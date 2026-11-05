@@ -661,6 +661,13 @@ func (s *Service) jobDeploy(ctx context.Context, l *jobs.Log, p map[string]any) 
 		l.Printf("Önceki sürüme dönülüyor: %s", rollbackTo)
 	}
 
+	return s.goLive(ctx, l, site, proxy, release, previous)
+}
+
+// goLive activates release, restarts + health-checks proxy apps (reverting to
+// previous on failure), re-applies nginx and prunes old releases. The site
+// lock must be held.
+func (s *Service) goLive(ctx context.Context, l *jobs.Log, site Site, proxy bool, release, previous string) error {
 	activate := func(name string) error {
 		if err := s.helper(ctx, l, nil, nil, "hp-site-deploy.sh", "activate", site.Domain, name); err != nil {
 			return err
@@ -698,6 +705,35 @@ func (s *Service) jobDeploy(ctx context.Context, l *jobs.Log, p map[string]any) 
 	}
 	l.Printf("Yayında: %s", release)
 	return nil
+}
+
+// RestoreRelease creates a new release with extract (e.g. from a backup
+// archive, written by a root helper into releases/<release>) and takes it live
+// through the normal deploy path, including the automatic fallback.
+func (s *Service) RestoreRelease(ctx context.Context, l *jobs.Log, site Site, extract func(ctx context.Context, release string) error) error {
+	defer s.lock(site.ID)()
+	site, err := s.Store.Get(ctx, site.ID)
+	if err != nil {
+		return err
+	}
+	prov, err := s.provider(site)
+	if err != nil {
+		return err
+	}
+	previous := s.Store.ActiveRelease(ctx, site.ID)
+	release := time.Now().Format("20060102-150405")
+	if release == previous {
+		release = time.Now().Add(time.Second).Format("20060102-150405")
+	}
+	if err := s.Store.AddRelease(ctx, &Release{SiteID: site.ID, Name: release, Status: ReleasePrevious, JobID: l.ID()}); err != nil {
+		return err
+	}
+	l.Printf("Yedekten yeni sürüm: %s", release)
+	if err := extract(ctx, release); err != nil {
+		s.Store.SetReleaseStatus(ctx, site.ID, release, ReleaseFailed)
+		return err
+	}
+	return s.goLive(ctx, l, site, prov.Def().Type == runtimes.TypeProxy, release, previous)
 }
 
 // markPruned mirrors the helper's prune policy in the DB.

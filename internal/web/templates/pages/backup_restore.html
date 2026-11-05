@@ -1,0 +1,37 @@
+{{define "content"}}
+{{with .Data}}{{$b := .Backup}}
+<p><a href="/backups" class="small">← Yedekler</a></p>
+<h1>Geri yükle</h1>
+<section class="card stack">
+  <dl class="kv">
+    <dt>Yedek</dt><dd>{{$b.Domain}} · <code>{{$b.Name}}</code> · {{datetime $b.CreatedAt}}</dd>
+    <dt>Bileşenler</dt><dd>{{range $b.Components}}<span class="tag">{{compLabel .}}</span> {{else}}<span class="muted">bilinmiyor (Drive'dan)</span>{{end}}</dd>
+    <dt>Konum</dt><dd>{{if $b.Local}}yerel{{end}}{{if and $b.Local $b.Remote}} + {{end}}{{if $b.Remote}}Google Drive{{if not $b.Local}} (önce indirilir){{end}}{{end}}</dd>
+    {{if $b.SizeBytes}}<dt>Boyut</dt><dd>{{size $b.SizeBytes}}</dd>{{end}}
+  </dl>
+</section>
+
+{{if not .Targets}}
+<div class="alert err">Bu yedeğin geri yüklenebileceği site yok. Aynı altyapıda bir site oluşturun{{if not .Source}} (silinmiş bir sitenin yedeğini aynı domainle yeni bir siteye geri yükleyebilirsiniz){{end}}.</div>
+{{else}}
+<form method="post" action="/backups/{{$b.ID}}/restore" class="card stack">
+  <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+  <label>Hedef site
+    <select name="target">
+      {{range .Targets}}<option value="{{.ID}}" {{if eq .ID $.Data.TargetID}}selected{{end}}>{{.Domain}}{{if eq .Domain $b.Domain}} (kendisi){{else}} — klon{{end}} · {{.RuntimeID}}</option>{{end}}
+    </select>
+    <span class="muted small">Farklı bir siteye geri yüklemede (klon) hedefin domain/alias'ları korunur; veritabanları hedef sitenin veritabanlarına (yoksa yeni, hedef müşterinin login'ine ait veritabanlarına) yüklenir ve connection string'ler hedefe göre yeniden yazılır. Hedef aynı altyapıda olmalı.</span>
+  </label>
+  <fieldset class="stack">
+    <legend>Geri yüklenecekler</legend>
+    {{if or ($b.Has "files") (not $b.Components)}}<label class="check"><input type="checkbox" name="components" value="files" checked> <span>Dosyalar — yeni sürüm olarak etkinleştirilir; sağlık kontrolü başarısızsa önceki sürüme dönülür. <code>shared/</code> yedektekiyle değiştirilir.</span></label>{{end}}
+    {{if or ($b.Has "db") (not $b.Components)}}<label class="check"><input type="checkbox" name="components" value="db" checked> <span>Veritabanları — mevcut veritabanının üzerine yazılır (REPLACE)</span></label>{{end}}
+    {{if or ($b.Has "config") (not $b.Components)}}<label class="check"><input type="checkbox" name="components" value="config" checked> <span>Ayarlar + ortam değişkenleri</span></label>{{end}}
+  </fieldset>
+  <div class="alert info small">Geri yüklemeden önce hedefin mevcut hali otomatik yedeklenir (tür: “geri yükleme öncesi”); yedek alınamazsa işlem başlamaz. SSL dosyaları otomatik geri yüklenmez (yedekteki <code>ssl.tar.zst</code> felaket kurtarma içindir; sertifikayı yeniden alın).</div>
+  <label>Onay için hedef domaini yazın <input name="confirm" autocomplete="off" spellcheck="false" required></label>
+  <div><button type="submit" class="danger">Geri yükle</button></div>
+</form>
+{{end}}
+{{end}}
+{{end}}

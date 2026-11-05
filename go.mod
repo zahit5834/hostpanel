@@ -6,6 +6,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2
 	github.com/microsoft/go-mssqldb v1.11.2
 	github.com/pquerna/otp v1.5.0
+	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/crypto v0.58.0
 	modernc.org/sqlite v1.61.1
 )

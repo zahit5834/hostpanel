@@ -1161,3 +1161,94 @@ func (s *Service) jobIsolation(ctx context.Context, l *jobs.Log, _ map[string]an
 	}
 	return IsolationTest(ctx, l, prov, s.connect)
 }
+
+// --- backup / restore (used by the backups package) ---
+
+// BackupTo writes a COPY_ONLY full backup of db to path (inside the server).
+func (s *Service) BackupTo(ctx context.Context, w io.Writer, db, path string) error {
+	p, err := s.admin(ctx, w)
+	if err != nil {
+		return err
+	}
+	return p.Backup(ctx, db, path)
+}
+
+// RestoreFrom restores the server-side .bak at path as in.Name. An existing
+// panel database of the same name is replaced (it must belong to the same
+// customer); otherwise a new one is created, owned by the customer's login.
+// With in.SiteID + in.WriteEnv the connection string goes into the site env.
+func (s *Service) RestoreFrom(ctx context.Context, w io.Writer, path string, in CreateInput) (Database, error) {
+	in.Name = strings.TrimSpace(strings.ToLower(in.Name))
+	if !ValidName(in.Name) {
+		return Database{}, ErrName
+	}
+	srv, err := s.runningServer(ctx)
+	if err != nil {
+		return Database{}, err
+	}
+	prov, err := s.admin(ctx, w)
+	if err != nil {
+		return Database{}, err
+	}
+	var d Database
+	created := false
+	if existing, ok := s.byName(ctx, in.Name); ok {
+		if existing.CustomerID != in.CustomerID {
+			return d, errors.New("bu adda başka bir müşteriye ait veritabanı var")
+		}
+		d = existing
+	} else {
+		login, _, err := s.EnsureLogin(ctx, in.CustomerID)
+		if err != nil {
+			return d, err
+		}
+		d = Database{ServerID: srv.ID, CustomerID: in.CustomerID, LoginID: login.ID, LoginName: login.Name,
+			SiteID: in.SiteID, Name: in.Name, Status: DBCreating}
+		if err := s.Store.InsertDatabase(ctx, &d); err != nil {
+			return d, err
+		}
+		created = true
+	}
+	if err := prov.Restore(ctx, d.Name, path, d.LoginName); err != nil {
+		if created {
+			s.Store.DeleteDatabase(context.WithoutCancel(ctx), d.ID)
+		}
+		return d, err
+	}
+	s.Store.SetDBStatus(ctx, d.ID, DBReady)
+	if sizes, err := prov.GetSize(ctx); err == nil {
+		s.Store.SetSizes(ctx, sizes)
+	}
+	if in.WriteEnv && in.SiteID > 0 {
+		site, err := s.Sites.Store.Get(ctx, in.SiteID)
+		if err != nil {
+			return d, err
+		}
+		if d.SiteID != in.SiteID {
+			s.Store.SetDBSite(ctx, d.ID, in.SiteID)
+		}
+		if s.siteHasEnv(site) {
+			d.SiteID = in.SiteID
+			d.EnvKey = strings.TrimSpace(in.EnvKey)
+			if d.EnvKey == "" {
+				d.EnvKey = DefaultEnvKey(site.RuntimeID)
+			}
+			if !sites.ValidEnvKey(d.EnvKey) {
+				return d, fmt.Errorf("geçersiz değişken adı: %s", d.EnvKey)
+			}
+			if err := s.writeSiteEnv(ctx, d, true); err != nil {
+				return d, fmt.Errorf("veritabanı geri yüklendi ama ortam değişkeni yazılamadı: %w", err)
+			}
+		}
+	}
+	return d, nil
+}
+
+func (s *Service) byName(ctx context.Context, name string) (Database, bool) {
+	var id int64
+	if s.DB.QueryRowContext(ctx, `SELECT id FROM databases WHERE name=?`, name).Scan(&id) != nil {
+		return Database{}, false
+	}
+	d, err := s.Store.Database(ctx, id)
+	return d, err == nil
+}

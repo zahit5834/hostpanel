@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"hostpanel/internal/backups"
 	"hostpanel/internal/customers"
 	"hostpanel/internal/databases"
 	"hostpanel/internal/exec"
@@ -57,6 +58,7 @@ type wizardData struct {
 
 	DBAvailable bool // MSSQL running: offer "create a database"
 	CreateDB    bool
+	Import      bool // "Mevcut siteyi taşı": continue on the Taşıma tab
 }
 
 func (s *Server) siteNew(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +70,8 @@ func (s *Server) siteNew(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderWizard(w http.ResponseWriter, r *http.Request, status int, in sites.CreateInput, errMsg string) {
 	cs, _ := s.Customers.List(r.Context(), "")
 	d := wizardData{Customers: cs, Runtimes: s.runtimeOptions(), In: in,
-		DBAvailable: s.DBs.Available(r.Context()), CreateDB: r.PostFormValue("create_db") == "1"}
+		DBAvailable: s.DBs.Available(r.Context()), CreateDB: r.PostFormValue("create_db") == "1",
+		Import: r.FormValue("import") == "1"}
 	if p, ok := s.Runtimes.Get(in.RuntimeID); ok {
 		f := s.runtimeFieldsData(r, p, in.RuntimeVersion, in.Fields)
 		d.Fields = &f
@@ -149,7 +152,11 @@ func (s *Server) siteCreate(w http.ResponseWriter, r *http.Request) {
 	if r.PostFormValue("create_db") == "1" {
 		s.wizardDatabase(r, site)
 	}
-	http.Redirect(w, r, fmt.Sprintf("/sites/%d?job=%d", site.ID, jobID), http.StatusSeeOther)
+	tab := ""
+	if r.PostFormValue("import") == "1" {
+		tab = "&tab=import"
+	}
+	http.Redirect(w, r, fmt.Sprintf("/sites/%d?job=%d%s", site.ID, jobID, tab), http.StatusSeeOther)
 }
 
 // wizardDatabase queues a database for a new site (named after its short
@@ -212,11 +219,20 @@ type siteData struct {
 
 	DBs         []databases.Database
 	DBAvailable bool
+
+	Backups    []backups.Backup
+	Remote     backups.RemoteSettings
+	Components []string
+	ServerIPs  []string
+	EnvKeyHint string
+	DBNameHint string
+	MaxBakMB   int64
 }
 
 type envRow struct{ Key, Value string }
 
-var siteTabs = map[string]bool{"overview": true, "deploy": true, "env": true, "ssl": true, "settings": true, "logs": true}
+var siteTabs = map[string]bool{"overview": true, "deploy": true, "env": true, "ssl": true, "settings": true, "logs": true,
+	"backups": true, "import": true}
 
 func (s *Server) siteDetail(w http.ResponseWriter, r *http.Request) {
 	site, ok := s.loadSite(w, r)
@@ -250,6 +266,8 @@ func (s *Server) renderSite(w http.ResponseWriter, r *http.Request, status int, 
 	switch tab {
 	case "ssl":
 		s.sslTabData(r, &d)
+	case "backups", "import":
+		s.siteBackupData(r, &d)
 	case "env":
 		env, err := s.Sites.Env(ctx, site.ID)
 		if err != nil {

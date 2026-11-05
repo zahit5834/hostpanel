@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"hostpanel/internal/auth"
+	"hostpanel/internal/backups"
 	"hostpanel/internal/config"
 	"hostpanel/internal/crypto"
 	"hostpanel/internal/customers"
@@ -195,8 +196,13 @@ func serve(args []string) error {
 		dbSvc.Fake = databases.NewFakeServer("")
 	}
 	dbSvc.Register()
+	bkSvc := &backups.Service{Store: backups.NewStore(a.db), DB: a.db, Box: a.box, Runner: runner, Probe: probe, Jobs: jm,
+		Activity: activity, Log: log, Sites: siteSvc, DBs: dbSvc, ScriptsDir: cfg.ScriptsDir,
+		UploadDir: siteSvc.UploadDir, DryRun: cfg.DryRun}
+	bkSvc.Register()
+	bkSvc.Recover(ctx)
 	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version,
-		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc}
+		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc}
 	srv.RegisterJobs()
 	if err := srv.Init(ctx); err != nil {
 		return err
@@ -209,6 +215,7 @@ func serve(args []string) error {
 		return err
 	}
 	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, log)
+	go bkSvc.RunScheduler(jobCtx)
 
 	hs := srv.HTTPServer()
 	errc := make(chan error, 1)

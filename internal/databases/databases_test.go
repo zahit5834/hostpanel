@@ -257,3 +257,60 @@ func TestIsolationMSSQL(t *testing.T) {
 		t.Errorf("GetSize: %v", err)
 	}
 }
+
+func TestRestoreSQL(t *testing.T) {
+	var got []capture
+	m := &MSSQL{
+		exec: func(_ context.Context, q string, args []sql.NamedArg) error {
+			got = append(got, capture{q, args})
+			return nil
+		},
+		files: func(string) ([]restoreFile, error) {
+			return []restoreFile{{"OldShop", "D"}, {"OldShop_2", "D"}, {"OldShop_log", "L"}}, nil
+		},
+	}
+	ctx := context.Background()
+	path := BackupDir + "/hprs-20261105-120000-a1b2-acme_shop.bak"
+	if err := m.Restore(ctx, "acme_shop", path, "c_acme"); err != nil {
+		t.Fatal(err)
+	}
+	q := got[0].q
+	for _, v := range []string{"acme_shop", "c_acme", "OldShop", "hprs-", ".mdf"} {
+		if strings.Contains(q, v) {
+			t.Errorf("value %q embedded in SQL text", v)
+		}
+	}
+	for _, want := range []string{"RESTORE DATABASE @db FROM DISK = @path WITH REPLACE", "MOVE @l3 TO @p3",
+		"REVOKE CONNECT FROM guest", "ALTER AUTHORIZATION ON DATABASE::", "TRUSTWORTHY OFF", "RECOVERY SIMPLE", "SINGLE_USER"} {
+		if !strings.Contains(q, want) {
+			t.Errorf("restore SQL lacks %q", want)
+		}
+	}
+	args := map[string]any{}
+	for _, a := range got[0].args {
+		args[a.Name] = a.Value
+	}
+	if args["p1"] != ServerDataDir+"/acme_shop.mdf" || args["p2"] != ServerDataDir+"/acme_shop_2.ndf" ||
+		args["p3"] != ServerDataDir+"/acme_shop_log.ldf" || args["l2"] != "OldShop_2" {
+		t.Errorf("file mapping: %v", args)
+	}
+
+	// Bad input never reaches the server; FILESTREAM is refused.
+	got = nil
+	for _, err := range []error{
+		m.Restore(ctx, "master", path, "c_acme"),
+		m.Restore(ctx, "acme_shop", "/etc/shadow", "c_acme"),
+		m.Restore(ctx, "acme_shop", path, "sa]; --"),
+	} {
+		if err == nil {
+			t.Error("invalid input accepted")
+		}
+	}
+	m.files = func(string) ([]restoreFile, error) { return []restoreFile{{"x", "D"}, {"fs", "S"}}, nil }
+	if err := m.Restore(ctx, "acme_shop", path, "c_acme"); err == nil {
+		t.Error("FILESTREAM backup accepted")
+	}
+	if len(got) != 0 {
+		t.Errorf("%d statements sent for invalid input", len(got))
+	}
+}

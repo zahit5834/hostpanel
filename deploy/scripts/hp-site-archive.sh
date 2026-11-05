@@ -2,8 +2,8 @@
 # hp-site-archive.sh — take a final archive of a site before deletion.
 # Usage: hp-site-archive.sh <domain>
 # Writes /var/backups/hostpanel/<domain>/pre-delete-<ts>.tar.zst (site files,
-# nginx config, env file). Runs with low CPU/IO priority. Faz 4 replaces this
-# with the full backup system.
+# nginx config, env file). Runs with low CPU/IO priority. Independent of the
+# Faz 4 backup system (kept outside plan retention).
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
 [[ $# -eq 1 ]] || die "kullanım: $(basename "$0") <domain>"

@@ -339,6 +339,12 @@ func (st *Store) SetDBEnvKey(ctx context.Context, id int64, key string) error {
 	return err
 }
 
+// SetDBSite links a database to a site.
+func (st *Store) SetDBSite(ctx context.Context, id, siteID int64) error {
+	_, err := st.db.ExecContext(ctx, `UPDATE databases SET site_id=? WHERE id=?`, nullID(siteID), id)
+	return err
+}
+
 // SetSizes stores sizes by database name.
 func (st *Store) SetSizes(ctx context.Context, sizes map[string]int64) error {
 	now := time.Now().Unix()

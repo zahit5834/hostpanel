@@ -1,0 +1,194 @@
+{{define "content"}}
+{{with .Data}}
+<div class="card-head">
+  <h1>Yedekler</h1>
+</div>
+<div class="tabs">
+  <a href="/backups" class="{{if eq .Tab "list"}}active{{end}}">Yedekler</a>
+  <a href="/backups?tab=plans" class="{{if eq .Tab "plans"}}active{{end}}">Planlar</a>
+  <a href="/backups?tab=settings" class="{{if eq .Tab "settings"}}active{{end}}">Ayarlar</a>
+</div>
+
+{{if .JobID}}{{template "job-console" .JobID}}{{end}}
+
+{{if eq .Tab "list"}}{{template "backups-list" $}}
+{{else if eq .Tab "plans"}}{{template "backups-plans" $}}
+{{else}}{{template "backups-settings" $}}{{end}}
+{{end}}
+{{end}}
+
+{{define "backups-list"}}{{$d := .Data}}
+<section class="card table-wrap">
+  <div class="card-head pad">
+    <form method="get" action="/backups" class="inline-form">
+      <select name="site">
+        <option value="0">Tüm siteler</option>
+        {{range $d.Sites}}<option value="{{.ID}}" {{if eq .ID $d.SiteFilter}}selected{{end}}>{{.Domain}}</option>{{end}}
+      </select>
+      <button type="submit">Filtrele</button>
+    </form>
+    <div class="ops end">
+      <span class="muted small">Yerel yedekler: {{size $d.LocalSize}} · <code>/var/backups/hostpanel/</code></span>
+      {{if $d.Remote.Configured}}
+      <form method="post" action="/backups/remote/scan"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">Drive'ı tara</button></form>
+      {{end}}
+    </div>
+  </div>
+  {{template "backup-table" list $ $d.Backups true}}
+</section>
+{{end}}
+
+{{define "backups-plans"}}{{$d := .Data}}{{$f := $d.Form}}
+<section class="card table-wrap">
+  <h2 class="pad">Planlar</h2>
+  <table class="table">
+    <thead><tr><th>Ad</th><th>Zamanlama</th><th>Kapsam</th><th>Hedef</th><th>Saklama</th><th>Son / sonraki</th><th></th></tr></thead>
+    <tbody>
+    {{range $d.Plans}}
+      <tr>
+        <td>{{.Name}}{{if not .Enabled}} <span class="badge">kapalı</span>{{end}}<div>{{range .Components}}<span class="tag">{{compLabel .}}</span> {{end}}</div></td>
+        <td class="small">{{schedule .Schedule}}<div class="muted"><code>{{.Schedule}}</code></div></td>
+        <td class="small">{{if eq .Scope "all"}}Tüm siteler{{else}}{{len .SiteIDs}} site{{end}}</td>
+        <td class="small">{{destLabel .Destination}}</td>
+        <td class="small">{{if ne .Destination "remote"}}yerel son {{.KeepLocal}}{{end}}{{if ne .Destination "local"}}<div>Drive: {{if .KeepRemote}}son {{.KeepRemote}}{{else}}sayı sınırı yok{{end}}{{if .KeepRemoteDays}}, {{.KeepRemoteDays}} günden eskiler silinir{{end}}</div>{{end}}</td>
+        <td class="small nowrap">{{datetime .LastRunAt}}<div class="muted">{{if .Enabled}}{{datetime .NextRunAt}}{{else}}—{{end}}</div></td>
+        <td class="right"><div class="ops end">
+          <form method="post" action="/backups/plans/{{.ID}}/run"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">Şimdi çalıştır</button></form>
+          <a class="button" href="/backups?tab=plans&amp;edit={{.ID}}#plan-form">Düzenle</a>
+          <form method="post" action="/backups/plans/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" class="danger" data-confirm="Plan silinsin mi? Alınmış yedekler kalır.">Sil</button></form>
+        </div></td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not $d.Plans}}<p class="muted pad">Henüz plan yok.</p>{{end}}
+  <p class="muted small pad">Zamanlar sunucunun yerel saatine göredir. Panel kapalıyken kaçırılan bir çalışma, panel açılınca bir kez yapılır. Saklama politikası her plan çalışmasının sonunda, o planın yedeklerine uygulanır (elle alınan yedekler budanmaz); Drive'daki en yeni kopya hiçbir zaman silinmez.</p>
+</section>
+
+<section class="card stack" id="plan-form">
+  <h2>{{if $f.Plan.ID}}Planı düzenle{{else}}Yeni plan{{end}}</h2>
+  <form method="post" action="/backups/plans" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    {{if $f.Plan.ID}}<input type="hidden" name="id" value="{{$f.Plan.ID}}">{{end}}
+    <div class="form-grid">
+      <label>Ad * <input name="name" value="{{$f.Plan.Name}}" required maxlength="100" placeholder="Gece yedeği"></label>
+      <label>Hedef
+        <select name="destination">
+          <option value="local" {{if eq $f.Plan.Destination "local"}}selected{{end}}>Yerel</option>
+          <option value="remote" {{if eq $f.Plan.Destination "remote"}}selected{{end}} {{if not $d.Remote.Type}}disabled{{end}}>Google Drive (yerelde tutulmaz)</option>
+          <option value="both" {{if eq $f.Plan.Destination "both"}}selected{{end}} {{if not $d.Remote.Type}}disabled{{end}}>Yerel + Google Drive</option>
+        </select>
+        {{if not $d.Remote.Type}}<span class="muted small">Drive için önce <a href="/backups?tab=settings">Ayarlar</a>.</span>{{end}}</label>
+      <label>Zamanlama
+        <select name="kind">
+          <option value="daily" {{if eq $f.Schedule.Kind "daily"}}selected{{end}}>Her gün</option>
+          <option value="weekly" {{if eq $f.Schedule.Kind "weekly"}}selected{{end}}>Haftalık</option>
+          <option value="monthly" {{if eq $f.Schedule.Kind "monthly"}}selected{{end}}>Aylık</option>
+          <option value="custom" {{if eq $f.Schedule.Kind "custom"}}selected{{end}}>Özel (cron)</option>
+        </select></label>
+      <label>Saat <input type="time" name="time" value="{{$f.Time}}"></label>
+      <label>Gün (haftalık)
+        <select name="weekday">{{range $i, $n := $d.Weekdays}}<option value="{{$i}}" {{if eq $i $f.Schedule.Weekday}}selected{{end}}>{{$n}}</option>{{end}}</select></label>
+      <label>Ayın günü (aylık) <input type="number" name="day" min="1" max="28" value="{{if $f.Schedule.Day}}{{$f.Schedule.Day}}{{else}}1{{end}}"></label>
+      <label class="full">Cron ifadesi (özel) <input name="expr" value="{{$f.Schedule.Expr}}" placeholder="30 2 * * 1-5" spellcheck="false">
+        <span class="muted small">5 alan: dakika saat gün ay haftanın-günü (0 = Pazar).</span></label>
+    </div>
+    <fieldset class="stack">
+      <legend>Bileşenler</legend>
+      <div class="ops">{{range $d.Components}}<label class="check"><input type="checkbox" name="components" value="{{.}}" {{if hasStr $f.Plan.Components .}}checked{{end}}> <span>{{compLabel .}}</span></label>{{end}}</div>
+    </fieldset>
+    <fieldset class="stack">
+      <legend>Kapsam</legend>
+      <label class="check"><input type="radio" name="scope" value="all" {{if ne $f.Plan.Scope "sites"}}checked{{end}}> <span>Tüm siteler (sonradan eklenenler dahil)</span></label>
+      <label class="check"><input type="radio" name="scope" value="sites" {{if eq $f.Plan.Scope "sites"}}checked{{end}}> <span>Seçili siteler:</span></label>
+      <div class="ops">{{range $d.Sites}}<label class="check"><input type="checkbox" name="site_ids" value="{{.ID}}" {{if hasInt $f.Plan.SiteIDs .ID}}checked{{end}}> <span>{{.Domain}}</span></label>{{end}}</div>
+    </fieldset>
+    <div class="form-grid">
+      <label>Yerelde sakla (son N) <input type="number" name="keep_local" min="0" max="365" value="{{$f.Plan.KeepLocal}}"></label>
+      <label>Drive'da sakla (son M, 0 = sınırsız) <input type="number" name="keep_remote" min="0" max="1000" value="{{$f.Plan.KeepRemote}}"></label>
+      <label>Drive'da X günden eskileri sil (0 = kapalı) <input type="number" name="keep_remote_days" min="0" max="3650" value="{{$f.Plan.KeepRemoteDays}}"></label>
+      <label class="check"><input type="checkbox" name="enabled" value="1" {{if $f.Plan.Enabled}}checked{{end}}> <span>Etkin</span></label>
+    </div>
+    <div><button type="submit" class="primary">Kaydet</button>{{if $f.Plan.ID}} <a class="button" href="/backups?tab=plans">Vazgeç</a>{{end}}</div>
+  </form>
+</section>
+{{end}}
+
+{{define "backups-settings"}}{{$d := .Data}}{{$r := $d.Remote}}
+{{with $d.Keys}}
+<section class="card stack">
+  <h2>Şifreleme anahtarları</h2>
+  <div class="alert err small">Bu iki değer olmadan Drive'daki şifreli yedekler <strong>hiçbir şekilde açılamaz</strong> (sunucu kaybolursa yenisine rclone crypt ile aynı değerler girilmelidir). Parola yöneticisine kaydedin.</div>
+  <dl class="kv">
+    <dt>password</dt><dd><code>{{.Password}}</code></dd>
+    <dt>password2 (salt)</dt><dd><code>{{.Salt}}</code></dd>
+  </dl>
+</section>
+{{end}}
+<div class="grid two">
+<section class="card stack">
+  <h2>1 · rclone</h2>
+  {{if $r.RcloneVersion}}
+  <p>Kurulu: <code>{{$r.RcloneVersion}}</code></p>
+  {{else}}
+  <p>Google Drive'a yükleme <a href="https://rclone.org" target="_blank" rel="noopener">rclone</a> ile yapılır. Resmi zip ({{$d.Rclone}}) indirilir, SHA-256 değeri betikteki sabit değerle doğrulanır ve <code>/usr/local/bin/rclone</code> olarak kurulur.</p>
+  <form method="post" action="/backups/rclone"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" class="primary">rclone'u kur</button></form>
+  {{end}}
+  <h2>Seçenekler</h2>
+  <form method="post" action="/backups/remote/options" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Sunucu adı <input name="server_name" value="{{$r.ServerName}}" required spellcheck="false">
+      <span class="muted small">Drive'da klasör: <code>{{$r.RootFolder}}/{{$r.ServerName}}/&lt;domain&gt;/&lt;yedek&gt;/</code>. Değiştirirseniz eski yedekler eski klasörden okunmaya devam eder.</span></label>
+    <label>Yükleme bant genişliği sınırı <input name="bwlimit" value="{{$r.Bwlimit}}" placeholder="boş = sınırsız, örn. 2M" spellcheck="false">
+      <span class="muted small">Bayt/sn: <code>512K</code>, <code>2M</code>… Yükleme sırasında sitelerin bağlantısı daralmasın.</span></label>
+    <div><button type="submit">Kaydet</button></div>
+  </form>
+</section>
+
+<section class="card stack">
+  <h2>2 · Google Drive bağlantısı</h2>
+  {{if $r.Type}}
+  <p>Bağlı: <strong>{{if eq $r.Type "drive_sa"}}Service account{{else}}OAuth (kişisel hesap){{end}}</strong>{{if $r.SharedDrive}} · Shared Drive <code>{{$r.SharedDrive}}</code>{{end}} · kök <code>{{$r.RootFolder}}</code> · şifreleme {{if $r.Crypt}}<span class="badge success">açık</span>{{else}}<span class="badge">kapalı</span>{{end}}</p>
+  <div class="ops">
+    <form method="post" action="/backups/remote/test"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" class="primary">Bağlantıyı test et</button></form>
+    {{if $r.Crypt}}<form method="post" action="/backups/remote/keys"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">Şifreleme anahtarlarını göster</button></form>{{end}}
+  </div>
+  {{end}}
+  {{if not $r.RcloneVersion}}<p class="muted">Önce rclone'u kurun.</p>{{else}}
+  <details {{if not $r.Type}}open{{end}}>
+    <summary>{{if $r.Type}}Bağlantıyı değiştir{{else}}Bağlan{{end}}</summary>
+    <form method="post" action="/backups/remote" class="stack pad">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <label class="check"><input type="radio" name="type" value="drive_oauth" {{if ne $r.Type "drive_sa"}}checked{{end}}> <span><strong>OAuth</strong> (kişisel Google hesabı)</span></label>
+      <div class="pad small stack">
+        <p>Tarayıcısı olan bir bilgisayarda rclone ile şu komutu çalıştırın, Google'da izin verin ve çıktıdaki <code>{…}</code> token'ını yapıştırın:</p>
+        <pre>rclone authorize "drive"</pre>
+        <label>Token <textarea name="token" rows="3" spellcheck="false" autocomplete="off" placeholder='{"access_token":"…","token_type":"Bearer","refresh_token":"…","expiry":"…"}'></textarea></label>
+        <details><summary>Kendi OAuth istemcim (isteğe bağlı)</summary>
+          <div class="form-grid pad">
+            <label>Client ID <input name="client_id" spellcheck="false" autocomplete="off"></label>
+            <label>Client secret <input name="client_secret" spellcheck="false" autocomplete="off"></label>
+          </div>
+          <p class="muted small">rclone'un ortak istemcisi kota sınırına takılabilir. Kendi istemcinizi kullanıyorsanız token'ı da <code>rclone authorize "drive" "&lt;client_id&gt;" "&lt;client_secret&gt;"</code> ile alın.</p>
+        </details>
+      </div>
+      <label class="check"><input type="radio" name="type" value="drive_sa" {{if eq $r.Type "drive_sa"}}checked{{end}}> <span><strong>Service account</strong> (Google Workspace)</span></label>
+      <div class="pad small stack">
+        <label>Service account JSON anahtarı <textarea name="sa_json" rows="3" spellcheck="false" autocomplete="off" placeholder='{"type":"service_account", …}'></textarea></label>
+        <p class="muted">Service account'ların kendi depolama kotası yoktur: bir Shared Drive oluşturup hesabı oraya “İçerik yöneticisi” olarak ekleyin.</p>
+      </div>
+      <div class="form-grid">
+        <label>Shared Drive ID <input name="shared_drive" value="{{$r.SharedDrive}}" spellcheck="false" placeholder="service account için zorunlu">
+          <span class="muted small">Drive adresindeki <code>/drive/folders/&lt;ID&gt;</code>.</span></label>
+        <label>Kök klasör <input name="root_folder" value="{{$r.RootFolder}}" spellcheck="false"></label>
+        <input type="hidden" name="server_name" value="{{$r.ServerName}}">
+      </div>
+      <label class="check"><input type="checkbox" name="crypt" value="1" {{if or $r.Crypt (not $r.Type)}}checked{{end}}> <span>Yedekleri Drive'a göndermeden önce şifrele (rclone crypt; dosya ve klasör adları da şifrelenir)</span></label>
+      <p class="muted small">Anahtarlar bir kez üretilir, panelde şifreli saklanır ve bağlantıyı değiştirince korunur. Ortam değişkenleri şifreleme kapalıyken de yedekte panelin master.key'i ile mühürlüdür.</p>
+      <div><button type="submit" class="primary">Kaydet</button></div>
+    </form>
+  </details>
+  {{end}}
+</section>
+</div>
+{{end}}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"strings"
 
 	mssql "github.com/microsoft/go-mssqldb"
 )
@@ -26,7 +27,12 @@ type MSSQL struct {
 
 	// exec replaces the server in tests: it receives the batch and its args.
 	exec func(ctx context.Context, q string, args []sql.NamedArg) error
+	// files replaces RESTORE FILELISTONLY in tests.
+	files func(path string) ([]restoreFile, error)
 }
+
+// ServerDataDir is where restored database files are placed (inside the server).
+const ServerDataDir = "/var/opt/mssql/data"
 
 var (
 	_ DatabaseProvider = (*MSSQL)(nil)
@@ -268,8 +274,148 @@ func (m *MSSQL) Backup(ctx context.Context, db, path string) error {
 	return m.run(ctx, sqlBackup, sql.Named("db", db), sql.Named("path", path))
 }
 
-// Restore arrives with the backup module (Faz 4).
-func (m *MSSQL) Restore(ctx context.Context, db, path string) error { return ErrNotImplemented }
+// restoreFile is one row of RESTORE FILELISTONLY.
+type restoreFile struct {
+	Logical string
+	Type    string // D data, L log (S filestream / F full-text are not supported)
+}
+
+// restorePlan maps the backup's files to physical paths for db.
+func restorePlan(db string, files []restoreFile) ([]string, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("yedekte dosya bulunamadı")
+	}
+	var out []string
+	nd, nl := 0, 0
+	for _, f := range files {
+		switch f.Type {
+		case "D":
+			nd++
+			if nd == 1 {
+				out = append(out, ServerDataDir+"/"+db+".mdf")
+			} else {
+				out = append(out, fmt.Sprintf("%s/%s_%d.ndf", ServerDataDir, db, nd))
+			}
+		case "L":
+			nl++
+			if nl == 1 {
+				out = append(out, ServerDataDir+"/"+db+"_log.ldf")
+			} else {
+				out = append(out, fmt.Sprintf("%s/%s_log%d.ldf", ServerDataDir, db, nl))
+			}
+		default:
+			return nil, fmt.Errorf("desteklenmeyen dosya türü (%s): FILESTREAM/full-text içeren yedekler geri yüklenemez", f.Type)
+		}
+	}
+	return out, nil
+}
+
+// restoreSQL builds the restore batch for n files. The text contains only
+// fixed keywords and numbered parameter names (@l1/@p1…); names and paths
+// travel as parameters.
+//
+// After the restore: the owner's login is unmapped from any non-dbo user (it
+// would block ALTER AUTHORIZATION), guest loses CONNECT (a restored database
+// from elsewhere might allow it, which would break customer isolation) and
+// TRUSTWORTHY is forced off.
+func restoreSQL(n int) string {
+	var b strings.Builder
+	b.WriteString(`DECLARE @sql nvarchar(max);
+IF DB_ID(@db) IS NOT NULL
+BEGIN
+    SET @sql = N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET SINGLE_USER WITH ROLLBACK IMMEDIATE';
+    EXEC (@sql);
+END
+RESTORE DATABASE @db FROM DISK = @path WITH REPLACE, RECOVERY`)
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, ", MOVE @l%d TO @p%d", i, i)
+	}
+	b.WriteString(`;
+SET @sql = N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET MULTI_USER';
+EXEC (@sql);
+SET @sql = N'USE ' + QUOTENAME(@db) + N';
+DECLARE @u sysname = (SELECT TOP 1 name FROM sys.database_principals WHERE sid = SUSER_SID(@o) AND name <> N''dbo'');
+IF @u IS NOT NULL BEGIN DECLARE @d nvarchar(400) = N''DROP USER '' + QUOTENAME(@u); EXEC (@d); END
+REVOKE CONNECT FROM guest;';
+EXEC sp_executesql @sql, N'@o sysname', @o = @owner;
+SET @sql = N'ALTER AUTHORIZATION ON DATABASE::' + QUOTENAME(@db) + N' TO ' + QUOTENAME(@owner);
+EXEC (@sql);
+SET @sql = N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET TRUSTWORTHY OFF';
+EXEC (@sql);
+SET @sql = N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET RECOVERY SIMPLE';
+EXEC (@sql);`)
+	return b.String()
+}
+
+// Restore restores path as db (REPLACE) owned by owner.
+func (m *MSSQL) Restore(ctx context.Context, db, path, owner string) error {
+	if err := checkName(db, owner); err != nil {
+		return err
+	}
+	if !ValidBackupPath(path) {
+		return fmt.Errorf("geçersiz yedek yolu: %s", path)
+	}
+	files, err := m.fileList(ctx, path)
+	if err != nil {
+		return fmt.Errorf("yedek dosyası okunamadı (geçerli bir SQL Server .bak mı?): %w", err)
+	}
+	phys, err := restorePlan(db, files)
+	if err != nil {
+		return err
+	}
+	args := []sql.NamedArg{sql.Named("db", db), sql.Named("path", path), sql.Named("owner", owner)}
+	for i, f := range files {
+		args = append(args, sql.Named(fmt.Sprintf("l%d", i+1), f.Logical), sql.Named(fmt.Sprintf("p%d", i+1), phys[i]))
+	}
+	return m.run(ctx, restoreSQL(len(files)), args...)
+}
+
+// fileList runs RESTORE FILELISTONLY; its column set differs between
+// versions, so columns are looked up by name.
+func (m *MSSQL) fileList(ctx context.Context, path string) ([]restoreFile, error) {
+	if m.files != nil {
+		return m.files(path)
+	}
+	d, err := m.open()
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+	rows, err := d.QueryContext(ctx, `RESTORE FILELISTONLY FROM DISK = @path`, sql.Named("path", path))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	li, ti := -1, -1
+	for i, c := range cols {
+		switch c {
+		case "LogicalName":
+			li = i
+		case "Type":
+			ti = i
+		}
+	}
+	if li < 0 || ti < 0 {
+		return nil, fmt.Errorf("FILELISTONLY çıktısı beklenmedik")
+	}
+	var out []restoreFile
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		raw := make([]sql.RawBytes, len(cols))
+		for i := range vals {
+			vals[i] = &raw[i]
+		}
+		if err := rows.Scan(vals...); err != nil {
+			return nil, err
+		}
+		out = append(out, restoreFile{Logical: string(raw[li]), Type: strings.TrimSpace(string(raw[ti]))})
+	}
+	return out, rows.Err()
+}
 
 const sqlSizes = `SELECT d.name, CAST(SUM(CAST(mf.size AS bigint)) * 8192 AS bigint)
 FROM sys.master_files mf JOIN sys.databases d ON d.database_id = mf.database_id

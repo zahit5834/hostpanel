@@ -237,7 +237,19 @@ func (c *fakeConn) Backup(_ context.Context, db, path string) error {
 	return nil
 }
 
-func (c *fakeConn) Restore(context.Context, string, string) error { return ErrNotImplemented }
+func (c *fakeConn) Restore(_ context.Context, db, path, owner string) error {
+	if err := checkName(db, owner); err != nil {
+		return err
+	}
+	if !ValidBackupPath(path) {
+		return fmt.Errorf("geçersiz yedek yolu: %s", path)
+	}
+	defer c.lock()()
+	c.echo("RESTORE DATABASE [%s] FROM DISK = '%s' WITH REPLACE; ALTER AUTHORIZATION … TO [%s]; REVOKE CONNECT FROM guest", db, path, owner)
+	c.login(owner)
+	c.f.dbs[db] = owner
+	return nil
+}
 
 func (c *fakeConn) GetSize(context.Context) (map[string]int64, error) {
 	defer c.lock()()

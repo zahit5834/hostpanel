@@ -32,7 +32,9 @@ type DatabaseProvider interface {
 	// written there first (path inside the server, e.g. /var/opt/mssql/backup/…).
 	Drop(ctx context.Context, name, backupPath string) error
 	Backup(ctx context.Context, name, path string) error
-	Restore(ctx context.Context, name, path string) error
+	// Restore restores the .bak at path (inside the server) as name, replacing
+	// an existing database, and makes owner its owner.
+	Restore(ctx context.Context, name, path, owner string) error
 	GetSize(ctx context.Context) (map[string]int64, error)
 }
 

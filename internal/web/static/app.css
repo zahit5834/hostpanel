@@ -196,3 +196,7 @@ pre.conf { background: var(--console-bg); color: var(--console-text); font-famil
 .checks .check-err { color: var(--err); }
 .alert-card { border-color: var(--warn); }
 .alert-card ul { margin: 0; padding-left: 18px; }
+
+/* Faz 4: backups */
+fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin: 0; }
+legend { padding: 0 6px; color: var(--muted); font-size: 13px; }

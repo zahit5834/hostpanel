@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"hostpanel/internal/auth"
+	"hostpanel/internal/backups"
 	"hostpanel/internal/config"
 	"hostpanel/internal/customers"
 	"hostpanel/internal/databases"
@@ -47,6 +48,7 @@ type Server struct {
 	Runtimes  *runtimes.Registry
 	SSL       *ssl.Service
 	DBs       *databases.Service
+	Backups   *backups.Service
 
 	tpl       *renderer
 	allowlist atomic.Pointer[[]netip.Prefix]

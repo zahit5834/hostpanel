@@ -243,3 +243,58 @@ validate_ip_or_cidr() {
   [[ ${#1} -le 50 && $1 =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ && $1 == *[.:]* ]] || die "geçersiz IP/CIDR: $1"
   [[ $1 != */0 ]] || die "/0 kabul edilmez: $1"
 }
+
+# ---------------------------------------------------------------------------
+# Backups (Faz 4)
+# ---------------------------------------------------------------------------
+
+BACKUP_ROOT=/var/backups/hostpanel
+MSSQL_HOST_BACKUP=/var/lib/hostpanel/mssql/backup
+RCLONE_CONF=/etc/hostpanel/rclone.conf
+RCLONE_SA=/etc/hostpanel/rclone-sa.json
+RCLONE_BIN=/usr/local/bin/rclone
+
+# validate_backup_name NAME — YYYYMMDD-HHMMSS-<4 hex> (mirrors backups.ValidName).
+validate_backup_name() {
+  [[ ${1:-} =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$ ]] || die "geçersiz yedek adı: '${1:-}'"
+}
+
+# validate_components LIST — comma separated subset of files,db,config,ssl.
+validate_components() {
+  [[ ${1:-} =~ ^(files|db|config|ssl)(,(files|db|config|ssl)){0,3}$ ]] || die "geçersiz bileşen listesi: '${1:-}'"
+}
+
+# validate_bwlimit V — "0" (none) or rclone size like 512K, 2M.
+validate_bwlimit() {
+  [[ ${1:-} == 0 || ${1:-} =~ ^[1-9][0-9]{0,5}[KMG]?$ ]] || die "geçersiz bant genişliği: '${1:-}'"
+}
+
+# validate_server_name V — remote folder of this server.
+validate_server_name() {
+  [[ ${1:-} =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ ]] || die "geçersiz sunucu adı: '${1:-}'"
+}
+
+# validate_folder V — Drive root folder: up to 5 segments, no "." / "..".
+validate_folder() {
+  local f=${1:-} seg
+  [[ ${#f} -le 200 && $f =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+){0,4}$ ]] || die "geçersiz klasör: '${f}'"
+  IFS=/ read -ra segs <<<"$f"
+  for seg in "${segs[@]}"; do
+    [[ $seg != . && $seg != .. ]] || die "geçersiz klasör: '${f}'"
+  done
+}
+
+# validate_shared_id V — Shared Drive id or "-".
+validate_shared_id() {
+  [[ ${1:-} == - || ${1:-} =~ ^[A-Za-z0-9_-]{10,100}$ ]] || die "geçersiz Shared Drive ID"
+}
+
+# validate_staged_bak NAME — file name in the MSSQL backup volume.
+validate_staged_bak() {
+  [[ ${1:-} =~ ^hp(rs|im)-[A-Za-z0-9._-]{1,200}\.bak$ && ${1:-} != *..* ]] || die "geçersiz dosya adı: '${1:-}'"
+}
+
+# validate_backup_file NAME — files allowed inside a backup directory.
+validate_backup_file() {
+  [[ ${1:-} =~ ^(files\.tar\.zst|ssl\.tar\.zst|config\.json|nginx\.conf|manifest\.json|SHA256SUMS|db-[a-z][a-z0-9_]{1,62}\.bak)$ ]] || die "yedekte beklenmeyen dosya: '${1:-}'"
+}

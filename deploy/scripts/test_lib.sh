@@ -137,5 +137,39 @@ bad validate_ip_or_cidr "1.2.3.4 port 22"
 bad validate_ip_or_cidr any
 bad validate_ip_or_cidr 1234
 
+ok  validate_backup_name 20261105-120000-a1b2
+bad validate_backup_name 20261105-120000
+bad validate_backup_name "20261105-120000-a1b2/../x"
+bad validate_backup_name 20261105-120000-A1B2
+ok  validate_components files,db,config,ssl
+ok  validate_components config
+bad validate_components files,,db
+bad validate_components "files;id"
+ok  validate_bwlimit 0
+ok  validate_bwlimit 512K
+ok  validate_bwlimit 10M
+bad validate_bwlimit 0M
+bad validate_bwlimit "1M --dry-run"
+ok  validate_server_name web-01.example
+bad validate_server_name "-x"
+bad validate_server_name "a/b"
+ok  validate_folder HostPanel-Backups
+ok  validate_folder a/b/c
+bad validate_folder a/../b
+bad validate_folder ../a
+bad validate_folder "/abs"
+bad validate_folder "a b"
+ok  validate_shared_id -
+ok  validate_shared_id 0ABCdef123_-xyz
+bad validate_shared_id short
+ok  validate_staged_bak hprs-20261105-120000-a1b2-shop.bak
+ok  validate_staged_bak hpim-42.bak
+bad validate_staged_bak hpbk-x.bak
+bad validate_staged_bak "hprs-../../etc.bak"
+ok  validate_backup_file files.tar.zst
+ok  validate_backup_file db-shop_db.bak
+bad validate_backup_file ../config.json
+bad validate_backup_file db-Shop.bak
+
 if [[ $fail -eq 0 ]]; then echo "lib.sh: tüm testler geçti"; fi
 exit $fail

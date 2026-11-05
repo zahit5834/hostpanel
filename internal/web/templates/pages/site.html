@@ -11,6 +11,8 @@
   {{if $proxy}}<a href="/sites/{{$s.ID}}?tab=env" class="{{if eq .Tab "env"}}active{{end}}">Ortam Değişkenleri</a>{{end}}
   <a href="/sites/{{$s.ID}}?tab=ssl" class="{{if eq .Tab "ssl"}}active{{end}}">SSL</a>
   <a href="/sites/{{$s.ID}}?tab=settings" class="{{if eq .Tab "settings"}}active{{end}}">Ayarlar</a>
+  <a href="/sites/{{$s.ID}}?tab=backups" class="{{if eq .Tab "backups"}}active{{end}}">Yedekler</a>
+  <a href="/sites/{{$s.ID}}?tab=import" class="{{if eq .Tab "import"}}active{{end}}">Taşıma</a>
   <a href="/sites/{{$s.ID}}?tab=logs" class="{{if eq .Tab "logs"}}active{{end}}">Loglar</a>
 </div>
 
@@ -21,6 +23,8 @@
 {{else if eq .Tab "env"}}{{template "site-env" $}}
 {{else if eq .Tab "ssl"}}{{template "site-ssl" $}}
 {{else if eq .Tab "settings"}}{{template "site-settings" $}}
+{{else if eq .Tab "backups"}}{{template "site-backups" $}}
+{{else if eq .Tab "import"}}{{template "site-import" $}}
 {{else if eq .Tab "logs"}}{{template "site-logs-tab" $}}{{end}}
 {{end}}
 {{end}}
@@ -324,4 +328,67 @@ DNS henüz bu sunucuyu göstermiyorsa siteyi kendi bilgisayarınızda denemek i�
   {{end}}
   <div><button type="button" class="small" hx-get="/sites/{{$d.Site.ID}}/ssl/check" hx-target="#ssl-check" hx-swap="outerHTML">Tekrar kontrol et</button></div>
 </div>
+{{end}}
+
+{{define "site-backups"}}{{$d := .Data}}{{$s := $d.Site}}
+<section class="card stack">
+  <h2>Şimdi yedekle</h2>
+  <form method="post" action="/sites/{{$s.ID}}/backup" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <div class="ops">{{range $d.Components}}<label class="check"><input type="checkbox" name="components" value="{{.}}" {{if ne . "ssl"}}checked{{end}}> <span>{{compLabel .}}</span></label>{{end}}</div>
+    {{if $d.Remote.Configured}}<label class="check"><input type="checkbox" name="upload" value="1"> <span>Google Drive'a da gönder</span></label>{{end}}
+    <p class="muted small">Yedek <code>/var/backups/hostpanel/{{$s.Domain}}/</code> altına alınır (yalnızca root okuyabilir). Dosyalar: aktif sürüm + <code>shared/</code>; veritabanı: siteye bağlı MSSQL veritabanları (COPY_ONLY); ayarlar: site ayarları ve şifreli ortam değişkenleri. Zamanlanmış yedekler için <a href="/backups?tab=plans">Planlar</a>.</p>
+    <div><button type="submit" class="primary">Yedekle</button></div>
+  </form>
+</section>
+<section class="card table-wrap">
+  <h2 class="pad">Bu sitenin yedekleri</h2>
+  {{template "backup-table" list $ $d.Backups false}}
+</section>
+{{end}}
+
+{{define "site-import"}}{{$d := .Data}}{{$s := $d.Site}}{{$proxy := eq $d.Def.Type "proxy"}}
+<p class="muted">Başka bir sunucudaki siteyi buraya taşımak için adımları sırayla izleyin. DNS'i en son değiştirin; o zamana kadar siteyi kendi bilgisayarınızın hosts dosyasıyla test edebilirsiniz.</p>
+<section class="card stack">
+  <h2>1 · Dosyalar</h2>
+  <p>Uygulamanın yayınlanmış halini zip olarak <a href="/sites/{{$s.ID}}?tab=deploy">Deploy</a> sekmesinden yükleyin{{if eq $d.Def.ID "dotnet"}} (<code>dotnet publish -c Release</code> çıktısı){{end}}. Kalıcı dizinlerdeki kullanıcı dosyaları (ör. yüklemeler) zip'te varsa ilk deploy'da <code>shared/</code>'a taşınmaz; bunları ayrı bir zip ile, kalıcı dizin ayarını sonradan ekleyerek aktarın.</p>
+</section>
+<section class="card stack">
+  <h2>2 · Veritabanı (.bak)</h2>
+  {{if not $d.DBAvailable}}<p class="muted">MSSQL sunucusu çalışmıyor. <a href="/databases">Veritabanları</a> sayfasından kurun.</p>{{else}}
+  <p class="small">Eski sunucuda SSMS ya da <code>BACKUP DATABASE [ad] TO DISK = N'…\ad.bak' WITH COPY_ONLY, INIT</code> ile alınmış tam yedeği yükleyin. Veritabanı <strong>{{$s.CustomerName}}</strong> müşterisinin login'ine ait olur; aynı adlı (bu müşteriye ait) bir veritabanı varsa üzerine yazılır.</p>
+  <form hx-post="/sites/{{$s.ID}}/import/db" hx-encoding="multipart/form-data" hx-disabled-elt="find button" x-data="upload" class="stack">
+    <div class="form-grid">
+      <label>Veritabanı adı <input name="name" value="{{$d.DBNameHint}}" pattern="[a-z][a-z0-9_]{1,62}" required spellcheck="false"></label>
+      {{if $proxy}}<label>Ortam değişkeni <input name="env_key" placeholder="{{$d.EnvKeyHint}}" spellcheck="false"></label>{{end}}
+    </div>
+    {{if $proxy}}<label class="check"><input type="checkbox" name="write_env" value="1" checked> <span>Connection string'i ortam değişkenine yaz</span></label>{{end}}
+    <input type="file" name="bak" accept=".bak" required>
+    <progress class="upload-progress" max="100" value="0" x-show="active" x-bind:value="pct"></progress>
+    <div><button type="submit" class="primary">Yükle ve geri yükle</button> <span class="muted small" x-text="label"></span> <span class="muted small">En fazla {{$d.MaxBakMB}} MB.</span></div>
+  </form>
+  {{end}}
+</section>
+{{if $proxy}}
+<section class="card stack">
+  <h2>3 · Ortam değişkenleri</h2>
+  <form method="post" action="/sites/{{$s.ID}}/import/env" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>KEY=VALUE satırları (<code>.env</code> biçimi) <textarea name="dotenv" rows="6" spellcheck="false" autocomplete="off" placeholder="# yorum&#10;ASPNETCORE_ENVIRONMENT=Production&#10;Smtp__Password=&quot;gizli değer&quot;"></textarea>
+      <span class="muted small">Boş satırlar ve <code>#</code> yorumları atlanır, <code>export</code> öneki kabul edilir, değeri saran tek bir tırnak çifti kaldırılır. Mevcut değişkenlerle birleştirilir (aynı ad varsa üzerine yazılır). Değerler şifreli saklanır, loglara yazılmaz.</span></label>
+    <div><button type="submit">Kaydet</button></div>
+  </form>
+</section>
+{{end}}
+<section class="card stack">
+  <h2>{{if $proxy}}4{{else}}3{{end}} · Sertifika</h2>
+  <p>Eski sunucudaki ücretli sertifikayı (sertifika + ara sertifikalar + private key) <a href="/ssl/install?site={{$s.ID}}">SSL kurulum</a> sayfasından yükleyebilirsiniz. Let's Encrypt kullanacaksanız DNS bu sunucuya döndükten sonra <a href="/sites/{{$s.ID}}?tab=ssl">SSL</a> sekmesinden alın.</p>
+</section>
+<section class="card stack">
+  <h2>{{if $proxy}}5{{else}}4{{end}} · DNS'ten önce test</h2>
+  <p class="small">Kendi bilgisayarınızda hosts dosyasına (<code>/etc/hosts</code>, Windows: <code>C:\Windows\System32\drivers\etc\hosts</code>) ekleyin, siteyi tarayıcıda açıp kontrol edin, sonra satırı silin:</p>
+  <pre>{{range $i, $ip := $d.ServerIPs}}{{if eq $i 0}}{{$ip}} {{$s.Domain}}{{if ne $s.WWWMode "none"}} {{$s.WWWName}}{{end}}{{range $s.Aliases}} {{.}}{{end}}{{end}}{{else}}&lt;sunucu IP&gt; {{$s.Domain}}{{end}}</pre>
+  {{if gt (len $d.ServerIPs) 1}}<p class="muted small">Sunucu IP'leri: {{range $i, $ip := $d.ServerIPs}}{{if $i}}, {{end}}<code>{{$ip}}</code>{{end}}</p>{{end}}
+  <p class="small">Her şey hazır olunca DNS'te A kaydını bu sunucuya yönlendirin ve <a href="/sites/{{$s.ID}}?tab=ssl">SSL</a> sekmesindeki ön kontrolün “hazır” demesini bekleyin.</p>
+</section>
 {{end}}

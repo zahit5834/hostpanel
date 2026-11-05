@@ -1,12 +1,14 @@
 {{define "content"}}
 {{with .Data}}
 <p><a href="/sites" class="small">← Siteler</a></p>
-<h1>Yeni site</h1>
+<h1>{{if .Import}}Mevcut siteyi taşı{{else}}Yeni site{{end}}</h1>
+{{if .Import}}<p class="muted">Önce site burada normal şekilde oluşturulur; ardından <strong>Taşıma</strong> sekmesinde dosyaları (zip), veritabanını (.bak), ortam değişkenlerini ve sertifikayı aktarırsınız. DNS'i en son, her şey hazır olunca değiştirin.</p>{{end}}
 {{if not .Customers}}
 <div class="alert err">Önce bir <a href="/customers/new">müşteri ekleyin</a>.</div>
 {{else}}
 <form method="post" action="/sites" class="stack" id="site-form">
   <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+  {{if .Import}}<input type="hidden" name="import" value="1">{{end}}
   <section class="card stack">
     <h2>1 · Müşteri ve domain</h2>
     <div class="form-grid">

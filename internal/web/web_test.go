@@ -21,6 +21,7 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	"hostpanel/internal/auth"
+	"hostpanel/internal/backups"
 	"hostpanel/internal/config"
 	"hostpanel/internal/crypto"
 	"hostpanel/internal/customers"
@@ -78,8 +79,11 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	dbSvc := &databases.Service{Store: databases.NewStore(db), DB: db, Box: box, Runner: runner, Jobs: jm, Activity: act,
 		Log: log, Sites: svc, ScriptsDir: cfg.ScriptsDir, DryRun: true, Fake: databases.NewFakeServer("")}
 	dbSvc.Register()
+	bkSvc := &backups.Service{Store: backups.NewStore(db), DB: db, Box: box, Runner: runner, Probe: probe, Jobs: jm,
+		Activity: act, Log: log, Sites: svc, DBs: dbSvc, ScriptsDir: cfg.ScriptsDir, UploadDir: svc.UploadDir, DryRun: true}
+	bkSvc.Register()
 	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
-		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc}
+		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc}
 	s.RegisterJobs()
 	if err := s.Init(ctx); err != nil {
 		t.Fatal(err)

@@ -1,0 +1,38 @@
+{{define "backup-table"}}{{/* list: page, backups, showSite */}}{{$p := index . 0}}{{$list := index . 1}}{{$remote := $p.Data.Remote.Configured}}
+<table class="table">
+  <thead><tr><th>Tarih</th>{{if index . 2}}<th>Site</th>{{end}}<th>Bileşenler</th><th>Tür</th><th class="right">Boyut</th><th>Konum</th><th>Durum</th><th></th></tr></thead>
+  <tbody>
+  {{range $list}}
+    <tr class="{{if eq .Status "failed"}}row-failed{{end}}">
+      <td class="nowrap">{{datetime .CreatedAt}}<div class="muted small"><code>{{.Name}}</code></div></td>
+      {{if index $ 2}}<td>{{if .SiteID}}<a href="/sites/{{.SiteID}}?tab=backups">{{.Domain}}</a>{{else}}{{.Domain}} <span class="tag">silinmiş site</span>{{end}}</td>{{end}}
+      <td>{{range .Components}}<span class="tag">{{compLabel .}}</span> {{end}}</td>
+      <td class="small">{{kindLabel .Kind}}{{if .PlanName}}<div class="muted">{{.PlanName}}</div>{{end}}</td>
+      <td class="right nowrap">{{if .SizeBytes}}{{size .SizeBytes}}{{else}}—{{end}}</td>
+      <td class="nowrap">{{if .Local}}<span class="tag">yerel</span>{{end}} {{if .Remote}}<span class="tag">Drive</span>{{end}}</td>
+      <td>{{template "badge" .Status}}{{if .Error}}<div class="small err-text">{{.Error}}</div>{{end}}{{if .JobID}} <a class="small" href="/logs/jobs/{{.JobID}}">#{{.JobID}}</a>{{end}}</td>
+      <td class="right"><div class="ops end">
+        {{if eq .Status "success"}}
+        <a class="button" href="/backups/{{.ID}}/restore">Geri yükle</a>
+        {{if and .Local (not .Remote) $remote}}<form method="post" action="/backups/{{.ID}}/upload"><input type="hidden" name="_csrf" value="{{$p.CSRF}}"><button type="submit">Drive'a gönder</button></form>{{end}}
+        {{end}}
+        {{if ne .Status "running"}}
+        <details class="inline-details"><summary class="button danger">Sil</summary>
+          <form method="post" action="/backups/{{.ID}}/delete" class="stack pad">
+            <input type="hidden" name="_csrf" value="{{$p.CSRF}}">
+            <select name="where">
+              {{if or .Local (eq .Status "failed")}}<option value="local">Yerel kopyayı sil</option>{{end}}
+              {{if .Remote}}<option value="remote">Drive kopyasını sil</option>{{end}}
+              {{if and .Local .Remote}}<option value="both">İkisini de sil</option>{{end}}
+            </select>
+            <button type="submit" class="danger" data-confirm="Yedek kopyası kalıcı olarak silinsin mi?">Sil</button>
+          </form>
+        </details>
+        {{end}}
+      </div></td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{if not $list}}<p class="muted pad">Henüz yedek yok.</p>{{end}}
+{{end}}
