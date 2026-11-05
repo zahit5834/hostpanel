@@ -303,6 +303,20 @@ func (s *Server) selftestStart(w http.ResponseWriter, r *http.Request) {
 var systemSources = []struct{ ID, Label string }{
 	{"panel", "Panel logu"},
 	{"auth", "Panel giriş denemeleri"},
+	{"certbot", "certbot (SSL yenileme)"},
+}
+
+func (s *Server) journalLines(ctx context.Context, unit string, n int) []string {
+	res, err := s.Sites.Probe.Run(ctx, exec.Cmd{Name: "journalctl", Args: []string{"-u", unit, "-n", strconv.Itoa(n), "--no-pager", "-o", "short-iso"},
+		Timeout: 10 * time.Second})
+	out := strings.TrimRight(res.Stdout, "\n")
+	if err != nil && out == "" {
+		return []string{"(journal okunamadı: " + err.Error() + ")"}
+	}
+	if out == "" {
+		return nil
+	}
+	return strings.Split(out, "\n")
 }
 
 func (s *Server) systemLogs(w http.ResponseWriter, r *http.Request) {
@@ -312,6 +326,8 @@ func (s *Server) systemLogs(w http.ResponseWriter, r *http.Request) {
 	switch src {
 	case "auth":
 		path = s.Cfg.AuthLogPath()
+	case "certbot":
+		path = ""
 	default:
 		src = "panel"
 	}
@@ -321,8 +337,13 @@ func (s *Server) systemLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	text := strings.TrimSpace(q.Get("q"))
 	level := q.Get("level")
-	lines, err := logs.TailLines(path, n)
-	if err != nil {
+	var lines []string
+	var err error
+	if path == "" {
+		// /var/log/letsencrypt is root-only; the systemd journal is readable
+		// by the systemd-journal group without sudo.
+		lines = s.journalLines(r.Context(), "certbot.service", n)
+	} else if lines, err = logs.TailLines(path, n); err != nil {
 		lines = []string{"(log okunamadı: " + err.Error() + ")"}
 	}
 	if text != "" || level != "" {

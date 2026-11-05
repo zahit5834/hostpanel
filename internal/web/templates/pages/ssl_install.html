@@ -1,0 +1,63 @@
+{{define "content"}}
+{{with .Data}}
+<p><a href="/ssl" class="small">← SSL</a></p>
+<h1>Ücretli sertifika kur</h1>
+<form method="post" action="/ssl/install" class="stack" id="install-form">
+  <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+  <section class="card stack">
+    <div class="form-grid">
+      <label>Site *
+        <select name="site_id" required>
+          <option value="">Seçin…</option>
+          {{range .Sites}}<option value="{{.ID}}" {{if eq .ID $.Data.SiteID}}selected{{end}}>{{.Domain}}</option>{{end}}
+        </select>
+      </label>
+      <label>Private key kaynağı
+        <select name="csr_id">
+          <option value="0">Key'i aşağıya yapıştıracağım</option>
+          {{range .CSRs}}<option value="{{.ID}}" {{if eq .ID $.Data.CSRID}}selected{{end}}>CSR: {{.CommonName}} ({{.KeyType}}, {{datetime .CreatedAt}})</option>{{end}}
+        </select>
+      </label>
+    </div>
+    <label x-data="fileToText">Private key (yalnızca CSR seçilmediyse)
+      <textarea name="key" rows="5" spellcheck="false" autocomplete="off" placeholder="-----BEGIN PRIVATE KEY-----" x-ref="text"></textarea>
+      <input type="file" accept=".key,.pem,.txt" x-on:change="load">
+    </label>
+    <label x-data="fileToText">Sertifika (CRT) *
+      <textarea name="cert" rows="8" spellcheck="false" required placeholder="-----BEGIN CERTIFICATE-----" x-ref="text">{{.CertPEM}}</textarea>
+      <input type="file" accept=".crt,.cer,.pem,.txt" x-on:change="load">
+    </label>
+    <label x-data="fileToText">CA bundle / ara sertifikalar
+      <textarea name="chain" rows="8" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----" x-ref="text">{{.Chain}}</textarea>
+      <input type="file" accept=".crt,.cer,.pem,.ca-bundle,.txt" x-on:change="load">
+      <span class="muted small">Sıra önemli değil; doğru sıraya panel dizer, kök sertifika varsa çıkarılır.</span>
+    </label>
+    <div class="actions">
+      <button type="button" hx-post="/ssl/install/verify" hx-include="#install-form" hx-target="#verify-report" hx-swap="outerHTML">Doğrula</button>
+      <button type="submit" class="primary">Doğrula ve kur</button>
+    </div>
+  </section>
+</form>
+{{template "verify-report" $}}
+{{end}}
+{{end}}
+
+{{define "verify-report"}}{{$d := .Data}}
+<section class="card" id="verify-report">
+{{with $d.Report}}
+  <h2>Doğrulama {{if .OK}}<span class="badge success">geçti</span>{{else}}<span class="badge failed">başarısız</span>{{end}}</h2>
+  <ul class="checks">
+    {{range .Checks}}<li class="check-{{.Level}}">{{if eq .Level "ok"}}✓{{else if eq .Level "warn"}}!{{else}}✗{{end}} {{.Text}}</li>{{end}}
+  </ul>
+  {{if .OK}}{{with .Info}}
+  <dl class="kv small">
+    <dt>Veren</dt><dd>{{.Issuer}}</dd>
+    <dt>Adlar</dt><dd>{{range $i, $n := .Names}}{{if $i}}, {{end}}{{$n}}{{end}}</dd>
+    <dt>Bitiş</dt><dd>{{datetime .NotAfter}}</dd>
+    <dt>Seri no</dt><dd><code>{{.Serial}}</code></dd>
+  </dl>{{end}}{{end}}
+{{else}}
+  <p class="muted">Kurmadan önce "Doğrula" ile key eşleşmesi, alan adı kapsamı, zincir ve tarihler kontrol edilir.</p>
+{{end}}
+</section>
+{{end}}

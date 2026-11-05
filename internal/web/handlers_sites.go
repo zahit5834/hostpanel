@@ -17,6 +17,7 @@ import (
 	"hostpanel/internal/logs"
 	"hostpanel/internal/runtimes"
 	"hostpanel/internal/sites"
+	"hostpanel/internal/ssl"
 )
 
 // MaxUploadBytes caps a deploy zip.
@@ -28,7 +29,7 @@ func (s *Server) siteList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.render(w, r, http.StatusOK, "sites", "layout", Page{Title: "Siteler", Nav: "sites", Data: map[string]any{"List": list}})
+	s.render(w, r, http.StatusOK, "sites", "layout", Page{Title: "Siteler", Nav: "sites", Data: map[string]any{"List": list, "Certs": s.SSL.ActiveBySite(r.Context())}})
 }
 
 type runtimeOption struct {
@@ -177,11 +178,15 @@ type siteData struct {
 	LogLines   []string
 	LogEntries []logs.Entry
 	DryRun     bool
+
+	Cert        *ssl.Certificate
+	CertHistory []ssl.Certificate
+	ACMEEmail   string
 }
 
 type envRow struct{ Key, Value string }
 
-var siteTabs = map[string]bool{"overview": true, "deploy": true, "env": true, "settings": true, "logs": true}
+var siteTabs = map[string]bool{"overview": true, "deploy": true, "env": true, "ssl": true, "settings": true, "logs": true}
 
 func (s *Server) siteDetail(w http.ResponseWriter, r *http.Request) {
 	site, ok := s.loadSite(w, r)
@@ -211,6 +216,8 @@ func (s *Server) renderSite(w http.ResponseWriter, r *http.Request, status int, 
 	d.Releases, _ = s.Sites.Store.Releases(ctx, site.ID)
 	d.Active = s.Sites.Store.ActiveRelease(ctx, site.ID)
 	switch tab {
+	case "ssl":
+		s.sslTabData(r, &d)
 	case "env":
 		env, err := s.Sites.Env(ctx, site.ID)
 		if err != nil {
@@ -226,6 +233,7 @@ func (s *Server) renderSite(w http.ResponseWriter, r *http.Request, status int, 
 		}
 	case "settings":
 		d.Nginx, _ = s.Sites.RenderNginxFor(site)
+		s.sslTabData(r, &d)
 		if ok {
 			d.Runtime = s.runtimeFieldsData(r, p, site.RuntimeVersion, site.Fields)
 		}

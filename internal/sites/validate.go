@@ -175,7 +175,7 @@ func ValidateSnippet(s, domain string) error {
 		return errors.New("süslü parantezler dengesiz")
 	}
 	for _, d := range confDirectives(s) {
-		if d.name == "access_log" || d.name == "error_log" {
+		if d.name == "access_log" || d.name == "error_log" || sslFileNames.MatchString(d.name) {
 			return fmt.Errorf("snippet içinde %s kullanılamaz", d.name)
 		}
 	}
@@ -215,7 +215,20 @@ func confDirectives(conf string) []confDirective {
 	return out
 }
 
-var forbiddenNames = regexp.MustCompile(`^(load_module|include|user|env|pid|daemon|master_process|lock_file|ssl_engine|working_directory|thread_pool|worker_[a-z_]+|[a-z_]*_temp_path|[a-z_]*_cache_path|perl[a-z_]*|lua[a-z_]*|js_[a-z_]+)$`)
+var forbiddenNames = regexp.MustCompile(`^(load_module|include|user|env|pid|daemon|master_process|lock_file|ssl_engine|ssl_conf_command|[a-z]+_ssl_conf_command|working_directory|thread_pool|worker_[a-z_]+|[a-z_]*_temp_path|[a-z_]*_cache_path|perl[a-z_]*|lua[a-z_]*|js_[a-z_]+)$`)
+
+// sslFileNames are directives whose argument is a file the root master reads
+// (also proxy_/grpc_/uwsgi_ upstream variants).
+var sslFileNames = regexp.MustCompile(`^([a-z]+_)?ssl_(certificate|certificate_key|trusted_certificate|client_certificate|crl|dhparam|password_file|stapling_file|session_ticket_key)$`)
+
+// sslPathOK: certificate files may only come from the site's own Let's
+// Encrypt lineage or its custom certificate directory.
+func sslPathOK(p, domain string) bool {
+	if strings.Contains(p, "..") || strings.Contains(p, "$") {
+		return false
+	}
+	return strings.HasPrefix(p, "/etc/letsencrypt/live/"+domain+"/") || strings.HasPrefix(p, "/etc/hostpanel/ssl/"+domain+"/")
+}
 
 // ValidateConf rejects directives that would let the config make the root
 // nginx master open arbitrary files or load code.
@@ -224,6 +237,8 @@ func ValidateConf(conf, domain string) error {
 		switch {
 		case forbiddenNames.MatchString(d.name):
 			return fmt.Errorf("bu direktife izin verilmiyor: %s", d.name)
+		case sslFileNames.MatchString(d.name) && !sslPathOK(d.arg, domain):
+			return fmt.Errorf("%s yalnızca sitenin kendi sertifika dosyalarını gösterebilir", d.name)
 		case d.name == "access_log" && d.arg != "off" && d.arg != "/var/log/nginx/hp-"+domain+".access.log",
 			d.name == "error_log" && d.arg != "/var/log/nginx/hp-"+domain+".error.log":
 			return fmt.Errorf("%s yalnızca site log dosyasına yazabilir", d.name)

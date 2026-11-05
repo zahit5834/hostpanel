@@ -151,9 +151,15 @@ conf_directives() {
 # nginx master load code or open arbitrary files (logs, temp/cache paths, includes).
 validate_nginx_conf() {
   local file=$1 domain=$2 name arg
-  local forbidden='^(load_module|include|user|env|pid|daemon|master_process|lock_file|ssl_engine|working_directory|thread_pool|worker_[a-z_]+|[a-z_]*_temp_path|[a-z_]*_cache_path|perl[a-z_]*|lua[a-z_]*|js_[a-z_]+)$'
+  local forbidden='^(load_module|include|user|env|pid|daemon|master_process|lock_file|ssl_engine|ssl_conf_command|[a-z]+_ssl_conf_command|working_directory|thread_pool|worker_[a-z_]+|[a-z_]*_temp_path|[a-z_]*_cache_path|perl[a-z_]*|lua[a-z_]*|js_[a-z_]+)$'
+  local sslfile='^([a-z]+_)?ssl_(certificate|certificate_key|trusted_certificate|client_certificate|crl|dhparam|password_file|stapling_file|session_ticket_key)$'
   while IFS=$'\t' read -r name arg; do
     [[ $name =~ $forbidden ]] && die "nginx: izin verilmeyen direktif: ${name}"
+    if [[ $name =~ $sslfile ]]; then
+      [[ $arg != *..* && $arg != *'$'* ]] &&
+        [[ $arg == "/etc/letsencrypt/live/${domain}/"* || $arg == "/etc/hostpanel/ssl/${domain}/"* ]] ||
+        die "nginx: ${name} yalnızca sitenin kendi sertifika dosyalarını gösterebilir"
+    fi
     case $name in
       access_log)
         [[ $arg == off || $arg == "/var/log/nginx/hp-${domain}.access.log" ]] || die "nginx: access_log yalnızca site log dosyasına yazabilir" ;;
@@ -184,4 +190,39 @@ env_line() {
     val=${val//\$/\\\$}
     printf '%s="%s"' "$key" "$val"
   fi
+}
+
+# validate_email ADDR — mirrors ssl.ValidEmail.
+validate_email() {
+  [[ $1 =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}$ ]] || die "geçersiz e-posta: $1"
+}
+
+# validate_id N — positive integer (database ids).
+validate_id() {
+  [[ $1 =~ ^[1-9][0-9]{0,17}$ ]] || die "geçersiz id: $1"
+}
+
+# split_pem_bundle IN KEYOUT CERTOUT — split a PEM stream into the private key
+# (exactly one) and certificates (at least one). Any other block type is rejected.
+split_pem_bundle() {
+  local in=$1 keyout=$2 certout=$3 counts
+  counts=$(awk -v k="$keyout" -v c="$certout" '
+    /^-----BEGIN [A-Z ]+-----$/ {
+      t = $0; sub(/^-----BEGIN /, "", t); sub(/-----$/, "", t)
+      if (t == "PRIVATE KEY" || t == "RSA PRIVATE KEY" || t == "EC PRIVATE KEY") { out = k; nk++ }
+      else if (t == "CERTIFICATE") { out = c; nc++ }
+      else { bad++; out = "" }
+    }
+    out != "" { print > out }
+    /^-----END [A-Z ]+-----$/ { out = "" }
+    END { printf "%d %d %d", nk, nc, bad }' "$in")
+  [[ $counts =~ ^1\ [1-9][0-9]*\ 0$ ]] || die "PEM paketi geçersiz (key/sertifika/diğer: ${counts})"
+}
+
+# cert_key_match CERT KEY — the first certificate's public key equals the key's.
+cert_key_match() {
+  local a b
+  a=$(openssl x509 -in "$1" -noout -pubkey 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum) || return 1
+  b=$(openssl pkey -in "$2" -pubout -outform DER 2>/dev/null | sha256sum) || return 1
+  [[ -n $a && $a == "$b" && $a != "$(printf '' | sha256sum)" ]]
 }

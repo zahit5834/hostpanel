@@ -149,6 +149,72 @@ func TestRenderNginxModes(t *testing.T) {
 	}
 }
 
+func TestRenderNginxTLS(t *testing.T) {
+	reg := loadRegistry(t)
+	dotnet, _ := reg.Get("dotnet")
+	site := Site{Domain: "ornek.com", Port: 5003, WWWMode: WWWToApex, MaxUploadMB: 50, HSTS: true, Fields: map[string]string{}}
+	d := NginxDataFor(site, dotnet.Def(), ModeApp, "/opt/hostpanel/templates")
+	d.ProbeToken = "0123456789abcdef0123456789abcdef"
+
+	// HSTS/force_https are ignored without a certificate.
+	conf, err := RenderNginx(templatesDir, "proxy.conf.tpl", d)
+	if err != nil || strings.Contains(conf, "443") || strings.Contains(conf, "Strict-Transport") || !strings.Contains(conf, `return 200 "0123456789abcdef0123456789abcdef";`) {
+		t.Fatalf("no TLS: %v\n%s", err, conf)
+	}
+
+	// Certificate without force_https: one server block on 80 + 443.
+	d.TLS = &TLSPaths{Cert: "/etc/letsencrypt/live/ornek.com/fullchain.pem", Key: "/etc/letsencrypt/live/ornek.com/privkey.pem", Names: []string{"ornek.com", "www.ornek.com"}}
+	conf, err = RenderNginx(templatesDir, "proxy.conf.tpl", d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"listen 80;", "listen 443 ssl http2;", "ssl_certificate /etc/letsencrypt/live/ornek.com/fullchain.pem;",
+		"ssl_protocols TLSv1.2 TLSv1.3;", `Strict-Transport-Security "max-age=31536000" always;`, "return 301 $scheme://ornek.com$request_uri;"} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("missing %q in:\n%s", want, conf)
+		}
+	}
+	// The www redirect server is covered by the certificate, so it listens on 443 too.
+	if strings.Count(conf, "listen 443 ssl http2;") != 2 {
+		t.Errorf("expected 2 TLS server blocks:\n%s", conf)
+	}
+
+	// force_https: port 80 only redirects (ACME + probe excepted).
+	site.ForceHTTPS = true
+	d.ForceHTTPS = true
+	conf, err = RenderNginx(templatesDir, "proxy.conf.tpl", d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"return 301 https://$host$request_uri;", "return 301 https://ornek.com$request_uri;"} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("missing %q in:\n%s", want, conf)
+		}
+	}
+	main := conf[strings.LastIndex(conf, "server {"):]
+	if strings.Contains(main, "listen 80;") || !strings.Contains(main, "proxy_pass") {
+		t.Errorf("main server must be 443-only:\n%s", main)
+	}
+	if strings.Count(conf, "/.well-known/acme-challenge/") != 3 {
+		t.Errorf("ACME location must exist in every port-80 block:\n%s", conf)
+	}
+	// Maintenance page keeps HSTS despite its own add_header.
+	d.Mode = ModeMaintenance
+	conf, _ = RenderNginx(templatesDir, "proxy.conf.tpl", d)
+	loc := conf[strings.Index(conf, "add_header Retry-After"):]
+	if !strings.Contains(loc, "Strict-Transport-Security") {
+		t.Errorf("HSTS missing in 503 location:\n%s", conf)
+	}
+	// A certificate path outside the site's own directories never renders.
+	d.TLS.Key = "/etc/letsencrypt/live/baska.com/privkey.pem"
+	if _, err := RenderNginx(templatesDir, "proxy.conf.tpl", d); err == nil {
+		t.Fatal("foreign key path rendered")
+	}
+	if err := ValidateSnippet("ssl_certificate /etc/letsencrypt/live/ornek.com/fullchain.pem;", "ornek.com"); err == nil {
+		t.Fatal("ssl directive accepted in snippet")
+	}
+}
+
 func TestEnvDiffHidesValues(t *testing.T) {
 	d := envDiff(map[string]string{"A": "1", "B": "secret-old"}, map[string]string{"B": "secret-new", "C": "x"})
 	if strings.Contains(d, "secret") || !strings.Contains(d, "- A") || !strings.Contains(d, "+ C=***") {

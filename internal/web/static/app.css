@@ -183,3 +183,11 @@ pre.conf { background: var(--console-bg); color: var(--console-text); font-famil
 .badge.st-stopped, .badge.st-maintenance, .badge.st-previous { background: var(--warn-bg); color: var(--warn); }
 .badge.st-error, .badge.st-disabled, .badge.st-failed { background: var(--err-bg); color: var(--err); }
 .badge.st-provisioning, .badge.st-awaiting_deploy, .badge.st-deleting { background: var(--run-bg); color: var(--run); }
+
+/* Faz 2: SSL */
+.checks { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 4px; }
+.checks .check-ok { color: var(--ok); }
+.checks .check-warn { color: var(--warn); }
+.checks .check-err { color: var(--err); }
+.alert-card { border-color: var(--warn); }
+.alert-card ul { margin: 0; padding-left: 18px; }

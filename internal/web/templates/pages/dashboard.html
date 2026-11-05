@@ -4,6 +4,13 @@
 {{template "metrics" .}}
 </div>
 
+{{with .Data.Expiring}}
+<section class="card alert-card">
+  <h2>Süresi dolmak üzere olan SSL sertifikaları</h2>
+  <ul>{{range .}}<li><a href="/sites/{{.SiteID}}?tab=ssl">{{.Domain}}</a> — {{template "days-left" .DaysLeft}} ({{datetime .NotAfter}}){{if eq .Kind "letsencrypt"}} · otomatik yenileme başarısız olmuş olabilir{{end}}</li>{{end}}</ul>
+</section>
+{{end}}
+
 <section class="card">
   <div class="card-head"><h2>Son İşlemler</h2><a href="/logs/activity" class="small">Tümü →</a></div>
   {{with .Data.Recent}}

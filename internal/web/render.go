@@ -156,6 +156,7 @@ var funcs = template.FuncMap{
 			"provisioning": "Hazırlanıyor", "awaiting_deploy": "Deploy bekliyor", "running": "Çalışıyor",
 			"stopped": "Durduruldu", "maintenance": "Bakımda", "disabled": "Devre dışı", "error": "Hata",
 			"deleting": "Siliniyor", "active": "Aktif", "previous": "Önceki", "failed": "Başarısız", "pruned": "Silindi",
+			"pending": "Bekliyor", "replaced": "Değiştirildi", "removed": "Kaldırıldı",
 		}[s]
 	},
 	"kb": func(n int64) string {

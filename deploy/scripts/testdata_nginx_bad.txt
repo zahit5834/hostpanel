@@ -9,3 +9,11 @@ include /etc/shadow;
 location / { perl_modules /x; }
 add_header X "a"; include /etc/passwd;
 # comment ; include /etc/passwd
+ssl_certificate /etc/shadow;
+ssl_certificate_key /etc/letsencrypt/live/baska.com/privkey.pem;
+ssl_certificate /etc/letsencrypt/live/ornek.com/../baska.com/fullchain.pem;
+ssl_certificate_key /etc/hostpanel/ssl/ornek.com.evil/1/privkey.pem;
+ssl_certificate data:$var;
+proxy_ssl_certificate_key /etc/ssh/ssh_host_rsa_key;
+ssl_trusted_certificate /etc/hostpanel/master.key;
+ssl_conf_command Options x;

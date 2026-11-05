@@ -1,0 +1,51 @@
+{{define "content"}}
+<div class="card-head">
+  <h1>SSL Sertifikaları</h1>
+  <div class="actions">
+    <a class="button" href="/ssl/csr/new">CSR oluştur</a>
+    <a class="button primary" href="/ssl/install">Ücretli sertifika kur</a>
+  </div>
+</div>
+<p class="muted small">Let's Encrypt sertifikaları site sayfasındaki <strong>SSL</strong> sekmesinden kurulur ve certbot tarafından otomatik yenilenir.</p>
+{{with .Data}}
+<section class="card table-wrap">
+  <table class="table">
+    <thead><tr><th>Site</th><th>Tür</th><th>Veren</th><th>Adlar</th><th>Bitiş</th><th>Kalan</th><th>Durum</th></tr></thead>
+    <tbody>
+    {{range .Certs}}
+      <tr class="{{if eq .Status "error"}}row-failed{{end}}">
+        <td><a href="/sites/{{.SiteID}}?tab=ssl">{{.Domain}}</a></td>
+        <td>{{template "cert-kind" .Kind}}{{if .Staging}} <span class="tag">test</span>{{end}}</td>
+        <td>{{.Issuer}}</td>
+        <td class="ellipsis" title="{{range $i, $n := .Names}}{{if $i}}, {{end}}{{$n}}{{end}}">{{range $i, $n := .Names}}{{if $i}}, {{end}}{{$n}}{{end}}</td>
+        <td class="nowrap">{{if not .NotAfter.IsZero}}{{datetime .NotAfter}}{{end}}</td>
+        <td>{{if not .NotAfter.IsZero}}{{template "days-left" .DaysLeft}}{{end}}</td>
+        <td>{{template "site-badge" .Status}}{{if .LastError}} <span class="err-text small" title="{{.LastError}}">!</span>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not .Certs}}<p class="muted pad">Henüz sertifika yok.</p>{{end}}
+</section>
+
+<section class="card table-wrap">
+  <h2 class="pad">CSR'lar</h2>
+  <table class="table">
+    <thead><tr><th>Ortak ad (CN)</th><th>SAN</th><th>Anahtar</th><th>Oluşturma</th><th>Sertifika</th><th></th></tr></thead>
+    <tbody>
+    {{range .CSRs}}
+      <tr>
+        <td><a href="/ssl/csr/{{.ID}}">{{.CommonName}}</a></td>
+        <td class="ellipsis">{{range $i, $n := .SANs}}{{if $i}}, {{end}}{{$n}}{{end}}</td>
+        <td>{{.KeyType}}</td>
+        <td class="nowrap muted">{{datetime .CreatedAt}}</td>
+        <td>{{if .CertID}}<span class="badge success">kuruldu</span>{{else}}<a href="/ssl/install?csr={{.ID}}">Sertifikayı kur →</a>{{end}}</td>
+        <td class="right"><a href="/ssl/csr/{{.ID}}?download=1">İndir</a></td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not .CSRs}}<p class="muted pad">CSR yok.</p>{{end}}
+</section>
+{{end}}
+{{end}}

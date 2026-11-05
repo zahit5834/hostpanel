@@ -70,6 +70,14 @@ server {
     location / { proxy_pass http://127.0.0.1:5000; proxy_set_header Host $host; }
     location ^~ /__hostpanel/ { internal; alias /opt/hostpanel/templates/pages/; }
 }
+server {
+    listen 443 ssl http2;
+    server_name ornek.com;
+    ssl_certificate /etc/letsencrypt/live/ornek.com/fullchain.pem;
+    ssl_certificate_key "/etc/hostpanel/ssl/ornek.com/7/privkey.pem";
+    access_log /var/log/nginx/hp-ornek.com.access.log;
+    error_log /var/log/nginx/hp-ornek.com.error.log;
+}
 CONF
 ok  validate_nginx_conf "$tmpc" ornek.com
 bad validate_nginx_conf "$tmpc" other.com
@@ -84,6 +92,31 @@ check_env() {
 check_env A 'plain value' "A='plain value'"
 check_env B 'x$y"z\w' "B='x\$y\"z\\w'"
 check_env C "it's \$HOME" 'C="it'"'"'s \$HOME"'
+
+# e-mail / id
+ok  validate_email admin@ornek.com.tr
+bad validate_email 'a@b'
+bad validate_email 'x@y.com;rm'
+ok  validate_id 42
+bad validate_id 0
+bad validate_id '1/../2'
+
+# PEM bundle split + key/cert match (real openssl, no root needed).
+if command -v openssl >/dev/null; then
+  pd=$(mktemp -d)
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$pd/k1.pem" -out "$pd/c1.pem" -subj /CN=ornek.com -days 2 2>/dev/null
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$pd/k2.pem" -out "$pd/c2.pem" -subj /CN=ornek.com -days 2 2>/dev/null
+  cat "$pd/k1.pem" "$pd/c1.pem" >"$pd/bundle.pem"
+  ok  split_pem_bundle "$pd/bundle.pem" "$pd/ko.pem" "$pd/co.pem"
+  ok  cert_key_match "$pd/co.pem" "$pd/ko.pem"
+  bad cert_key_match "$pd/c2.pem" "$pd/k1.pem"
+  cat "$pd/k1.pem" "$pd/k2.pem" "$pd/c1.pem" >"$pd/two-keys.pem"
+  bad split_pem_bundle "$pd/two-keys.pem" "$pd/x.pem" "$pd/y.pem"
+  bad split_pem_bundle "$pd/c1.pem" "$pd/x.pem" "$pd/y.pem"
+  printf -- '-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n' | cat "$pd/bundle.pem" - >"$pd/extra.pem"
+  bad split_pem_bundle "$pd/extra.pem" "$pd/x.pem" "$pd/y.pem"
+  rm -rf "$pd"
+fi
 
 if [[ $fail -eq 0 ]]; then echo "lib.sh: tüm testler geçti"; fi
 exit $fail

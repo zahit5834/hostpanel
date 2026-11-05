@@ -8,3 +8,11 @@
 </div>
 {{end}}
 {{define "site-badge"}}<span class="badge st-{{.}}">{{siteStatus .}}</span>{{end}}
+{{define "cert-kind"}}{{if eq . "letsencrypt"}}Let's Encrypt{{else}}Ücretli{{end}}{{end}}
+{{define "days-left"}}<span class="badge {{daysClass .}}">{{if lt . 0}}süresi doldu{{else}}{{.}} gün{{end}}</span>{{end}}
+{{define "settings-tabs"}}
+<div class="tabs">
+  <a href="/settings/security" class="{{if eq . "security"}}active{{end}}">Güvenlik</a>
+  <a href="/settings/general" class="{{if eq . "general"}}active{{end}}">Genel</a>
+</div>
+{{end}}

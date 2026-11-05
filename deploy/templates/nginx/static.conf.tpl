@@ -1,7 +1,6 @@
 {{template "header" .}}
 server {
-    listen 80;
-    listen [::]:80;
+{{- template "listen" .}}
     server_name {{join .ServerNames " "}};
 {{template "common" .}}
 {{- if eq .Mode "app"}}

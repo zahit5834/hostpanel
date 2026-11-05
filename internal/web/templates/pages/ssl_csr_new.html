@@ -1,0 +1,34 @@
+{{define "content"}}
+{{with .Data}}
+<p><a href="/ssl" class="small">← SSL</a></p>
+<h1>CSR oluştur</h1>
+<form method="post" action="/ssl/csr" class="card stack">
+  <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+  <p class="muted small">Private key bu sunucuda üretilir ve şifreli saklanır; sertifika sağlayıcısına yalnızca CSR metnini verin.</p>
+  <div class="form-grid">
+    <label>Site (isteğe bağlı)
+      <select name="site_id">
+        <option value="0">—</option>
+        {{range .Sites}}<option value="{{.ID}}" {{if eq .ID $.Data.SiteID}}selected{{end}}>{{.Domain}}</option>{{end}}
+      </select>
+    </label>
+    <label>Ortak ad (CN) * <input name="cn" value="{{.In.CommonName}}" placeholder="ornek.com.tr" required spellcheck="false"></label>
+    <label class="full">Ek alan adları (SAN) <input name="sans" value="{{.SANs}}" placeholder="www.ornek.com.tr, shop.ornek.com.tr" spellcheck="false">
+      <span class="muted small">Virgülle ayırın. CN otomatik olarak SAN listesine eklenir. Wildcard için <code>*.ornek.com.tr</code>.</span></label>
+    <label>Ülke <input name="c" value="{{.In.Subject.Country}}" maxlength="2" placeholder="TR"></label>
+    <label>İl <input name="st" value="{{.In.Subject.State}}" placeholder="İstanbul"></label>
+    <label>Şehir / ilçe <input name="l" value="{{.In.Subject.Locality}}" placeholder="Kadıköy"></label>
+    <label>Kuruluş <input name="o" value="{{.In.Subject.Org}}" placeholder="Örnek A.Ş."></label>
+    <label>Birim <input name="ou" value="{{.In.Subject.OrgUnit}}" placeholder="BT"></label>
+    <label>E-posta <input type="email" name="email" value="{{.In.Subject.Email}}"></label>
+    <label>Anahtar tipi
+      <select name="key_type">
+        {{range .KeyTypes}}<option value="{{.ID}}" {{if eq .ID $.Data.In.KeyType}}selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+      <span class="muted small">RSA 2048 en geniş uyumluluk; ECDSA P-256 daha hızlı ve küçük.</span>
+    </label>
+  </div>
+  <div class="actions"><button type="submit" class="primary">CSR oluştur</button></div>
+</form>
+{{end}}
+{{end}}

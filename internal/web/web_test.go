@@ -3,8 +3,10 @@ package web
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -27,6 +29,7 @@ import (
 	"hostpanel/internal/logs"
 	"hostpanel/internal/runtimes"
 	"hostpanel/internal/sites"
+	"hostpanel/internal/ssl"
 	"hostpanel/internal/store"
 )
 
@@ -63,9 +66,16 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	svc := &sites.Service{Store: sites.NewStore(db), Box: box, Runner: runner, Probe: probe, Runtimes: reg, Jobs: jm,
 		Activity: act, Log: log, ScriptsDir: cfg.ScriptsDir, TemplatesDir: cfg.TemplatesDir,
 		UploadDir: filepath.Join(dir, "uploads"), DryRun: true}
+	svc.ProbeToken = ssl.EnsureServerID(ctx, db)
 	svc.Register()
+	sslSvc := &ssl.Service{Store: ssl.NewStore(db), Sites: svc, DB: db, Box: box, Runner: runner, Probe: probe, Jobs: jm,
+		Activity: act, Log: log, ScriptsDir: cfg.ScriptsDir, RenewLog: filepath.Join(dir, "ssl-renewals.log"), DryRun: true,
+		Checker: func(context.Context) *ssl.Checker {
+			return &ssl.Checker{Resolver: testResolver{}, Client: &http.Client{Transport: noNetwork{}}, Token: "x"}
+		}}
+	sslSvc.Register()
 	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
-		Customers: customers.New(db), Sites: svc, Runtimes: reg}
+		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc}
 	s.RegisterJobs()
 	if err := s.Init(ctx); err != nil {
 		t.Fatal(err)
@@ -85,6 +95,19 @@ func (fakeProbe) Run(ctx context.Context, c exec.Cmd) (exec.Result, error) {
 		return exec.Result{Stdout: "Microsoft.AspNetCore.App 10.0.14 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\n"}, nil
 	}
 	return exec.Result{Stdout: "inactive\n"}, nil
+}
+
+// testResolver resolves every name to 192.0.2.1 (not this server).
+type testResolver struct{}
+
+func (testResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
+	return []net.IPAddr{{IP: net.ParseIP("192.0.2.1")}}, nil
+}
+
+type noNetwork struct{}
+
+func (noNetwork) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("no network in tests")
 }
 
 func client() *http.Client {

@@ -1,0 +1,19 @@
+{{define "content"}}
+<h1>Ayarlar</h1>
+{{template "settings-tabs" "general"}}
+{{with .Data}}
+<section class="card">
+  <h2>SSL / Let's Encrypt</h2>
+  <form method="post" action="/settings/general" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Let's Encrypt e-posta adresi
+      <input type="email" name="acme_email" value="{{.Email}}" placeholder="admin@ornek.com">
+      <span class="muted small">Süre dolumu ve hesap bildirimleri bu adrese gelir.</span></label>
+    <label>Sunucunun genel IP adresleri (isteğe bağlı)
+      <textarea name="server_ips" rows="2" placeholder="203.0.113.10">{{.IPs}}</textarea>
+      <span class="muted small">DNS ön kontrolünde kullanılır. Ağ arayüzlerinde bulunanlar: <code>{{or .LocalIPs "—"}}</code>. Sunucu NAT arkasındaysa genel IP'yi buraya girin.</span></label>
+    <div><button type="submit" class="primary">Kaydet</button></div>
+  </form>
+</section>
+{{end}}
+{{end}}

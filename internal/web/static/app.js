@@ -91,6 +91,20 @@
       };
     });
 
+    // fileToText: read a small local PEM file into the sibling textarea so the
+    // form stays urlencoded (no multipart upload for certificates).
+    window.Alpine.data("fileToText", function () {
+      return {
+        load: function (ev) {
+          var f = ev.target.files && ev.target.files[0];
+          var ta = this.$refs.text;
+          if (!f || !ta) return;
+          if (f.size > 65536) { alert("Dosya çok büyük (en fazla 64 KB)"); ev.target.value = ""; return; }
+          f.text().then(function (t) { ta.value = t; });
+        }
+      };
+    });
+
     window.Alpine.data("copy", function () {
       return {
         label: "Kopyala",

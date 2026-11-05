@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,6 +43,12 @@ type Service struct {
 	UploadDir    string
 	DryRun       bool
 
+	// CertFor returns the site's active certificate for nginx (nil: none).
+	// Injected by the ssl package so sites does not depend on it.
+	CertFor func(ctx context.Context, siteID int64) *TLSPaths
+	// ProbeToken is served at /.well-known/hostpanel-probe for SSL pre-checks.
+	ProbeToken string
+
 	locks sync.Map // site id → *sync.Mutex: one mutating operation per site at a time
 }
 
@@ -53,6 +60,9 @@ func (s *Service) Register() {
 	s.Jobs.Register("runtime.install", s.jobRuntime("install"))
 	s.Jobs.Register("runtime.remove", s.jobRuntime("remove"))
 }
+
+// Lock serialises mutating operations on one site (also used by the ssl package).
+func (s *Service) Lock(id int64) func() { return s.lock(id) }
 
 func (s *Service) lock(id int64) func() {
 	m, _ := s.locks.LoadOrStore(id, &sync.Mutex{})
@@ -301,12 +311,31 @@ func (s *Service) applyNginx(ctx context.Context, w io.Writer, site Site, mode s
 	if err != nil {
 		return err
 	}
-	conf, err := RenderNginx(s.TemplatesDir, prov.Def().NginxTemplate, NginxDataFor(site, prov.Def(), mode, s.TemplatesDir))
+	conf, err := RenderNginx(s.TemplatesDir, prov.Def().NginxTemplate, s.nginxData(ctx, site, prov.Def(), mode))
 	if err != nil {
 		return err
 	}
 	return s.helper(ctx, w, strings.NewReader(conf), nil, "hp-nginx-site.sh", "install", site.Domain)
 }
+
+// ApplyNginx re-renders and installs the config for the site's current status
+// (after a certificate change). The caller holds Lock(site.ID).
+func (s *Service) ApplyNginx(ctx context.Context, w io.Writer, site Site) error {
+	return s.applyNginx(ctx, w, site, ModeFor(site.Status))
+}
+
+func (s *Service) nginxData(ctx context.Context, site Site, def *runtimes.Definition, mode string) NginxData {
+	d := NginxDataFor(site, def, mode, s.TemplatesDir)
+	if probeTokenRe.MatchString(s.ProbeToken) {
+		d.ProbeToken = s.ProbeToken
+	}
+	if s.CertFor != nil {
+		d.TLS = s.CertFor(ctx, site.ID)
+	}
+	return d
+}
+
+var probeTokenRe = regexp.MustCompile(`^[a-f0-9]{16,64}$`)
 
 // RenderNginxFor returns the config that would be installed (for the UI preview / diff).
 func (s *Service) RenderNginxFor(site Site) (string, error) {
@@ -314,7 +343,7 @@ func (s *Service) RenderNginxFor(site Site) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return RenderNginx(s.TemplatesDir, prov.Def().NginxTemplate, NginxDataFor(site, prov.Def(), ModeFor(site.Status), s.TemplatesDir))
+	return RenderNginx(s.TemplatesDir, prov.Def().NginxTemplate, s.nginxData(context.Background(), site, prov.Def(), ModeFor(site.Status)))
 }
 
 // --- env ---
@@ -777,6 +806,7 @@ func (s *Service) jobDelete(ctx context.Context, l *jobs.Log, p map[string]any) 
 		try("ortam değişkenleri siliniyor", func() error { return s.helper(dctx, l, nil, nil, "hp-site-env.sh", "delete", site.Domain) })
 	}
 	try("nginx yapılandırması kaldırılıyor", func() error { return s.helper(dctx, l, nil, nil, "hp-nginx-site.sh", "remove", site.Domain) })
+	try("SSL sertifikaları siliniyor", func() error { return s.helper(dctx, l, nil, nil, "hp-ssl.sh", "delete", site.Domain, "all") })
 	l.Progress(60)
 	try("site dizini siliniyor", func() error { return s.helper(dctx, l, nil, nil, "hp-site-dirs.sh", "delete", site.Domain) })
 	try("Linux kullanıcısı siliniyor", func() error {

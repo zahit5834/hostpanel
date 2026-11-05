@@ -55,6 +55,44 @@ type NginxData struct {
 	PagesDir     string
 	ErrorPage    string // page served for 503 in non-app modes
 	ACMERoot     string
+
+	TLS        *TLSPaths // nil: HTTP only
+	ForceHTTPS bool      // effective only with TLS
+	HSTS       bool      // effective only with TLS
+	ProbeToken string    // answered at /.well-known/hostpanel-probe (SSL pre-check)
+}
+
+// TLSPaths is the active certificate as nginx sees it.
+type TLSPaths struct {
+	Cert, Key string
+	Names     []string // names the certificate covers (may contain *.wildcards)
+}
+
+// Covered reports whether the certificate covers name (templates use it to
+// decide whether a redirect-only server block can also listen on 443).
+func (d NginxData) Covered(name string) bool {
+	if d.TLS == nil {
+		return false
+	}
+	for _, n := range d.TLS.Names {
+		if n == name {
+			return true
+		}
+		if strings.HasPrefix(n, "*.") {
+			if i := strings.IndexByte(name, '.'); i > 0 && name[i:] == n[1:] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// RedirectScheme is the scheme used by www/apex redirect blocks.
+func (d NginxData) RedirectScheme() string {
+	if d.TLS != nil && d.ForceHTTPS {
+		return "https"
+	}
+	return "$scheme"
 }
 
 // NginxDataFor builds template data for s in the given mode.
@@ -68,6 +106,8 @@ func NginxDataFor(s Site, def *runtimes.Definition, mode, templatesDir string) N
 		Index:       "index.html",
 		MaxUploadMB: s.MaxUploadMB,
 		Gzip:        s.Gzip,
+		HSTS:        s.HSTS,
+		ForceHTTPS:  s.ForceHTTPS,
 		Snippet:     strings.TrimSpace(s.CustomSnippet),
 		AccessLog:   "/var/log/nginx/hp-" + s.Domain + ".access.log",
 		ErrorLog:    "/var/log/nginx/hp-" + s.Domain + ".error.log",

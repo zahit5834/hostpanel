@@ -1,0 +1,33 @@
+{{define "content"}}
+{{with .Data}}
+<p><a href="/ssl" class="small">← SSL</a></p>
+<div class="card-head">
+  <h1>CSR · {{.CommonName}}</h1>
+  <div class="actions">
+    <a class="button" href="/ssl/csr/{{.ID}}?download=1">.csr indir</a>
+    {{if not .CertID}}<a class="button primary" href="/ssl/install?csr={{.ID}}">Sertifikayı kur</a>{{end}}
+  </div>
+</div>
+<section class="card">
+  <dl class="kv">
+    <dt>Alan adları</dt><dd>{{range $i, $n := .SANs}}{{if $i}}, {{end}}{{$n}}{{end}}</dd>
+    <dt>Anahtar</dt><dd>{{.KeyType}}</dd>
+    {{with .Subject}}<dt>Kuruluş</dt><dd>{{or .Org "—"}}{{if .OrgUnit}} · {{.OrgUnit}}{{end}}</dd>
+    <dt>Konum</dt><dd>{{or .Locality "—"}}{{if .State}}, {{.State}}{{end}}{{if .Country}}, {{.Country}}{{end}}</dd>{{end}}
+    <dt>Oluşturma</dt><dd>{{datetime .CreatedAt}}</dd>
+  </dl>
+</section>
+<section class="card stack">
+  <div class="card-head"><h2>CSR metni</h2><button type="button" x-data="copy" data-target="csr-pem" x-on:click="copy" x-text="label">Kopyala</button></div>
+  <pre id="csr-pem">{{.PEM}}</pre>
+  <p class="muted small">Bu metni sertifika sağlayıcınızın başvuru formuna yapıştırın. Sertifika gelince "Sertifikayı kur" ile yükleyin.</p>
+</section>
+<section class="card danger-zone">
+  <form method="post" action="/ssl/csr/{{.ID}}/delete" class="inline-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <button type="submit" class="danger">CSR'ı ve private key'i sil</button>
+    <span class="muted small">Bu CSR için sertifika henüz kurulmadıysa, silindikten sonra o sertifika kullanılamaz.</span>
+  </form>
+</section>
+{{end}}
+{{end}}

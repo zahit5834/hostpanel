@@ -23,6 +23,7 @@ import (
 	"hostpanel/internal/logs"
 	"hostpanel/internal/runtimes"
 	"hostpanel/internal/sites"
+	"hostpanel/internal/ssl"
 	"hostpanel/internal/store"
 )
 
@@ -43,6 +44,7 @@ type Server struct {
 	Customers *customers.Store
 	Sites     *sites.Service
 	Runtimes  *runtimes.Registry
+	SSL       *ssl.Service
 
 	tpl       *renderer
 	allowlist atomic.Pointer[[]netip.Prefix]

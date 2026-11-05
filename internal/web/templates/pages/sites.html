@@ -5,7 +5,7 @@
 </div>
 <div class="card table-wrap">
   <table class="table">
-    <thead><tr><th>Domain</th><th>Müşteri</th><th>Altyapı</th><th class="right">Port</th><th>Durum</th><th>Oluşturma</th></tr></thead>
+    <thead><tr><th>Domain</th><th>Müşteri</th><th>Altyapı</th><th class="right">Port</th><th>SSL</th><th>Durum</th><th>Oluşturma</th></tr></thead>
     <tbody>
     {{range .Data.List}}
       <tr>
@@ -13,6 +13,7 @@
         <td><a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a></td>
         <td>{{.RuntimeID}} {{.RuntimeVersion}}</td>
         <td class="right">{{if .Port}}{{.Port}}{{else}}—{{end}}</td>
+        <td class="nowrap">{{with index $.Data.Certs .ID}}{{template "days-left" .DaysLeft}}{{else}}<span class="muted">—</span>{{end}}</td>
         <td>{{template "site-badge" .Status}}</td>
         <td class="nowrap muted">{{datetime .CreatedAt}}</td>
       </tr>

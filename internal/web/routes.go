@@ -59,11 +59,28 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /sites/{id}/settings", s.requireAuth(s.siteSaveSettings))
 	mux.Handle("POST /sites/{id}/delete", s.requireAuth(s.siteDelete))
 
+	mux.Handle("GET /sites/{id}/ssl/check", s.requireAuth(s.siteSSLCheck))
+	mux.Handle("POST /sites/{id}/ssl/letsencrypt", s.requireAuth(s.siteSSLLetsEncrypt))
+	mux.Handle("POST /sites/{id}/ssl/renew", s.requireAuth(s.siteSSLRenew))
+	mux.Handle("POST /sites/{id}/ssl/remove", s.requireAuth(s.siteSSLRemove))
+
+	mux.Handle("GET /ssl", s.requireAuth(s.sslList))
+	mux.Handle("GET /ssl/csr/new", s.requireAuth(s.csrNew))
+	mux.Handle("POST /ssl/csr", s.requireAuth(s.csrCreate))
+	mux.Handle("GET /ssl/csr/{id}", s.requireAuth(s.csrDetail))
+	mux.Handle("POST /ssl/csr/{id}/delete", s.requireAuth(s.csrDelete))
+	mux.Handle("GET /ssl/install", s.requireAuth(s.sslInstallPage))
+	mux.Handle("POST /ssl/install/verify", s.requireAuth(s.sslVerify))
+	mux.Handle("POST /ssl/install", s.requireAuth(s.sslInstall))
+	mux.Handle("POST /ssl/{id}/export", s.requireAuth(s.sslExport))
+
 	mux.Handle("GET /runtimes", s.requireAuth(s.runtimesPage))
 	mux.Handle("POST /runtimes/{id}/{action}", s.requireAuth(s.runtimeAction))
 
 	mux.Handle("GET /settings", http.RedirectHandler("/settings/security", http.StatusSeeOther))
 	mux.Handle("GET /settings/security", s.requireAuth(s.securityPage))
+	mux.Handle("GET /settings/general", s.requireAuth(s.generalPage))
+	mux.Handle("POST /settings/general", s.requireAuth(s.saveGeneral))
 	mux.Handle("POST /settings/password", s.requireAuth(s.changePassword))
 	mux.Handle("POST /settings/2fa/start", s.requireAuth(s.totpStart))
 	mux.Handle("POST /settings/2fa/enable", s.requireAuth(s.totpEnable))
