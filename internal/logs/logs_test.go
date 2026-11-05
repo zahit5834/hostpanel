@@ -101,3 +101,14 @@ func TestActivityRecordQuery(t *testing.T) {
 		t.Fatalf("text filter n=%d", len(f))
 	}
 }
+
+func TestLineDiff(t *testing.T) {
+	d := LineDiff("a\nb\nc", "a\nx\nc\nd")
+	want := "  a\n- b\n+ x\n  c\n+ d"
+	if d != want {
+		t.Fatalf("got\n%s", d)
+	}
+	if LineDiff("same", "same") != "" {
+		t.Fatal("equal inputs should give empty diff")
+	}
+}

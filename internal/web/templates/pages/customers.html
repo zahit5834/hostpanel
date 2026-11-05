@@ -1,0 +1,31 @@
+{{define "content"}}
+<div class="card-head">
+  <h1>Müşteriler</h1>
+  <a class="button primary" href="/customers/new">Yeni müşteri</a>
+</div>
+<form class="filters" hx-get="/customers" hx-target="#customer-table" hx-swap="outerHTML" hx-push-url="true" hx-trigger="keyup changed delay:300ms, search">
+  <input type="search" name="q" value="{{.Data.Q}}" placeholder="Ad, firma, e-posta veya telefon ara">
+</form>
+{{template "customer-table" .}}
+{{end}}
+
+{{define "customer-table"}}{{$d := .Data}}
+<div id="customer-table" class="card table-wrap">
+  <table class="table">
+    <thead><tr><th>Ad</th><th>Firma</th><th>E-posta</th><th>Telefon</th><th class="right">Site</th><th>Eklenme</th></tr></thead>
+    <tbody>
+    {{range $d.List}}
+      <tr>
+        <td><a href="/customers/{{.ID}}">{{.Name}}</a></td>
+        <td>{{.Company}}</td>
+        <td>{{.Email}}</td>
+        <td class="nowrap">{{.Phone}}</td>
+        <td class="right">{{.SiteCount}}</td>
+        <td class="nowrap muted">{{datetime .CreatedAt}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not $d.List}}<p class="muted pad">{{if $d.Q}}Aramayla eşleşen müşteri yok.{{else}}Henüz müşteri yok.{{end}}</p>{{end}}
+</div>
+{{end}}

@@ -1,0 +1,57 @@
+{{define "content"}}
+{{with .Data}}
+<p><a href="/sites" class="small">← Siteler</a></p>
+<h1>Yeni site</h1>
+{{if not .Customers}}
+<div class="alert err">Önce bir <a href="/customers/new">müşteri ekleyin</a>.</div>
+{{else}}
+<form method="post" action="/sites" class="stack" id="site-form">
+  <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+  <section class="card stack">
+    <h2>1 · Müşteri ve domain</h2>
+    <div class="form-grid">
+      <label>Müşteri *
+        <select name="customer_id" required>
+          {{range .Customers}}<option value="{{.ID}}" {{if eq .ID $.Data.In.CustomerID}}selected{{end}}>{{.Name}}{{if .Company}} · {{.Company}}{{end}}</option>{{end}}
+        </select>
+      </label>
+      <label>Domain * <input name="domain" value="{{.In.Domain}}" placeholder="ornek.com.tr" required autocomplete="off" spellcheck="false"></label>
+      <label>Ek alan adları <input name="aliases" value="{{.In.Aliases}}" placeholder="ornek.net, eski.ornek.com" spellcheck="false">
+        <span class="muted small">Virgülle ayırın.</span></label>
+      <label>www yönlendirmesi
+        <select name="www_mode">
+          <option value="none" {{if eq .In.WWWMode "none"}}selected{{end}}>Yok (yalnızca girilen domain)</option>
+          <option value="to_apex" {{if eq .In.WWWMode "to_apex"}}selected{{end}}>www → domain</option>
+          <option value="to_www" {{if eq .In.WWWMode "to_www"}}selected{{end}}>domain → www</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="card stack">
+    <h2>2 · Altyapı</h2>
+    <label>Altyapı *
+      <select name="runtime" required hx-get="/sites/runtime-fields" hx-target="#runtime-fields" hx-trigger="change">
+        <option value="">Seçin…</option>
+        {{range .Runtimes}}<option value="{{.ID}}" {{if eq .ID $.Data.In.RuntimeID}}selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    <div id="runtime-fields" class="stack">{{with .Fields}}{{template "runtime-fields-inner" .}}{{end}}</div>
+  </section>
+
+  <section class="card stack">
+    <h2>3 · Kaynaklar</h2>
+    <div class="form-grid">
+      <label>Bellek sınırı (MB) <input type="number" name="memory_max_mb" min="64" max="65536" value="{{.In.MemoryMaxMB}}"></label>
+      <label>CPU kotası (%) <input type="number" name="cpu_quota_pct" min="5" max="1600" value="{{.In.CPUQuotaPct}}">
+        <span class="muted small">%100 = bir çekirdek.</span></label>
+      <label class="full">Kalıcı dizinler <input name="persistent_dirs" value="{{.In.PersistentDirs}}" placeholder="wwwroot/uploads, logs" spellcheck="false">
+        <span class="muted small">Deploy'lar arasında korunur (shared/ altına bağlanır). Virgülle ayırın.</span></label>
+    </div>
+  </section>
+
+  <div class="actions"><button type="submit" class="primary">Siteyi oluştur</button></div>
+</form>
+{{end}}
+{{end}}
+{{end}}

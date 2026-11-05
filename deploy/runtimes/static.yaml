@@ -1,0 +1,14 @@
+id: static
+displayName: "Statik (HTML)"
+type: static
+nginxTemplate: "static.conf.tpl"
+siteFields:
+  - key: index
+    label: "İndeks dosyası"
+    pattern: '^[A-Za-z0-9._-]+$'
+    default: "index.html"
+  - key: spa
+    label: "SPA modu (bilinmeyen yolları index'e yönlendir)"
+    pattern: '^(evet|hayır)$'
+    default: "hayır"
+info: "Zip içeriği doğrudan nginx tarafından sunulur."

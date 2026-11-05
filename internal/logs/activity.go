@@ -156,6 +156,7 @@ type Filter struct {
 	Source     string
 	TargetType string
 	TargetID   string
+	TargetIDs  []string // any of these target ids (e.g. a customer's sites)
 	Text       string
 	From, To   time.Time
 	BeforeID   int64 // keyset pagination
@@ -192,6 +193,12 @@ func (a *Activity) Query(ctx context.Context, f Filter) ([]Entry, error) {
 	}
 	if f.TargetID != "" {
 		add("target_id = ?", f.TargetID)
+	}
+	if len(f.TargetIDs) > 0 {
+		where = append(where, "target_id IN (?"+strings.Repeat(",?", len(f.TargetIDs)-1)+")")
+		for _, id := range f.TargetIDs {
+			args = append(args, id)
+		}
 	}
 	if f.Text != "" {
 		where = append(where, "(summary LIKE ? ESCAPE '\\' OR target_id LIKE ? ESCAPE '\\' OR error LIKE ? ESCAPE '\\')")

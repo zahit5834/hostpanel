@@ -21,9 +21,12 @@ import (
 	"hostpanel/internal/auth"
 	"hostpanel/internal/config"
 	"hostpanel/internal/crypto"
+	"hostpanel/internal/customers"
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
+	"hostpanel/internal/runtimes"
+	"hostpanel/internal/sites"
 	"hostpanel/internal/store"
 )
 
@@ -47,7 +50,22 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	a := auth.New(db, box, key)
 	a.SetAdminPassword(ctx, "admin", "correct-horse-1")
 	jm := jobs.NewManager(db, cfg.JobLogDir(), act, jobs.NewBroker(), log)
-	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: &exec.DryRun{Activity: act}, Log: log, Version: "test"}
+	cfg.ScriptsDir, cfg.TemplatesDir, cfg.RuntimesDir = "../../deploy/scripts", "../../deploy/templates", "../../deploy/runtimes"
+	runner := &exec.DryRun{Activity: act}
+	probe := fakeProbe{}
+	reg, err := runtimes.Load(cfg.RuntimesDir, probe, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range reg.All() {
+		p.Def().Versions.Available = "" // no network in tests
+	}
+	svc := &sites.Service{Store: sites.NewStore(db), Box: box, Runner: runner, Probe: probe, Runtimes: reg, Jobs: jm,
+		Activity: act, Log: log, ScriptsDir: cfg.ScriptsDir, TemplatesDir: cfg.TemplatesDir,
+		UploadDir: filepath.Join(dir, "uploads"), DryRun: true}
+	svc.Register()
+	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
+		Customers: customers.New(db), Sites: svc, Runtimes: reg}
 	s.RegisterJobs()
 	if err := s.Init(ctx); err != nil {
 		t.Fatal(err)
@@ -57,6 +75,16 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 	return ts, s
+}
+
+// fakeProbe answers read-only probes: .NET reports one installed ASP.NET Core runtime.
+type fakeProbe struct{}
+
+func (fakeProbe) Run(ctx context.Context, c exec.Cmd) (exec.Result, error) {
+	if strings.HasSuffix(c.Name, "dotnet") {
+		return exec.Result{Stdout: "Microsoft.AspNetCore.App 10.0.14 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\n"}, nil
+	}
+	return exec.Result{Stdout: "inactive\n"}, nil
 }
 
 func client() *http.Client {

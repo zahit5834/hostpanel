@@ -1,0 +1,44 @@
+{{define "content"}}
+<h1>Altyapılar</h1>
+{{with .Data}}
+<p class="muted small">Tanımlar <code>{{.Dir}}</code> altındaki YAML dosyalarından okunur; yeni bir altyapı eklemek için oraya dosya bırakıp paneli yeniden başlatın.</p>
+{{range .LoadErrors}}<div class="alert err">{{.}}</div>{{end}}
+{{range .Rows}}{{$def := .Def}}
+<section class="card">
+  <div class="card-head"><h2>{{$def.DisplayName}}</h2><span class="tag">{{$def.Type}}</span></div>
+  {{if eq $def.Type "proxy"}}
+  <div class="grid two">
+    <div class="table-wrap">
+      <h3>Kurulu sürümler</h3>
+      <table class="table">
+        <thead><tr><th>Sürüm</th><th class="right">Kullanan site</th><th></th></tr></thead>
+        <tbody>
+        {{range .Installed}}<tr><td><code>{{.Version}}</code></td><td class="right">{{.Sites}}</td><td class="right">
+          {{if eq .Sites 0}}<form method="post" action="/runtimes/{{$def.ID}}/remove" class="inline-form">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.Version}}">
+            <button type="submit" class="danger">Kaldır</button></form>{{else}}<span class="muted small">kullanımda</span>{{end}}
+        </td></tr>{{end}}
+        </tbody>
+      </table>
+      {{if not .Installed}}<p class="muted">Kurulu sürüm yok.</p>{{end}}
+    </div>
+    <div>
+      <h3>Kurulabilir sürümler</h3>
+      {{if .RemoteErr}}<p class="alert err small">Sürüm listesi alınamadı: {{.RemoteErr}}</p>{{end}}
+      {{if .Available}}
+      <form method="post" action="/runtimes/{{$def.ID}}/install" class="stack">
+        <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+        <select name="version">{{range .Available}}<option value="{{.Version}}">{{.Version}}{{if .Label}} · {{.Label}}{{end}}</option>{{end}}</select>
+        <div><button type="submit" class="primary">Kur</button></div>
+        <p class="muted small">Resmi dağıtımdan indirilir, sağlama toplamı doğrulanır.</p>
+      </form>
+      {{else if not .RemoteErr}}<p class="muted">Tüm güncel sürümler kurulu.</p>{{end}}
+    </div>
+  </div>
+  {{else}}
+  <p class="muted">Kurulum gerektirmez (nginx doğrudan sunar).</p>
+  {{end}}
+</section>
+{{end}}
+{{end}}
+{{end}}

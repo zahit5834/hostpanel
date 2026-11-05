@@ -1,0 +1,21 @@
+{{/* "runtime-fields" takes Page (.Data = web.runtimeFieldsData) for HTMX swaps;
+     "runtime-fields-inner" takes the runtimeFieldsData itself for embedding. */}}
+{{define "runtime-fields"}}{{template "runtime-fields-inner" .Data}}{{end}}
+
+{{define "runtime-fields-inner"}}
+{{with .Def}}{{if eq .Type "proxy"}}
+<label>Sürüm *
+  <select name="version" required>
+    {{range $.Installed}}<option value="{{.}}" {{if eq . $.Version}}selected{{end}}>{{.}}</option>{{end}}
+  </select>
+</label>
+{{if not $.Installed}}<p class="alert err">Bu altyapının kurulu sürümü yok. <a href="/runtimes">Altyapılar</a> sayfasından kurun.</p>{{end}}
+{{end}}
+{{range .SiteFields}}
+<label>{{.Label}}{{if .Required}} *{{end}}
+  <input name="field_{{.Key}}" value="{{with index $.Values .Key}}{{.}}{{else}}{{.Default}}{{end}}" placeholder="{{.Placeholder}}" {{if .Required}}required{{end}}>
+  {{if .Help}}<span class="muted small">{{.Help}}</span>{{end}}
+</label>
+{{end}}
+{{if .Info}}<div class="alert info small">{{.Info}}</div>{{end}}
+{{end}}{{end}}

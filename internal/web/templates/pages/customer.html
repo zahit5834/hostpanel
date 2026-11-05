@@ -1,0 +1,51 @@
+{{define "content"}}
+{{with .Data}}{{$c := .C}}
+<p><a href="/customers" class="small">← Müşteriler</a></p>
+<div class="card-head">
+  <h1>{{$c.Name}}</h1>
+  <div class="actions">
+    <a class="button" href="/customers/{{$c.ID}}/edit">Düzenle</a>
+    <a class="button primary" href="/sites/new?customer={{$c.ID}}">Site ekle</a>
+  </div>
+</div>
+<div class="grid two">
+<section class="card">
+  <h2>Bilgiler</h2>
+  <dl class="kv">
+    <dt>Firma</dt><dd>{{or $c.Company "—"}}</dd>
+    <dt>Telefon</dt><dd>{{or $c.Phone "—"}}</dd>
+    <dt>E-posta</dt><dd>{{if $c.Email}}<a href="mailto:{{$c.Email}}">{{$c.Email}}</a>{{else}}—{{end}}</dd>
+    <dt>Eklenme</dt><dd>{{datetime $c.CreatedAt}}</dd>
+  </dl>
+  {{if $c.Notes}}<h3>Notlar</h3><pre>{{$c.Notes}}</pre>{{end}}
+</section>
+<section class="card table-wrap">
+  <h2 class="pad">Siteler</h2>
+  <table class="table">
+    <thead><tr><th>Domain</th><th>Altyapı</th><th>Durum</th></tr></thead>
+    <tbody>
+    {{range .Sites}}<tr><td><a href="/sites/{{.ID}}">{{.Domain}}</a></td><td>{{.RuntimeID}} {{.RuntimeVersion}}</td><td>{{template "site-badge" .Status}}</td></tr>{{end}}
+    </tbody>
+  </table>
+  {{if not .Sites}}<p class="muted pad">Bu müşterinin sitesi yok.</p>{{end}}
+</section>
+</div>
+
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Son işlemler</h2><a class="small" href="/logs/activity">Tüm işlem geçmişi →</a></div>
+  <table class="table">
+    <thead><tr><th>Zaman</th><th>İşlem</th><th>Özet</th><th>Durum</th></tr></thead>
+    <tbody>
+    {{range .Recent}}<tr><td class="nowrap muted">{{datetime .TS}}</td><td><a href="/logs/activity?open={{.ID}}"><code>{{.Action}}</code></a></td><td>{{.Summary}}</td><td>{{template "badge" .Status}}</td></tr>{{end}}
+    </tbody>
+  </table>
+  {{if not .Recent}}<p class="muted pad">Kayıt yok.</p>{{end}}
+</section>
+
+<section class="card danger-zone">
+  <h2>Müşteriyi sil</h2>
+  {{if .Sites}}<p class="muted">Siteleri olan müşteri silinemez; önce sitelerini silin.</p>
+  {{else}}<button type="button" class="danger" hx-post="/customers/{{$c.ID}}/delete" hx-confirm="{{$c.Name}} silinsin mi?">Sil</button>{{end}}
+</section>
+{{end}}
+{{end}}

@@ -26,8 +26,9 @@
   </header>
   <nav class="sidebar" x-bind:class="openClass">
     <a href="/" class="{{if eq .Nav "dashboard"}}active{{end}}">Genel Bakış</a>
-    <span class="nav-soon">Müşteriler</span>
-    <span class="nav-soon">Siteler</span>
+    <a href="/customers" class="{{if eq .Nav "customers"}}active{{end}}">Müşteriler</a>
+    <a href="/sites" class="{{if eq .Nav "sites"}}active{{end}}">Siteler</a>
+    <a href="/runtimes" class="{{if eq .Nav "runtimes"}}active{{end}}">Altyapılar</a>
     <span class="nav-soon">SSL</span>
     <span class="nav-soon">Veritabanları</span>
     <span class="nav-soon">Yedekler</span>

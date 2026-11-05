@@ -1,0 +1,30 @@
+id: dotnet
+displayName: ".NET (ASP.NET Core)"
+type: proxy
+versions:
+  # Runtimes live side by side under /usr/share/dotnet; the app's
+  # runtimeconfig.json picks the one it targets.
+  list-command: ["/usr/share/dotnet/dotnet", "--list-runtimes"]
+  list-regex: '^Microsoft\.AspNetCore\.App (\d+\.\d+\.\d+)'
+  available: dotnet-releases
+  install-script: dotnet.sh
+startCommand: "/usr/share/dotnet/dotnet {{entryPoint}}"
+environment:
+  ASPNETCORE_URLS: "http://127.0.0.1:{{port}}"
+  ASPNETCORE_ENVIRONMENT: "Production"
+  DOTNET_ROOT: "/usr/share/dotnet"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+systemdTemplate: "proxy-service.service.tpl"
+nginxTemplate: "proxy.conf.tpl"
+siteFields:
+  - key: entryPoint
+    label: "Başlangıç DLL'i"
+    required: true
+    pattern: '^[A-Za-z0-9._-]+\.dll$'
+    placeholder: "MyApp.dll"
+    help: "dotnet publish çıktısındaki ana DLL (zip'in kök dizininde)."
+info: >-
+  Uygulama nginx arkasında çalışır. Program.cs içinde
+  app.UseForwardedHeaders(new ForwardedHeadersOptions { ForwardedHeaders =
+  ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto }) ekleyin;
+  aksi halde HTTPS yönlendirmeleri ve istemci IP'leri hatalı olur.

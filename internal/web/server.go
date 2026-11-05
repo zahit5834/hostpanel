@@ -17,9 +17,12 @@ import (
 
 	"hostpanel/internal/auth"
 	"hostpanel/internal/config"
+	"hostpanel/internal/customers"
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
+	"hostpanel/internal/runtimes"
+	"hostpanel/internal/sites"
 	"hostpanel/internal/store"
 )
 
@@ -36,6 +39,10 @@ type Server struct {
 	Runner   exec.Runner
 	Log      *slog.Logger
 	Version  string
+
+	Customers *customers.Store
+	Sites     *sites.Service
+	Runtimes  *runtimes.Registry
 
 	tpl       *renderer
 	allowlist atomic.Pointer[[]netip.Prefix]

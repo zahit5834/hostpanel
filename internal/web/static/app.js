@@ -54,6 +54,43 @@
       };
     });
 
+    // Deploy upload: show XHR upload progress (htmx fires htmx:xhr:progress on the form).
+    window.Alpine.data("upload", function () {
+      return {
+        active: false, pct: 0, label: "",
+        init: function () {
+          var self = this;
+          this.$el.addEventListener("htmx:xhr:progress", function (e) {
+            if (!e.detail.lengthComputable || !e.detail.total) return;
+            self.active = true;
+            self.pct = Math.round(e.detail.loaded * 100 / e.detail.total);
+            self.label = self.pct < 100 ? "Yükleniyor… %" + self.pct : "Yüklendi, deploy başlatılıyor…";
+          });
+        }
+      };
+    });
+
+    // Env editor: add/remove key-value rows. x-on passes the event to methods.
+    window.Alpine.data("envEditor", function () {
+      return {
+        add: function () {
+          var rows = this.$refs.rows;
+          var last = rows.lastElementChild;
+          if (!last) return;
+          var row = last.cloneNode(true);
+          row.querySelectorAll("input").forEach(function (i) { i.value = ""; });
+          rows.appendChild(row);
+          row.querySelector("input").focus();
+        },
+        remove: function (ev) {
+          var row = ev.target.closest(".env-row");
+          var rows = this.$refs.rows;
+          if (rows.children.length > 1) { row.remove(); return; }
+          row.querySelectorAll("input").forEach(function (i) { i.value = ""; });
+        }
+      };
+    });
+
     window.Alpine.data("copy", function () {
       return {
         label: "Kopyala",

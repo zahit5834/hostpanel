@@ -1,0 +1,17 @@
+{{define "content"}}
+{{with .Data}}
+<p><a href="{{if .ID}}/customers/{{.ID}}{{else}}/customers{{end}}" class="small">← Geri</a></p>
+<h1>{{if .ID}}Müşteriyi düzenle{{else}}Yeni müşteri{{end}}</h1>
+<form method="post" action="{{if .ID}}/customers/{{.ID}}{{else}}/customers{{end}}" class="card stack">
+  <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+  <div class="form-grid">
+    <label>Ad soyad * <input name="name" value="{{.Name}}" maxlength="200" required autofocus></label>
+    <label>Firma <input name="company" value="{{.Company}}" maxlength="200"></label>
+    <label>Telefon <input name="phone" type="tel" value="{{.Phone}}" maxlength="40"></label>
+    <label>E-posta <input name="email" type="email" value="{{.Email}}" maxlength="200"></label>
+    <label class="full">Notlar <textarea name="notes" rows="4" maxlength="4000">{{.Notes}}</textarea></label>
+  </div>
+  <div class="actions"><button type="submit" class="primary">Kaydet</button></div>
+</form>
+{{end}}
+{{end}}

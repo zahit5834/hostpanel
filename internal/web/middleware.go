@@ -146,7 +146,9 @@ func sameOrigin(r *http.Request) bool {
 
 func validCSRF(r *http.Request, want string) bool {
 	got := r.Header.Get("X-CSRF-Token")
-	if got == "" {
+	// Multipart uploads must send the header: parsing the body here would buffer
+	// the whole upload (memory/temp files) before the handler can stream it.
+	if got == "" && !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
 		got = r.PostFormValue("_csrf")
 	}
 	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1

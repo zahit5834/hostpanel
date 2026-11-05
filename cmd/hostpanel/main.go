@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"syscall"
@@ -20,9 +21,12 @@ import (
 	"hostpanel/internal/auth"
 	"hostpanel/internal/config"
 	"hostpanel/internal/crypto"
+	"hostpanel/internal/customers"
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
+	"hostpanel/internal/runtimes"
+	"hostpanel/internal/sites"
 	"hostpanel/internal/store"
 	"hostpanel/internal/web"
 )
@@ -161,7 +165,22 @@ func serve(args []string) error {
 		runner = &exec.DryRun{Log: log, Activity: activity}
 	}
 	jm := jobs.NewManager(a.db, cfg.JobLogDir(), activity, jobs.NewBroker(), log)
-	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version}
+	// probe runs read-only, unprivileged commands (dotnet --list-runtimes,
+	// systemctl is-active, journalctl) even in dry-run mode.
+	probe := &exec.Real{Log: log}
+	reg, err := runtimes.Load(cfg.RuntimesDir, probe, cfg.DryRun)
+	if err != nil {
+		return err
+	}
+	for _, e := range reg.Errors() {
+		log.Warn("runtime definition skipped", "err", e)
+	}
+	siteSvc := &sites.Service{Store: sites.NewStore(a.db), Box: a.box, Runner: runner, Probe: probe, Runtimes: reg,
+		Jobs: jm, Activity: activity, Log: log, ScriptsDir: cfg.ScriptsDir, TemplatesDir: cfg.TemplatesDir,
+		UploadDir: filepath.Join(cfg.DataDir, "uploads"), DryRun: cfg.DryRun}
+	siteSvc.Register()
+	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version,
+		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg}
 	srv.RegisterJobs()
 	if err := srv.Init(ctx); err != nil {
 		return err

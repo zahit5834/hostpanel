@@ -81,3 +81,107 @@ atomic_write() {
   chown "$owner" "$tmp"
   mv -f "$tmp" "$dest"
 }
+
+# ---------------------------------------------------------------------------
+# Site helpers (Faz 1)
+# ---------------------------------------------------------------------------
+
+# bash 5.2 expands '&' in ${var//pat/rep} replacements; we never want that.
+shopt -u patsub_replacement 2>/dev/null || true
+
+HP_ROOT=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")
+HP_TEMPLATES=${HP_TEMPLATES:-${HP_ROOT}/templates}
+SITES_ROOT=/var/www/sites
+ENV_DIR=/etc/hostpanel/env
+UPLOAD_DIR=/var/lib/hostpanel/uploads
+
+# validate_short NAME — site short name (site user is site_<short>).
+validate_short() {
+  [[ ${1:-} =~ ^[a-z][a-z0-9_]{0,23}$ ]] || die "geçersiz kısa ad: '${1:-}'"
+}
+
+# validate_site_user NAME — only panel-created site accounts.
+validate_site_user() {
+  [[ ${1:-} =~ ^site_[a-z][a-z0-9_]{0,23}$ ]] || die "geçersiz site kullanıcısı: '${1:-}'"
+}
+
+# validate_release NAME — YYYYMMDD-HHMMSS (00000000-000000 = placeholder).
+validate_release() {
+  [[ ${1:-} =~ ^[0-9]{8}-[0-9]{6}$ ]] || die "geçersiz sürüm adı: '${1:-}'"
+}
+
+# validate_reldir PATH — relative dir like "wwwroot/uploads"; no "..", no dot-start segments.
+validate_reldir() {
+  local d=${1:-}
+  [[ $d =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$ && $d != *..* ]] || die "geçersiz dizin: '${d}'"
+}
+
+# site_dir DOMAIN — validated site root that must not be a symlink.
+site_dir() {
+  validate_domain "$1"
+  local d=${SITES_ROOT}/$1
+  [[ ! -L $d ]] || die "site dizini symlink olamaz: ${d}"
+  printf '%s\n' "$d"
+}
+
+# conf_directives FILE — prints "name<TAB>firstarg" per nginx statement.
+# Statements are split at every ; { } (even inside quotes/comments): this can
+# only create extra statements, never hide one. Quotes and backslashes are
+# stripped from tokens. Mirrors confDirectives() in internal/sites/validate.go.
+conf_directives() {
+  awk 'BEGIN { RS = "[;{}]"; q = "[\"\047\\\\]" }
+  {
+    rec = $0
+    while (1) {
+      sub(/^[ \t\r\n]+/, "", rec)
+      if (rec == "") break
+      tok = rec; sub(/[ \t\r\n].*$/, "", tok); gsub(q, "", tok)
+      if (substr(tok, 1, 1) != "#") break
+      i = index(rec, "\n"); if (i == 0) rec = ""; else rec = substr(rec, i + 1)
+    }
+    if (rec == "") next
+    n = split(rec, f, /[ \t\r\n]+/)
+    name = f[1]; arg = (n > 1) ? f[2] : ""
+    gsub(q, "", name); gsub(q, "", arg)
+    print name "\t" arg
+  }' "$1"
+}
+
+# validate_nginx_conf FILE DOMAIN — reject directives that would make the root
+# nginx master load code or open arbitrary files (logs, temp/cache paths, includes).
+validate_nginx_conf() {
+  local file=$1 domain=$2 name arg
+  local forbidden='^(load_module|include|user|env|pid|daemon|master_process|lock_file|ssl_engine|working_directory|thread_pool|worker_[a-z_]+|[a-z_]*_temp_path|[a-z_]*_cache_path|perl[a-z_]*|lua[a-z_]*|js_[a-z_]+)$'
+  while IFS=$'\t' read -r name arg; do
+    [[ $name =~ $forbidden ]] && die "nginx: izin verilmeyen direktif: ${name}"
+    case $name in
+      access_log)
+        [[ $arg == off || $arg == "/var/log/nginx/hp-${domain}.access.log" ]] || die "nginx: access_log yalnızca site log dosyasına yazabilir" ;;
+      error_log)
+        [[ $arg == "/var/log/nginx/hp-${domain}.error.log" ]] || die "nginx: error_log yalnızca site log dosyasına yazabilir" ;;
+    esac
+  done < <(conf_directives "$file")
+  return 0
+}
+
+# read_stdin_limited DEST MAXBYTES — copy stdin to DEST, failing if larger than MAXBYTES.
+read_stdin_limited() {
+  local dest=$1 max=$2
+  head -c "$((max + 1))" >"$dest"
+  (( $(stat -c %s "$dest") <= max )) || die "girdi çok büyük (en fazla ${max} bayt)"
+}
+
+# env_line KEY VALUE — one systemd EnvironmentFile line that keeps VALUE literal:
+# single-quoted (no processing at all), or double-quoted with \ " $ escaped
+# when the value itself contains a single quote.
+env_line() {
+  local key=$1 val=$2
+  if [[ $val != *"'"* ]]; then
+    printf "%s='%s'" "$key" "$val"
+  else
+    val=${val//\\/\\\\}
+    val=${val//\"/\\\"}
+    val=${val//\$/\\\$}
+    printf '%s="%s"' "$key" "$val"
+  fi
+}

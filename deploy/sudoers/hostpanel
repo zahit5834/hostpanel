@@ -12,6 +12,15 @@ Defaults:hostpanel !requiretty, env_reset, !lecture
 Defaults:hostpanel secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 Cmnd_Alias HOSTPANEL_HELPERS = \
-    /opt/hostpanel/scripts/hp-selftest.sh
+    /opt/hostpanel/scripts/hp-selftest.sh, \
+    /opt/hostpanel/scripts/hp-site-user.sh, \
+    /opt/hostpanel/scripts/hp-site-dirs.sh, \
+    /opt/hostpanel/scripts/hp-site-unit.sh, \
+    /opt/hostpanel/scripts/hp-site-service.sh, \
+    /opt/hostpanel/scripts/hp-site-env.sh, \
+    /opt/hostpanel/scripts/hp-site-deploy.sh, \
+    /opt/hostpanel/scripts/hp-site-archive.sh, \
+    /opt/hostpanel/scripts/hp-nginx-site.sh, \
+    /opt/hostpanel/scripts/hp-runtime.sh
 
 hostpanel ALL=(root) NOPASSWD: HOSTPANEL_HELPERS

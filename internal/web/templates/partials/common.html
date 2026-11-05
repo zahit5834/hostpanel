@@ -7,3 +7,4 @@
   <a href="/logs/system" class="{{if eq . "system"}}active{{end}}">Sistem Logları</a>
 </div>
 {{end}}
+{{define "site-badge"}}<span class="badge st-{{.}}">{{siteStatus .}}</span>{{end}}

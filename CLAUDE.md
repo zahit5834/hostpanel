@@ -5,8 +5,8 @@ Tek admin için, Ubuntu 24.04 üzerinde müşteri sitelerini (ASP.NET Core, Node
 ## Kaynak bütçesi (zorunlu)
 | Metrik | Hedef | Son ölçüm |
 |---|---|---|
-| Boşta RSS | < 30 MB | **18.8 MB** (Faz 0, giriş + iş sonrası 60 sn boşta; RssAnon 5.3 MB, RssFile 13.5 MB) |
-| Binary | < 30 MB | **15 MB** amd64 / 14 MB arm64 (stripped, her şey gömülü) |
+| Boşta RSS | < 30 MB | **24.0 MB** (Faz 1, dry-run akışı: 2 site, 3 deploy, rollback, silme + 60 sn boşta; RssAnon 8.8 MB, RssFile 15.2 MB). Faz 0: 18.8 MB |
+| Binary | < 30 MB | **16 MB** amd64 / 15 MB arm64 (stripped, her şey gömülü) |
 | Boşta CPU | ~%0 | %0.0 (polling yok; tek timer: günlük bakım) |
 | CGO | kapalı | `CGO_ENABLED=0`, statik ELF |
 
@@ -38,8 +38,13 @@ internal/logs/        Activity log (Record/Begin/Finish/Query), maskeleme, TailL
 internal/jobs/        Job kuyruğu + worker, job log dosyaları, Broker (SSE pub/sub)
 internal/auth/        argon2id, oturumlar, TOTP, kurtarma kodları, rate limit
 internal/system/      /proc + statfs metrikleri
+internal/customers/   müşteri CRUD (arama Go'da: Türkçe büyük/küçük harf)
+internal/runtimes/    runtime YAML tanımları (Provider arayüzü), kurulu sürüm tespiti, resmi sürüm listeleri (1 sa cache)
+internal/sites/       site iş mantığı: doğrulama, port, nginx render+doğrulama, saga, create/deploy/ops/env/settings/delete job'ları
 internal/web/         server, middleware, handler'lar, templates/ (layout + pages + partials), static/
-deploy/scripts/       root helper script'leri (hp-*.sh) + lib.sh (doğrulayıcılar) + test_lib.sh
+deploy/scripts/       root helper script'leri (hp-*.sh) + lib.sh (doğrulayıcılar) + test_lib.sh; runtimes/<id>.sh kurulum alt script'leri
+deploy/runtimes/      dotnet.yaml, node.yaml, static.yaml (prod: /opt/hostpanel/runtimes)
+deploy/templates/     nginx/*.conf.tpl (Go text/template), systemd/*.service.tpl (root script doldurur), pages/ (yakında/503/devre dışı)
 deploy/sudoers/       /etc/sudoers.d/hostpanel (script'ler tek tek listelenir)
 deploy/systemd/       hostpanel.service
 deploy/config.example.yaml
@@ -53,6 +58,10 @@ Sunucu düzeni: `PROMPT.md` §5 (`/opt/hostpanel`, `/etc/hostpanel`, `/var/lib/h
 - **Job'lar:** `Manager.Register(kind, Handler)` → `Submit(Spec)`. Handler `*jobs.Log`'a yazar (io.Writer; `exec.Cmd.Output` olarak verilebilir), `Progress(p)` çağırır, ctx iptaline uyar. Açılışta yarım kalan işler `failed` yapılır.
   - **Kural:** job params maskeli saklanır → handler'lara asla gizli bilgi param olarak verilmez; handler gizliyi kendisi (DB'den, id ile) yükler. Bu sayede "yeniden dene" güvenlidir.
 - **SSE:** önce dosyadan replay, sonra broker; event id = satır no (Last-Event-ID ile tekrarsız yeniden bağlanma). Yavaş abone düşürülür, bağlantı r.Context() ile kapanır; `sse-close="done"`.
+- **Siteler:** her site = `site_<short>` Linux kullanıcısı + `/var/www/sites/<domain>/{releases,shared,current→releases/X}` (2750 site_x:www-data) + (proxy ise) `hp-site-<short>.service` + `/etc/nginx/sites-*/hp-<domain>.conf` + `/etc/hostpanel/env/<domain>.env`. Port 5000–5999 (DB + `/proc/net/tcp`). Durum makinesi: provisioning → awaiting_deploy → running/stopped/maintenance/disabled/error; nginx modu duruma göre (`sites.ModeFor`).
+- **Create/Delete saga:** adım + telafi (`saga.go`); create'te hata → yapılanlar ters sırayla geri alınır + DB satırı silinir. Delete önce arşivler (`/var/backups/hostpanel/<domain>/`), sonra adımlar best-effort.
+- **Deploy:** upload stream → `uploads/upload-*.zip` → job: extract (site kullanıcısı olarak) → activate (atomik symlink) → restart → health check (30 sn, <500) → başarısızsa önceki sürüme otomatik dönüş → prune (son 5). Rollback aynı yolu kullanır.
+- **Runtime ekleme:** `deploy/runtimes/<id>.yaml` (+ gerekiyorsa `deploy/scripts/runtimes/<id>.sh` ve `hp-site-unit.sh` exec allowlist'i). `type: proxy|static` (fastcgi = PHP, Faz 5).
 - **Root işlemleri:** yalnızca `exec.Helper(cfg.ScriptsDir, "hp-<x>.sh", args...)`. Yeni helper: `deploy/scripts/hp-x.sh` (`source lib.sh`, `require_root`, tüm argümanları `validate_*` ile doğrula) + `deploy/sudoers/hostpanel` listesine ekle (`make check-sudoers`).
 
 ## Kod kuralları
@@ -90,6 +99,11 @@ Planlanan (ilgili fazda eklenecek): `robfig/cron/v3` (Faz 4 yedek planları), `m
 - **IP allowlist:** mevcut IP'yi dışlayan liste kaydedilmez; loopback (SSH tüneli) her zaman izinli.
 - **X-Real-IP** yalnızca `trust_proxy: true` ve bağlantı 127.0.0.1'den geliyorsa kabul edilir.
 - **Gizli bilgiler:** AES-256-GCM (`crypto.Box`), master key 600. Log/params maskeleme: `logs.IsSensitiveKey` (password, secret, token, key, connection string…) + `Cmd.Secrets` literal maskesi.
+- **systemd unit'ini root script üretir** (`hp-site-unit.sh`): panel yalnızca doğrulanmış argümanlar verir; argv[0] allowlist (`/usr/share/dotnet/dotnet`, `/opt/node/vX.Y.Z/bin/node`), diğer argv `^[A-Za-z0-9._/@:=,+-]+$`, `..` yok. Panel ele geçirilse bile root'a serbest unit içeriği yazdıramaz. Site unit'leri sıkı: `NoNewPrivileges`, `ProtectSystem=strict`, `ReadWritePaths=<site dizini>`, `MemoryMax`, `CPUQuota`.
+- **nginx config'ini panel üretir ama root script içerik doğrular** (`validate_nginx_conf`, Go'da `sites.ValidateConf` ile aynı kural; ifade bazlı `;{}` ayrıştırma): `include`/`load_module`/`*_temp_path`/perl/lua/js yasak, `*_log` yalnızca `/var/log/nginx/hp-<domain>.(access|error).log` (root master'a keyfi dosya açtırılamaz). Yaz → `nginx -t` → hata ise eski dosya geri yüklenir.
+- **Zip site kullanıcısı olarak açılır** (`runuser`): zip-slip/symlink en fazla o kullanıcının yetkisinde kalır.
+- **Env dosyası** root:root 600; değerler `env_line` ile tırnaklanır (tek tırnak, ya da `\ " $` kaçışlı çift tırnak). DB'de AES-GCM; activity diff'inde yalnızca anahtar adları. Runtime'ın kendi değişkenleri (ASPNETCORE_URLS, PORT…) kullanıcınınkileri ezer ve kullanıcı tarafından girilemez.
+- **Upload:** multipart gövde `_csrf` için parse edilmez → `X-CSRF-Token` başlığı zorunlu; 1 GiB sınır, PK imzası kontrolü, okuma süresi 1 sa'e uzatılır (yalnızca bu istekte).
 - **Let's Encrypt (Faz 2):** webroot yöntemi — nginx config'lerini yalnızca panel şablonları yazar; `--nginx` eklentisi config'i kendisi değiştirip geri alma mantığını bozar.
 
 ## Log rotasyonu
@@ -97,7 +111,7 @@ Planlanan (ilgili fazda eklenecek): `robfig/cron/v3` (Faz 4 yedek planları), `m
 
 ## Faz durumu
 - [x] **Faz 0 — İskelet** (2026-11-05): modül/dizinler, config, SQLite+migration, auth+2FA+CSRF+rate limit+allowlist, CommandRunner (+dry-run), AES-GCM, Log Merkezi (işlem geçmişi, iş logları + SSE, sistem logları: panel/auth), helper script + sudoers altyapısı, systemd unit.
-- [ ] Faz 1 — Site çekirdeği
+- [x] **Faz 1 — Site çekirdeği** (2026-11-05): müşteriler, runtime YAML sistemi (.NET/Node/statik + sürüm kur/kaldır), site sihirbazı, başlat/durdur/restart/bakım/devre dışı/sil, nginx + systemd şablonları, zip deploy + otomatik geri dönüş + rollback, ortam değişkenleri (şifreli), site ayarları (nginx diff), site log sekmesi (işlem geçmişi/journal/nginx).
 - [ ] Faz 2 — SSL
 - [ ] Faz 3 — Veritabanı
 - [ ] Faz 4 — Yedekleme
@@ -111,6 +125,22 @@ Faz 0:
 - [ ] `sudo deploy/scripts/hp-selftest.sh ping` (gerçek sudo zinciri)
 - [ ] Tarayıcı (SSH tüneli `-L 8080:127.0.0.1:8080`): giriş → 2FA kur (QR) → çıkış/giriş TOTP ve kurtarma kodu → öz test işi canlı akış + iptal → İşlem Geçmişi kayıtları → tema ve mobil menü
 
+Faz 1 (sunucuda nginx/dotnet/node yok; dry-run ile geliştirildi):
+- [ ] `sudo apt install -y nginx unzip zstd`; script'ler/şablonlar `/opt/hostpanel/{scripts,templates,runtimes}` altına root:root kopyalanmalı (Faz 6 install.sh; şimdilik elle). `hostpanel-maps.conf` ilk site kurulumunda `/etc/nginx/conf.d/`'ye otomatik konur; hata sayfaları `/opt/hostpanel/templates/pages/`'den sunulur (www-data okuyabilmeli). `/var/www/letsencrypt` Faz 2'de.
+- [ ] `sudo visudo -cf deploy/sudoers/hostpanel` (10 script)
+- [ ] `config.yaml`'da `dry_run: false` ile panel → Altyapılar: .NET 10 ve Node 24 kur (sha512/sha256 doğrulaması job logunda)
+- [ ] .NET 10 site: sihirbaz → `dotnet publish` zip'i yükle → health check → `curl -H 'Host: <domain>' http://127.0.0.1/`; `UseForwardedHeaders` bilgi kutusu
+- [ ] Node site (entryPoint `server.js`) + statik site (SPA açık/kapalı)
+- [ ] Bozuk sürüm yükle (açılışta çöken) → otomatik geri dönüş; elle rollback; 6+ deploy sonrası yalnızca 5 sürüm kalmalı
+- [ ] Durdur → 503 sayfası; bakım modu; devre dışı; tekrar etkinleştir
+- [ ] Env değerleri `$`, `"`, `'`, boşluk içersin → uygulamada aynen okunmalı; `/etc/hostpanel/env/*.env` 600 root
+- [ ] Ayarlar → özel snippet'e bilerek geçerli ama nginx'in reddedeceği direktif (örn. `proxy_read_timeout abc;`) → `nginx -t` hatası, eski config geri yüklenmeli, site çalışmaya devam etmeli
+- [ ] Kalıcı dizin (`wwwroot/uploads`) deploy'lar arasında korunuyor mu
+- [ ] Site sil → `/var/backups/hostpanel/<domain>/pre-delete-*.tar.zst` oluştu, kullanıcı/dizin/unit/nginx temizlendi
+- [ ] Panel kullanıcısı `adm` + `systemd-journal` gruplarında olmalı (nginx/journal log sekmesi; Faz 6 install.sh)
+
 ## Açık konular
 - Modül yolu geçici `hostpanel`; GitHub kullanıcı adı gelince `github.com/<ad>/hostpanel` (Faz 6). `deploy/systemd/hostpanel.service` içindeki `OWNER` da.
 - Sunucuda `make` ve `shellcheck` yok (`sudo apt install make shellcheck`).
+- Dry-run'da kurulu runtime yoksa resmi listedeki sürümler "kurulu" sayılır (geliştirme kolaylığı); bu yüzden dev'de Altyapılar sayfasında "Kur" düğmesi görünmez.
+- `force_https`/HSTS ayarları saklanıyor, sertifika gelince (Faz 2) uygulanacak.

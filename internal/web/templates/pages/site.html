@@ -1,0 +1,220 @@
+{{define "content"}}
+{{with .Data}}{{$s := .Site}}{{$proxy := eq .Def.Type "proxy"}}
+<p><a href="/sites" class="small">← Siteler</a></p>
+<div class="card-head">
+  <h1>{{$s.Domain}} {{template "site-badge" $s.Status}}</h1>
+  <div class="muted small">{{.Def.DisplayName}}{{if $s.RuntimeVersion}} {{$s.RuntimeVersion}}{{end}} · <a href="/customers/{{$s.CustomerID}}">{{$s.CustomerName}}</a></div>
+</div>
+<div class="tabs">
+  <a href="/sites/{{$s.ID}}" class="{{if eq .Tab "overview"}}active{{end}}">Genel</a>
+  <a href="/sites/{{$s.ID}}?tab=deploy" class="{{if eq .Tab "deploy"}}active{{end}}">Deploy</a>
+  {{if $proxy}}<a href="/sites/{{$s.ID}}?tab=env" class="{{if eq .Tab "env"}}active{{end}}">Ortam Değişkenleri</a>{{end}}
+  <a href="/sites/{{$s.ID}}?tab=settings" class="{{if eq .Tab "settings"}}active{{end}}">Ayarlar</a>
+  <a href="/sites/{{$s.ID}}?tab=logs" class="{{if eq .Tab "logs"}}active{{end}}">Loglar</a>
+</div>
+
+{{if .JobID}}{{template "job-console" .JobID}}{{end}}
+
+{{if eq .Tab "overview"}}{{template "site-overview" $}}
+{{else if eq .Tab "deploy"}}{{template "site-deploy" $}}
+{{else if eq .Tab "env"}}{{template "site-env" $}}
+{{else if eq .Tab "settings"}}{{template "site-settings" $}}
+{{else if eq .Tab "logs"}}{{template "site-logs-tab" $}}{{end}}
+{{end}}
+{{end}}
+
+{{define "op"}}{{/* list: page, op, label, class, confirm */}}
+<form method="post" action="/sites/{{(index . 0).Data.Site.ID}}/op/{{index . 1}}">
+  <input type="hidden" name="_csrf" value="{{(index . 0).CSRF}}">
+  <button type="submit" class="{{index . 3}}">{{index . 2}}</button>
+</form>
+{{end}}
+
+{{define "site-overview"}}{{$d := .Data}}{{$s := $d.Site}}{{$proxy := eq $d.Def.Type "proxy"}}
+<div class="grid two">
+<section class="card">
+  <h2>Durum</h2>
+  <dl class="kv">
+    <dt>Adresler</dt><dd><a href="http://{{$s.Domain}}" rel="noopener" target="_blank">{{$s.Domain}}</a>{{if ne $s.WWWMode "none"}} <span class="tag">www: {{if eq $s.WWWMode "to_www"}}domain → www{{else}}www → domain{{end}}</span>{{end}}{{range $s.Aliases}}<br>{{.}}{{end}}</dd>
+    <dt>Aktif sürüm</dt><dd>{{if eq $d.Active "00000000-000000"}}<span class="muted">henüz deploy yok (“yakında” sayfası)</span>{{else}}<code>{{$d.Active}}</code>{{end}}</dd>
+    {{if $proxy}}
+    <dt>Servis</dt><dd><code>{{$s.Unit}}</code> · {{if eq $d.Unit "active"}}<span class="badge success">active</span>{{else if $d.Unit}}<span class="badge">{{$d.Unit}}</span>{{else}}<span class="muted">bilinmiyor</span>{{end}}</dd>
+    <dt>Port</dt><dd>127.0.0.1:{{$s.Port}}</dd>
+    <dt>Limitler</dt><dd>{{$s.MemoryMaxMB}} MB bellek · %{{$s.CPUQuotaPct}} CPU</dd>
+    {{end}}
+    <dt>Linux kullanıcısı</dt><dd><code>{{$s.User}}</code></dd>
+    <dt>Dizin</dt><dd><code>{{$s.Dir}}</code></dd>
+    <dt>Oluşturma</dt><dd>{{datetime $s.CreatedAt}}</dd>
+  </dl>
+</section>
+<section class="card stack">
+  <h2>İşlemler</h2>
+  <div class="ops">
+    {{if or (eq $s.Status "stopped") (eq $s.Status "error")}}{{template "op" list $ "start" "Başlat" "primary"}}{{end}}
+    {{if and $proxy (or (eq $s.Status "running") (eq $s.Status "error"))}}{{template "op" list $ "restart" "Yeniden başlat" ""}}{{end}}
+    {{if eq $s.Status "running"}}{{template "op" list $ "stop" "Durdur" ""}}{{template "op" list $ "maintenance-on" "Bakım modunu aç" ""}}{{end}}
+    {{if eq $s.Status "maintenance"}}{{template "op" list $ "maintenance-off" "Bakım modunu kapat" "primary"}}{{end}}
+    {{if eq $s.Status "disabled"}}{{template "op" list $ "enable" "Etkinleştir" "primary"}}
+    {{else if ne $s.Status "deleting"}}{{template "op" list $ "disable" "Devre dışı bırak" "danger"}}{{end}}
+  </div>
+  {{if eq $s.Status "awaiting_deploy"}}<p class="muted">Site hazır; <a href="/sites/{{$s.ID}}?tab=deploy">Deploy</a> sekmesinden ilk sürümü yükleyin.</p>{{end}}
+  <details>
+    <summary>Gelişmiş</summary>
+    <div class="ops pad">
+      {{template "op" list $ "nginx" "nginx yapılandırmasını yeniden uygula" ""}}
+      {{if $proxy}}{{template "op" list $ "service" "systemd servisini yeniden oluştur" ""}}{{end}}
+    </div>
+  </details>
+  {{if $d.Def.Info}}<div class="alert info small">{{$d.Def.Info}}</div>{{end}}
+</section>
+</div>
+
+<section class="card danger-zone">
+  <h2>Siteyi sil</h2>
+  <p class="muted">Silmeden önce site dizini <code>/var/backups/hostpanel/{{$s.Domain}}/</code> altına arşivlenir. Ardından servis, nginx yapılandırması, ortam değişkenleri, Linux kullanıcısı ve dosyalar kaldırılır.</p>
+  <form method="post" action="/sites/{{$s.ID}}/delete" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Onaylamak için domaini yazın: <strong>{{$s.Domain}}</strong>
+      <input name="confirm" autocomplete="off" spellcheck="false" required></label>
+    <label class="check"><input type="checkbox" disabled> Veritabanlarını da sil <span class="muted small">(Faz 3)</span></label>
+    <div><button type="submit" class="danger">Siteyi kalıcı olarak sil</button></div>
+  </form>
+</section>
+{{end}}
+
+{{define "site-deploy"}}{{$d := .Data}}{{$s := $d.Site}}
+<section class="card stack">
+  <h2>Yeni sürüm yükle</h2>
+  <p class="muted small">Zip'in kökü uygulamanın kökü olmalı{{if eq $d.Def.ID "dotnet"}} (<code>dotnet publish</code> çıktısı){{end}}. Kalıcı dizinler ({{range $i, $p := $s.PersistentDirs}}{{if $i}}, {{end}}<code>{{$p}}</code>{{else}}yok{{end}}) korunur; son 5 sürüm saklanır.{{if eq $d.Def.Type "proxy"}} Yeni sürüm sağlık kontrolünden (<code>{{$s.HealthPath}}</code>) geçemezse önceki sürüme otomatik dönülür.{{end}}</p>
+  <form hx-post="/sites/{{$s.ID}}/deploy" hx-encoding="multipart/form-data" hx-disabled-elt="find button" x-data="upload" class="stack">
+    <input type="file" name="zip" accept=".zip,application/zip" required>
+    <progress class="upload-progress" max="100" value="0" x-show="active" x-bind:value="pct"></progress>
+    <div><button type="submit" class="primary">Yükle ve deploy et</button> <span class="muted small" x-text="label"></span></div>
+  </form>
+</section>
+<section class="card table-wrap">
+  <h2 class="pad">Sürümler</h2>
+  <table class="table">
+    <thead><tr><th>Sürüm</th><th>Boyut</th><th>Durum</th><th>İş</th><th></th></tr></thead>
+    <tbody>
+    {{range $d.Releases}}{{if ne .Name "00000000-000000"}}
+      <tr>
+        <td><code>{{.Name}}</code></td>
+        <td class="nowrap">{{if .Size}}{{kb .Size}}{{end}}</td>
+        <td>{{template "site-badge" .Status}}</td>
+        <td>{{if .JobID}}<a href="/logs/jobs/{{.JobID}}">#{{.JobID}}</a>{{end}}</td>
+        <td class="right">{{if or (eq .Status "previous") (eq .Status "failed")}}
+          <form method="post" action="/sites/{{$s.ID}}/rollback" class="inline-form">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="release" value="{{.Name}}">
+            <button type="submit">Bu sürüme dön</button>
+          </form>{{end}}</td>
+      </tr>
+    {{end}}{{end}}
+    </tbody>
+  </table>
+  {{if le (len $d.Releases) 1}}<p class="muted pad">Henüz deploy edilmiş sürüm yok.</p>{{end}}
+</section>
+{{end}}
+
+{{define "site-env"}}{{$d := .Data}}{{$s := $d.Site}}
+<form method="post" action="/sites/{{$s.ID}}/env" class="card stack" x-data="envEditor">
+  <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+  <h2>Ortam değişkenleri</h2>
+  <p class="muted small">Değerler şifreli saklanır, loglarda görünmez. Altyapının kendi değişkenleri ({{range $k, $v := $d.Def.Environment}}<code>{{$k}}</code> {{end}}) ayrıca eklenir ve öncelikli olur.</p>
+  <div x-ref="rows">
+    {{range $d.Env}}<div class="env-row"><input name="key" value="{{.Key}}" spellcheck="false" pattern="[A-Za-z_][A-Za-z0-9_]*"><input name="value" value="{{.Value}}" spellcheck="false" autocomplete="off"><button type="button" x-on:click="remove">Sil</button></div>{{end}}
+    <div class="env-row"><input name="key" placeholder="ANAHTAR" spellcheck="false" pattern="[A-Za-z_][A-Za-z0-9_]*"><input name="value" placeholder="değer" spellcheck="false" autocomplete="off"><button type="button" x-on:click="remove">Sil</button></div>
+  </div>
+  <div><button type="button" x-on:click="add">Satır ekle</button></div>
+  <details>
+    <summary>Toplu ekle (KEY=VALUE satırları)</summary>
+    <textarea name="bulk" rows="6" placeholder="ConnectionStrings__Default=Server=...&#10;FEATURE_X=1" spellcheck="false"></textarea>
+  </details>
+  <div class="actions"><button type="submit" class="primary">Kaydet</button></div>
+</form>
+{{end}}
+
+{{define "site-settings"}}{{$d := .Data}}{{$s := $d.Site}}{{$proxy := eq $d.Def.Type "proxy"}}
+<form method="post" action="/sites/{{$s.ID}}/settings" class="stack">
+  <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+  <section class="card stack">
+    <h2>Domain</h2>
+    <div class="form-grid">
+      <label>Ek alan adları <input name="aliases" value="{{range $i, $a := $s.Aliases}}{{if $i}}, {{end}}{{$a}}{{end}}" spellcheck="false"></label>
+      <label>www yönlendirmesi
+        <select name="www_mode">
+          <option value="none" {{if eq $s.WWWMode "none"}}selected{{end}}>Yok</option>
+          <option value="to_apex" {{if eq $s.WWWMode "to_apex"}}selected{{end}}>www → domain</option>
+          <option value="to_www" {{if eq $s.WWWMode "to_www"}}selected{{end}}>domain → www</option>
+        </select>
+      </label>
+    </div>
+  </section>
+  <section class="card stack">
+    <h2>Altyapı</h2>
+    {{if $d.Runtime.Def}}{{template "runtime-fields-inner" $d.Runtime}}{{else}}<p class="alert err">Altyapı tanımı bulunamadı: {{$s.RuntimeID}}</p>{{end}}
+    <div class="form-grid">
+      {{if $proxy}}
+      <label>Bellek sınırı (MB) <input type="number" name="memory_max_mb" min="64" max="65536" value="{{$s.MemoryMaxMB}}"></label>
+      <label>CPU kotası (%) <input type="number" name="cpu_quota_pct" min="5" max="1600" value="{{$s.CPUQuotaPct}}"></label>
+      <label>Sağlık kontrolü yolu <input name="health_path" value="{{$s.HealthPath}}" spellcheck="false"></label>
+      {{end}}
+      <label>Kalıcı dizinler <input name="persistent_dirs" value="{{range $i, $p := $s.PersistentDirs}}{{if $i}}, {{end}}{{$p}}{{end}}" spellcheck="false"></label>
+    </div>
+  </section>
+  <section class="card stack">
+    <h2>nginx</h2>
+    <div class="form-grid">
+      <label>Maks. yükleme boyutu (MB) <input type="number" name="max_upload_mb" min="1" max="10240" value="{{$s.MaxUploadMB}}"></label>
+      <label class="check"><input type="checkbox" name="gzip" value="1" {{if $s.Gzip}}checked{{end}}> gzip sıkıştırma</label>
+      <label class="check"><input type="checkbox" name="force_https" value="1" {{if $s.ForceHTTPS}}checked{{end}}> HTTPS'e yönlendir <span class="muted small">(SSL kurulunca, Faz 2)</span></label>
+      <label class="check"><input type="checkbox" name="hsts" value="1" {{if $s.HSTS}}checked{{end}}> HSTS <span class="muted small">(SSL kurulunca, Faz 2)</span></label>
+      <label class="full">Özel nginx direktifleri (server bloğuna eklenir)
+        <textarea name="custom_snippet" rows="6" spellcheck="false" placeholder="location /api/ { proxy_read_timeout 300s; }">{{$s.CustomSnippet}}</textarea>
+        <span class="muted small">include, load_module, *_log, *_temp_path, lua/perl/js direktifleri reddedilir. Kayıttan önce <code>nginx -t</code> ile denenir; başarısızsa eski yapılandırma geri yüklenir.</span>
+      </label>
+    </div>
+  </section>
+  <div class="actions"><button type="submit" class="primary">Kaydet</button></div>
+</form>
+<details class="card">
+  <summary>Üretilen nginx yapılandırması</summary>
+  <pre class="conf">{{$d.Nginx}}</pre>
+</details>
+{{end}}
+
+{{define "site-logs-tab"}}{{$d := .Data}}
+<form class="filters" hx-get="/sites/{{$d.Site.ID}}" hx-target="#site-logs" hx-swap="outerHTML" hx-trigger="change">
+  <input type="hidden" name="tab" value="logs"><input type="hidden" name="part" value="logs">
+  <select name="source">
+    <option value="activity" {{if eq $d.LogSource "activity"}}selected{{end}}>İşlem geçmişi</option>
+    {{if eq $d.Def.Type "proxy"}}<option value="journal" {{if eq $d.LogSource "journal"}}selected{{end}}>Uygulama (journal)</option>{{end}}
+    <option value="access" {{if eq $d.LogSource "access"}}selected{{end}}>nginx erişim</option>
+    <option value="error" {{if eq $d.LogSource "error"}}selected{{end}}>nginx hata</option>
+  </select>
+  <select name="n">
+    {{range $n := list 100 500 1000}}<option value="{{$n}}" {{if eq $d.LogN $n}}selected{{end}}>Son {{$n}} satır</option>{{end}}
+  </select>
+  <button type="button" hx-get="/sites/{{$d.Site.ID}}" hx-include="closest form" hx-target="#site-logs" hx-swap="outerHTML">Yenile</button>
+</form>
+{{template "site-logs" .}}
+{{end}}
+
+{{define "site-logs"}}{{$d := .Data}}
+<div id="site-logs">
+{{if eq $d.LogSource "activity"}}
+  <div class="card table-wrap">
+    <table class="table">
+      <thead><tr><th>Zaman</th><th>İşlem</th><th>Özet</th><th>Kaynak</th><th>Durum</th></tr></thead>
+      <tbody>
+      {{range $d.LogEntries}}<tr class="{{if eq .Status "failed"}}row-failed{{end}}"><td class="nowrap muted">{{datetime .TS}}</td><td><a href="/logs/activity?open={{.ID}}"><code>{{.Action}}</code></a></td><td>{{.Summary}}{{if .JobID}} · <a href="/logs/jobs/{{.JobID}}">iş #{{.JobID}}</a>{{end}}</td><td>{{.Source}}</td><td>{{template "badge" .Status}}</td></tr>{{end}}
+      </tbody>
+    </table>
+    {{if not $d.LogEntries}}<p class="muted pad">Kayıt yok.</p>{{end}}
+  </div>
+{{else}}
+  <pre class="console">{{range $d.LogLines}}{{.}}
+{{else}}(boş){{end}}</pre>
+{{end}}
+</div>
+{{end}}

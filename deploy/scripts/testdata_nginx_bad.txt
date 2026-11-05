@@ -1,0 +1,11 @@
+load_module /tmp/evil.so;
+"load_module" x;
+lo\ad_module x;
+access_log /etc/cron.d/x;
+error_log /root/x;
+client_body_temp_path /etc;
+proxy_cache_path /x keys_zone=a:1m;
+include /etc/shadow;
+location / { perl_modules /x; }
+add_header X "a"; include /etc/passwd;
+# comment ; include /etc/passwd

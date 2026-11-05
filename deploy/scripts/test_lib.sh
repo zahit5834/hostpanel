@@ -40,5 +40,50 @@ bad validate_path_under "$tmp/base/escape/etc/passwd" "$tmp/base"
 bad validate_path_under "$tmp/basefoo" "$tmp/base"
 rm -rf "$tmp"
 
+ok  validate_release 20261105-140000
+bad validate_release 2026-11-05
+ok  validate_reldir wwwroot/uploads
+ok  validate_reldir App_Data
+bad validate_reldir ../x
+bad validate_reldir .env
+bad validate_reldir a/../b
+bad validate_reldir /abs
+ok  validate_short ornek_com
+bad validate_short Ornek
+ok  validate_site_user site_ornek_com
+bad validate_site_user root
+bad validate_site_user site_
+
+# nginx config validation: every line of testdata_nginx_bad.txt must be rejected on its own.
+tmpc=$(mktemp)
+while IFS= read -r line; do
+  printf '%s\n' "$line" >"$tmpc"
+  bad validate_nginx_conf "$tmpc" ornek.com
+done <testdata_nginx_bad.txt
+cat >"$tmpc" <<'CONF'
+# Managed by HostPanel
+server {
+    listen 80;
+    server_name ornek.com www.ornek.com;
+    access_log /var/log/nginx/hp-ornek.com.access.log;
+    error_log /var/log/nginx/hp-ornek.com.error.log;
+    location / { proxy_pass http://127.0.0.1:5000; proxy_set_header Host $host; }
+    location ^~ /__hostpanel/ { internal; alias /opt/hostpanel/templates/pages/; }
+}
+CONF
+ok  validate_nginx_conf "$tmpc" ornek.com
+bad validate_nginx_conf "$tmpc" other.com
+rm -f "$tmpc"
+
+# env_line keeps values literal.
+check_env() {
+  local got
+  got=$(source ./lib.sh; env_line "$1" "$2")
+  [[ $got == "$3" ]] || { echo "FAIL env_line $1: got [$got] want [$3]"; fail=1; }
+}
+check_env A 'plain value' "A='plain value'"
+check_env B 'x$y"z\w' "B='x\$y\"z\\w'"
+check_env C "it's \$HOME" 'C="it'"'"'s \$HOME"'
+
 if [[ $fail -eq 0 ]]; then echo "lib.sh: tüm testler geçti"; fi
 exit $fail

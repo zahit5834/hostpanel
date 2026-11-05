@@ -151,6 +151,19 @@ var funcs = template.FuncMap{
 		}
 		return s
 	},
+	"siteStatus": func(s string) string {
+		return map[string]string{
+			"provisioning": "Hazırlanıyor", "awaiting_deploy": "Deploy bekliyor", "running": "Çalışıyor",
+			"stopped": "Durduruldu", "maintenance": "Bakımda", "disabled": "Devre dışı", "error": "Hata",
+			"deleting": "Siliniyor", "active": "Aktif", "previous": "Önceki", "failed": "Başarısız", "pruned": "Silindi",
+		}[s]
+	},
+	"kb": func(n int64) string {
+		if n < 1<<20 {
+			return fmt.Sprintf("%d KB", n>>10)
+		}
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	},
 	"prettyJSON": func(s string) string {
 		if s == "" {
 			return ""

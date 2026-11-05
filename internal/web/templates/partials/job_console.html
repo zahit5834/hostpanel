@@ -1,0 +1,11 @@
+{{/* Data: job id (int64). Live job output via SSE; closes on "done". */}}
+{{define "job-console"}}
+<div class="card" hx-ext="sse" sse-connect="/logs/jobs/{{.}}/stream" sse-close="done">
+  <div class="card-head">
+    <div class="progress-line" sse-swap="progress"><progress max="100" value="0"></progress></div>
+    <div sse-swap="status,done"><span class="badge running">Devam ediyor</span></div>
+    <a href="/logs/jobs/{{.}}" class="small">İş #{{.}} →</a>
+  </div>
+  <div class="console" id="console" sse-swap="line" hx-swap="beforeend"></div>
+</div>
+{{end}}

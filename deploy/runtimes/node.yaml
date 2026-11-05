@@ -1,0 +1,28 @@
+id: node
+displayName: "Node.js"
+type: proxy
+versions:
+  # One directory per version: /opt/node/v22.23.4/bin/node
+  list-dir: /opt/node
+  list-regex: '^v(\d+\.\d+\.\d+)$'
+  available: node-dist
+  install-script: node.sh
+startCommand: "/opt/node/v{{version}}/bin/node {{entryPoint}} {{args}}"
+environment:
+  NODE_ENV: "production"
+  PORT: "{{port}}"
+  HOST: "127.0.0.1"
+systemdTemplate: "proxy-service.service.tpl"
+nginxTemplate: "proxy.conf.tpl"
+siteFields:
+  - key: entryPoint
+    label: "Başlangıç dosyası"
+    required: true
+    pattern: '^[A-Za-z0-9._/-]+\.(js|mjs|cjs)$'
+    placeholder: "server.js"
+    help: "Zip'in köküne göre yol, örn. dist/main.js. Uygulama PORT ortam değişkenini dinlemeli."
+  - key: args
+    label: "Ek argümanlar (isteğe bağlı)"
+    pattern: '^[A-Za-z0-9._/@:=,+ -]*$'
+    placeholder: "--max-old-space-size=256"
+info: "Uygulama process.env.PORT ve 127.0.0.1 üzerinde dinlemeli. Bağımlılıklar (node_modules) zip içinde olmalı."

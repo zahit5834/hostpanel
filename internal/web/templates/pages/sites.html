@@ -1,0 +1,24 @@
+{{define "content"}}
+<div class="card-head">
+  <h1>Siteler</h1>
+  <a class="button primary" href="/sites/new">Yeni site</a>
+</div>
+<div class="card table-wrap">
+  <table class="table">
+    <thead><tr><th>Domain</th><th>Müşteri</th><th>Altyapı</th><th class="right">Port</th><th>Durum</th><th>Oluşturma</th></tr></thead>
+    <tbody>
+    {{range .Data.List}}
+      <tr>
+        <td><a href="/sites/{{.ID}}">{{.Domain}}</a>{{range .Aliases}} <span class="tag">{{.}}</span>{{end}}</td>
+        <td><a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a></td>
+        <td>{{.RuntimeID}} {{.RuntimeVersion}}</td>
+        <td class="right">{{if .Port}}{{.Port}}{{else}}—{{end}}</td>
+        <td>{{template "site-badge" .Status}}</td>
+        <td class="nowrap muted">{{datetime .CreatedAt}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not .Data.List}}<p class="muted pad">Henüz site yok.</p>{{end}}
+</div>
+{{end}}
