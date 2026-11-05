@@ -24,6 +24,7 @@ import (
 	"hostpanel/internal/config"
 	"hostpanel/internal/crypto"
 	"hostpanel/internal/customers"
+	"hostpanel/internal/databases"
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
@@ -48,7 +49,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	store.Migrate(ctx, db)
 	key, _ := crypto.LoadKey(filepath.Join(dir, "k"), true, true)
 	box, _ := crypto.New(key)
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.NewTextHandler(testLogOut, nil))
 	act := logs.NewActivity(db)
 	a := auth.New(db, box, key)
 	a.SetAdminPassword(ctx, "admin", "correct-horse-1")
@@ -74,8 +75,11 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 			return &ssl.Checker{Resolver: testResolver{}, Client: &http.Client{Transport: noNetwork{}}, Token: "x"}
 		}}
 	sslSvc.Register()
+	dbSvc := &databases.Service{Store: databases.NewStore(db), DB: db, Box: box, Runner: runner, Jobs: jm, Activity: act,
+		Log: log, Sites: svc, ScriptsDir: cfg.ScriptsDir, DryRun: true, Fake: databases.NewFakeServer("")}
+	dbSvc.Register()
 	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
-		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc}
+		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc}
 	s.RegisterJobs()
 	if err := s.Init(ctx); err != nil {
 		t.Fatal(err)
@@ -302,3 +306,5 @@ func TestTwoFactorWebFlow(t *testing.T) {
 		t.Fatalf("dashboard after 2fa %d", res.StatusCode)
 	}
 }
+
+var testLogOut io.Writer = io.Discard

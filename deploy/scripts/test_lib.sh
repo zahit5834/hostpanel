@@ -118,5 +118,24 @@ if command -v openssl >/dev/null; then
   rm -rf "$pd"
 fi
 
+# MSSQL helper validators
+ok  validate_mssql_image mcr.microsoft.com/mssql/server:2025-CU10-ubuntu-24.04
+ok  validate_mssql_image mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
+bad validate_mssql_image mcr.microsoft.com/mssql/server:latest
+bad validate_mssql_image docker.io/evil/server:2025-CU10
+bad validate_mssql_image "mcr.microsoft.com/mssql/server:2025-x;id"
+ok  validate_mssql_pid Express
+ok  validate_mssql_pid ABCDE-12345-FGHIJ-67890-KLMNO
+bad validate_mssql_pid Enterprise
+bad validate_mssql_pid "Express --privileged"
+ok  validate_ip_or_cidr 203.0.113.7
+ok  validate_ip_or_cidr 198.51.100.0/24
+ok  validate_ip_or_cidr 2001:db8::1
+bad validate_ip_or_cidr 0.0.0.0/0
+bad validate_ip_or_cidr ::/0
+bad validate_ip_or_cidr "1.2.3.4 port 22"
+bad validate_ip_or_cidr any
+bad validate_ip_or_cidr 1234
+
 if [[ $fail -eq 0 ]]; then echo "lib.sh: tüm testler geçti"; fi
 exit $fail

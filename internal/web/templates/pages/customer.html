@@ -32,6 +32,24 @@
 </div>
 
 <section class="card table-wrap">
+  <div class="card-head pad"><h2>MSSQL</h2>{{if .Login}}<span class="muted small">login: <code>{{.Login.Name}}</code> {{if .Login.Disabled}}<span class="badge">devre dışı</span>{{else}}<span class="badge success">etkin</span>{{end}}</span>{{end}}</div>
+  {{if .DBs}}
+  <table class="table">
+    <thead><tr><th>Veritabanı</th><th>Site</th><th class="right">Boyut</th><th>Durum</th></tr></thead>
+    <tbody>
+    {{range .DBs}}<tr><td><a href="/databases"><code>{{.Name}}</code></a></td><td>{{if .SiteID}}<a href="/sites/{{.SiteID}}">{{.SiteDomain}}</a>{{else}}<span class="muted">—</span>{{end}}</td><td class="right">{{if .SizeBytes}}{{size .SizeBytes}}{{else}}—{{end}}</td><td>{{template "site-badge" .Status}}</td></tr>{{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="muted pad">Veritabanı yok.</p>{{end}}
+  {{if .DBAvailable}}
+  <div class="ops pad">
+    {{if not .Login}}<form method="post" action="/databases/logins"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="customer_id" value="{{$c.ID}}"><input type="hidden" name="back" value="customer"><button type="submit">MSSQL login'i oluştur</button></form>{{end}}
+    <a class="button" href="/databases?customer={{$c.ID}}#new-db">Veritabanı oluştur</a>
+  </div>
+  {{end}}
+</section>
+
+<section class="card table-wrap">
   <div class="card-head pad"><h2>Son işlemler</h2><a class="small" href="/logs/activity">Tüm işlem geçmişi →</a></div>
   <table class="table">
     <thead><tr><th>Zaman</th><th>İşlem</th><th>Özet</th><th>Durum</th></tr></thead>
@@ -45,7 +63,8 @@
 <section class="card danger-zone">
   <h2>Müşteriyi sil</h2>
   {{if .Sites}}<p class="muted">Siteleri olan müşteri silinemez; önce sitelerini silin.</p>
-  {{else}}<button type="button" class="danger" hx-post="/customers/{{$c.ID}}/delete" hx-confirm="{{$c.Name}} silinsin mi?">Sil</button>{{end}}
+  {{else if .DBs}}<p class="muted">Veritabanları olan müşteri silinemez; önce veritabanlarını silin.</p>
+  {{else}}<button type="button" class="danger" hx-post="/customers/{{$c.ID}}/delete" hx-confirm="{{$c.Name}} silinsin mi?{{if .Login}} MSSQL login'i de silinir.{{end}}">Sil</button>{{end}}
 </section>
 {{end}}
 {{end}}

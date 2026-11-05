@@ -71,6 +71,18 @@
 </section>
 </div>
 
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Veritabanları</h2>{{if $d.DBAvailable}}<a class="small" href="/databases?customer={{$s.CustomerID}}&site={{$s.ID}}#new-db">Veritabanı oluştur →</a>{{end}}</div>
+  {{if $d.DBs}}
+  <table class="table">
+    <thead><tr><th>Ad</th><th>Login</th><th>Ortam değişkeni</th><th class="right">Boyut</th><th>Durum</th></tr></thead>
+    <tbody>
+    {{range $d.DBs}}<tr><td><a href="/databases"><code>{{.Name}}</code></a></td><td><code>{{.LoginName}}</code></td><td>{{if .EnvKey}}<code>{{.EnvKey}}</code>{{else}}<span class="muted">—</span>{{end}}</td><td class="right">{{if .SizeBytes}}{{size .SizeBytes}}{{else}}—{{end}}</td><td>{{template "site-badge" .Status}}</td></tr>{{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="muted pad">Bu siteye bağlı veritabanı yok.</p>{{end}}
+</section>
+
 <section class="card danger-zone">
   <h2>Siteyi sil</h2>
   <p class="muted">Silmeden önce site dizini <code>/var/backups/hostpanel/{{$s.Domain}}/</code> altına arşivlenir. Ardından servis, nginx yapılandırması, ortam değişkenleri, Linux kullanıcısı ve dosyalar kaldırılır.</p>
@@ -78,7 +90,7 @@
     <input type="hidden" name="_csrf" value="{{$.CSRF}}">
     <label>Onaylamak için domaini yazın: <strong>{{$s.Domain}}</strong>
       <input name="confirm" autocomplete="off" spellcheck="false" required></label>
-    <label class="check"><input type="checkbox" disabled> Veritabanlarını da sil <span class="muted small">(Faz 3)</span></label>
+    {{if $d.DBs}}<label class="check"><input type="checkbox" name="drop_dbs" value="1"> <span>Veritabanlarını da sil ({{range $i, $db := $d.DBs}}{{if $i}}, {{end}}<code>{{$db.Name}}</code>{{end}}) <span class="muted small">— her biri silinmeden önce yedeklenir; işaretlenmezse veritabanları korunur ve siteden ayrılır.</span></span></label>{{end}}
     <div><button type="submit" class="danger">Siteyi kalıcı olarak sil</button></div>
   </form>
 </section>

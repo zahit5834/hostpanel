@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"hostpanel/internal/customers"
+	"hostpanel/internal/databases"
 	"hostpanel/internal/exec"
 	"hostpanel/internal/logs"
 	"hostpanel/internal/runtimes"
@@ -53,6 +54,9 @@ type wizardData struct {
 	Runtimes  []runtimeOption
 	In        sites.CreateInput
 	Fields    *runtimeFieldsData // preloaded when re-rendering after an error
+
+	DBAvailable bool // MSSQL running: offer "create a database"
+	CreateDB    bool
 }
 
 func (s *Server) siteNew(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +67,8 @@ func (s *Server) siteNew(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) renderWizard(w http.ResponseWriter, r *http.Request, status int, in sites.CreateInput, errMsg string) {
 	cs, _ := s.Customers.List(r.Context(), "")
-	d := wizardData{Customers: cs, Runtimes: s.runtimeOptions(), In: in}
+	d := wizardData{Customers: cs, Runtimes: s.runtimeOptions(), In: in,
+		DBAvailable: s.DBs.Available(r.Context()), CreateDB: r.PostFormValue("create_db") == "1"}
 	if p, ok := s.Runtimes.Get(in.RuntimeID); ok {
 		f := s.runtimeFieldsData(r, p, in.RuntimeVersion, in.Fields)
 		d.Fields = &f
@@ -141,7 +146,29 @@ func (s *Server) siteCreate(w http.ResponseWriter, r *http.Request) {
 		s.renderWizard(w, r, http.StatusBadRequest, in, err.Error())
 		return
 	}
+	if r.PostFormValue("create_db") == "1" {
+		s.wizardDatabase(r, site)
+	}
 	http.Redirect(w, r, fmt.Sprintf("/sites/%d?job=%d", site.ID, jobID), http.StatusSeeOther)
+}
+
+// wizardDatabase queues a database for a new site (named after its short
+// name) and, for proxy runtimes, writes the connection string into its env.
+// The db.create job runs after site.create (one worker; the env write also
+// waits for the site lock). Failures are logged; the site is already created.
+func (s *Server) wizardDatabase(r *http.Request, site sites.Site) {
+	base := databases.DBBase(site.ShortName)
+	name := base
+	for i := 2; s.DBs.Store.DBNameTaken(r.Context(), name); i++ {
+		name = base + "_" + strconv.Itoa(i)
+	}
+	p, ok := s.Runtimes.Get(site.RuntimeID)
+	in := databases.CreateInput{CustomerID: site.CustomerID, Name: name, SiteID: site.ID,
+		WriteEnv: ok && p.Def().Type == runtimes.TypeProxy}
+	if _, _, err := s.DBs.StartCreate(r.Context(), in); err != nil {
+		s.Activity.Record(r.Context(), logs.Entry{Action: "db.create", TargetType: "database", TargetID: name,
+			Status: logs.StatusFailed, Error: err.Error(), Summary: "Site için veritabanı oluşturulamadı: " + site.Domain}, nil)
+	}
 }
 
 func (s *Server) loadSite(w http.ResponseWriter, r *http.Request) (sites.Site, bool) {
@@ -182,6 +209,9 @@ type siteData struct {
 	Cert        *ssl.Certificate
 	CertHistory []ssl.Certificate
 	ACMEEmail   string
+
+	DBs         []databases.Database
+	DBAvailable bool
 }
 
 type envRow struct{ Key, Value string }
@@ -215,6 +245,8 @@ func (s *Server) renderSite(w http.ResponseWriter, r *http.Request, status int, 
 	}
 	d.Releases, _ = s.Sites.Store.Releases(ctx, site.ID)
 	d.Active = s.Sites.Store.ActiveRelease(ctx, site.ID)
+	d.DBs, _ = s.DBs.Store.Databases(ctx, databases.DBFilter{SiteID: site.ID})
+	d.DBAvailable = s.DBs.Available(ctx)
 	switch tab {
 	case "ssl":
 		s.sslTabData(r, &d)
@@ -487,7 +519,7 @@ func (s *Server) siteDelete(w http.ResponseWriter, r *http.Request) {
 		s.renderSite(w, r, http.StatusBadRequest, site, "overview", "Onay için domain adını tam olarak yazın.", "")
 		return
 	}
-	jobID, err := s.Sites.StartDelete(r.Context(), site)
+	jobID, err := s.Sites.StartDelete(r.Context(), site, r.PostFormValue("drop_dbs") == "1")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

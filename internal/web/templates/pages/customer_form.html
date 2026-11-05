@@ -10,6 +10,7 @@
     <label>Telefon <input name="phone" type="tel" value="{{.Phone}}" maxlength="40"></label>
     <label>E-posta <input name="email" type="email" value="{{.Email}}" maxlength="200"></label>
     <label class="full">Notlar <textarea name="notes" rows="4" maxlength="4000">{{.Notes}}</textarea></label>
+    {{if and (not .ID) .DBAvailable}}<label class="check full"><input type="checkbox" name="create_login" value="1" {{if .CreateLogin}}checked{{end}}> <span>MSSQL login'i de oluştur <span class="muted small">(c_&lt;ad&gt;, rastgele şifre)</span></span></label>{{end}}
   </div>
   <div class="actions"><button type="submit" class="primary">Kaydet</button></div>
 </form>

@@ -50,6 +50,13 @@
     </div>
   </section>
 
+  {{if .DBAvailable}}
+  <section class="card stack">
+    <h2>4 · Veritabanı</h2>
+    <label class="check"><input type="checkbox" name="create_db" value="1" {{if .CreateDB}}checked{{end}}> <span>MSSQL veritabanı oluştur <span class="muted small">— adı sitenin kısa adından türetilir, sahibi müşterinin login'i olur; .NET/Node sitelerinde connection string ortam değişkenine yazılır (.NET: <code>ConnectionStrings__DefaultConnection</code>, Node: <code>DATABASE_URL</code>).</span></span></label>
+  </section>
+  {{end}}
+
   <div class="actions"><button type="submit" class="primary">Siteyi oluştur</button></div>
 </form>
 {{end}}

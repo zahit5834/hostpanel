@@ -22,6 +22,12 @@
     alert((xhr.responseText || "İstek başarısız") + " (" + xhr.status + ")");
   });
 
+  // Plain (non-HTMX) forms: buttons with data-confirm ask first.
+  document.addEventListener("submit", function (ev) {
+    var b = ev.submitter;
+    if (b && b.dataset && b.dataset.confirm && !window.confirm(b.dataset.confirm)) ev.preventDefault();
+  });
+
   // Keep the job console scrolled to the bottom unless the user scrolled up.
   document.addEventListener("htmx:sseBeforeMessage", function () {
     var c = document.getElementById("console");

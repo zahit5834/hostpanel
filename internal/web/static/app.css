@@ -175,14 +175,19 @@ meter, progress { width: 100%; height: 8px; }
 .env-row { display: grid; grid-template-columns: minmax(120px, 1fr) 2fr auto; gap: 8px; margin-bottom: 6px; }
 .ops { display: flex; flex-wrap: wrap; gap: 8px; }
 .ops form { display: inline; }
+.ops.end { justify-content: flex-end; }
+.inline-details { display: inline-block; position: relative; }
+.inline-details > summary { list-style: none; cursor: pointer; }
+.inline-details > summary::-webkit-details-marker { display: none; }
+.inline-details[open] > form { position: absolute; right: 0; z-index: 5; min-width: 280px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.15); text-align: left; }
 .danger-zone { border-color: var(--err); }
 pre.conf { background: var(--console-bg); color: var(--console-text); font-family: var(--mono); font-size: 12px; padding: 12px; border-radius: 6px; max-height: 480px; overflow: auto; }
 .upload-progress { width: 100%; }
 @media (max-width: 640px) { .env-row { grid-template-columns: 1fr; } }
-.badge.st-running, .badge.st-active { background: var(--ok-bg); color: var(--ok); }
+.badge.st-running, .badge.st-active, .badge.st-ready { background: var(--ok-bg); color: var(--ok); }
 .badge.st-stopped, .badge.st-maintenance, .badge.st-previous { background: var(--warn-bg); color: var(--warn); }
 .badge.st-error, .badge.st-disabled, .badge.st-failed { background: var(--err-bg); color: var(--err); }
-.badge.st-provisioning, .badge.st-awaiting_deploy, .badge.st-deleting { background: var(--run-bg); color: var(--run); }
+.badge.st-provisioning, .badge.st-awaiting_deploy, .badge.st-deleting, .badge.st-installing, .badge.st-creating, .badge.st-dropping { background: var(--run-bg); color: var(--run); }
 
 /* Faz 2: SSL */
 .checks { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 4px; }

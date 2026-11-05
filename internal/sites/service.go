@@ -48,6 +48,10 @@ type Service struct {
 	CertFor func(ctx context.Context, siteID int64) *TLSPaths
 	// ProbeToken is served at /.well-known/hostpanel-probe for SSL pre-checks.
 	ProbeToken string
+	// DeleteHook runs inside the site delete job before the site row is
+	// removed (databases inject "drop the site's databases"). The site lock is
+	// held: the hook must not call SaveEnv/Operate.
+	DeleteHook func(ctx context.Context, l *jobs.Log, site Site, params map[string]any) error
 
 	locks sync.Map // site id → *sync.Mutex: one mutating operation per site at a time
 }
@@ -771,9 +775,14 @@ func (s *Service) healthCheck(ctx context.Context, l *jobs.Log, site Site) error
 // --- delete ---
 
 // StartDelete queues deletion after the domain confirmation matched.
-func (s *Service) StartDelete(ctx context.Context, site Site) (int64, error) {
+// dropDBs is passed to DeleteHook.
+func (s *Service) StartDelete(ctx context.Context, site Site, dropDBs bool) (int64, error) {
+	summary := "Site siliniyor: " + site.Domain
+	if dropDBs {
+		summary += " (veritabanlarıyla birlikte)"
+	}
 	return s.Jobs.Submit(ctx, jobs.Spec{Kind: "site.delete", TargetType: "site", TargetID: site.Domain,
-		Summary: "Site siliniyor: " + site.Domain, Params: map[string]any{"site_id": site.ID}})
+		Summary: summary, Params: map[string]any{"site_id": site.ID, "drop_dbs": dropDBs}})
 }
 
 func (s *Service) jobDelete(ctx context.Context, l *jobs.Log, p map[string]any) error {
@@ -812,6 +821,9 @@ func (s *Service) jobDelete(ctx context.Context, l *jobs.Log, p map[string]any) 
 	try("Linux kullanıcısı siliniyor", func() error {
 		return s.helper(dctx, l, nil, nil, "hp-site-user.sh", "delete", site.User(), site.Domain)
 	})
+	if s.DeleteHook != nil {
+		try("veritabanları", func() error { return s.DeleteHook(dctx, l, site, p) })
+	}
 	if err := s.Store.Delete(dctx, site.ID); err != nil {
 		return err
 	}

@@ -18,6 +18,7 @@ import (
 	"hostpanel/internal/auth"
 	"hostpanel/internal/config"
 	"hostpanel/internal/customers"
+	"hostpanel/internal/databases"
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
@@ -45,6 +46,7 @@ type Server struct {
 	Sites     *sites.Service
 	Runtimes  *runtimes.Registry
 	SSL       *ssl.Service
+	DBs       *databases.Service
 
 	tpl       *renderer
 	allowlist atomic.Pointer[[]netip.Prefix]

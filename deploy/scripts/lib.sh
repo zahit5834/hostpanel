@@ -226,3 +226,20 @@ cert_key_match() {
   b=$(openssl pkey -in "$2" -pubout -outform DER 2>/dev/null | sha256sum) || return 1
   [[ -n $a && $a == "$b" && $a != "$(printf '' | sha256sum)" ]]
 }
+
+# validate_mssql_image REF — only Microsoft's SQL Server 2022/2025 images, pinned tag.
+validate_mssql_image() {
+  [[ $1 =~ ^mcr\.microsoft\.com/mssql/server:20(22|25)-[A-Za-z0-9.-]{1,64}$ ]] || die "izin verilmeyen imaj: $1"
+}
+
+# validate_mssql_pid PID — edition name or product key.
+validate_mssql_pid() {
+  [[ $1 =~ ^(Express|Developer|[A-Z0-9]{5}(-[A-Z0-9]{5}){4})$ ]] || die "geçersiz MSSQL_PID"
+}
+
+# validate_ip_or_cidr V — charset/length check; ufw parses the value itself
+# (passed as one argv element, never through a shell).
+validate_ip_or_cidr() {
+  [[ ${#1} -le 50 && $1 =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ && $1 == *[.:]* ]] || die "geçersiz IP/CIDR: $1"
+  [[ $1 != */0 ]] || die "/0 kabul edilmez: $1"
+}

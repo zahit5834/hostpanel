@@ -378,7 +378,7 @@ func TestCreateStaticDeployRollbackDelete(t *testing.T) {
 
 	// Delete.
 	e.run.calls = nil
-	jid, _ = e.svc.StartDelete(ctx, site)
+	jid, _ = e.svc.StartDelete(ctx, site, false)
 	if j := wait(t, e.jobs, jid); j.Status != jobs.StatusSuccess {
 		t.Fatalf("delete: %+v", j)
 	}

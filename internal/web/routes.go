@@ -74,6 +74,21 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /ssl/install", s.requireAuth(s.sslInstall))
 	mux.Handle("POST /ssl/{id}/export", s.requireAuth(s.sslExport))
 
+	mux.Handle("GET /databases", s.requireAuth(s.databasesPage))
+	mux.Handle("GET /databases/status", s.requireAuth(s.databasesStatus))
+	mux.Handle("POST /databases/docker", s.requireAuth(s.dockerInstall))
+	mux.Handle("POST /databases/server", s.requireAuth(s.dbServerInstall))
+	mux.Handle("POST /databases/server/remove", s.requireAuth(s.dbServerRemove))
+	mux.Handle("POST /databases/server/op/{op}", s.requireAuth(s.dbServerOp))
+	mux.Handle("POST /databases/server/settings", s.requireAuth(s.dbServerSettings))
+	mux.Handle("POST /databases/isolation-test", s.requireAuth(s.dbIsolationTest))
+	mux.Handle("POST /databases/sizes", s.requireAuth(s.dbRefreshSizes))
+	mux.Handle("POST /databases", s.requireAuth(s.dbCreate))
+	mux.Handle("POST /databases/{id}/connection", s.requireAuth(s.dbConnection))
+	mux.Handle("POST /databases/{id}/delete", s.requireAuth(s.dbDelete))
+	mux.Handle("POST /databases/logins", s.requireAuth(s.dbLoginCreate))
+	mux.Handle("POST /databases/logins/{id}/{action}", s.requireAuth(s.dbLoginAction))
+
 	mux.Handle("GET /runtimes", s.requireAuth(s.runtimesPage))
 	mux.Handle("POST /runtimes/{id}/{action}", s.requireAuth(s.runtimeAction))
 

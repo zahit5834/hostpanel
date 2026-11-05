@@ -304,6 +304,7 @@ var systemSources = []struct{ ID, Label string }{
 	{"panel", "Panel logu"},
 	{"auth", "Panel giriş denemeleri"},
 	{"certbot", "certbot (SSL yenileme)"},
+	{"mssql", "MSSQL container"},
 }
 
 func (s *Server) journalLines(ctx context.Context, unit string, n int) []string {
@@ -326,7 +327,7 @@ func (s *Server) systemLogs(w http.ResponseWriter, r *http.Request) {
 	switch src {
 	case "auth":
 		path = s.Cfg.AuthLogPath()
-	case "certbot":
+	case "certbot", "mssql":
 		path = ""
 	default:
 		src = "panel"
@@ -339,7 +340,10 @@ func (s *Server) systemLogs(w http.ResponseWriter, r *http.Request) {
 	level := q.Get("level")
 	var lines []string
 	var err error
-	if path == "" {
+	if src == "mssql" {
+		// docker logs needs the docker socket (root): read through hp-mssql.sh.
+		lines = s.DBs.ContainerLogs(r.Context(), n)
+	} else if path == "" {
 		// /var/log/letsencrypt is root-only; the systemd journal is readable
 		// by the systemd-journal group without sudo.
 		lines = s.journalLines(r.Context(), "certbot.service", n)

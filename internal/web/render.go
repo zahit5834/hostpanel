@@ -157,6 +157,7 @@ var funcs = template.FuncMap{
 			"stopped": "Durduruldu", "maintenance": "Bakımda", "disabled": "Devre dışı", "error": "Hata",
 			"deleting": "Siliniyor", "active": "Aktif", "previous": "Önceki", "failed": "Başarısız", "pruned": "Silindi",
 			"pending": "Bekliyor", "replaced": "Değiştirildi", "removed": "Kaldırıldı",
+			"installing": "Kuruluyor", "creating": "Oluşturuluyor", "ready": "Hazır", "dropping": "Siliniyor",
 		}[s]
 	},
 	"kb": func(n int64) string {
@@ -164,6 +165,16 @@ var funcs = template.FuncMap{
 			return fmt.Sprintf("%d KB", n>>10)
 		}
 		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	},
+	"size": func(n int64) string {
+		switch {
+		case n >= 1<<30:
+			return fmt.Sprintf("%.2f GB", float64(n)/(1<<30))
+		case n >= 1<<20:
+			return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+		default:
+			return fmt.Sprintf("%d KB", n>>10)
+		}
 	},
 	"prettyJSON": func(s string) string {
 		if s == "" {

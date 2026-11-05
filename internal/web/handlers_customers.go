@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"hostpanel/internal/customers"
+	"hostpanel/internal/databases"
 	"hostpanel/internal/logs"
 )
 
@@ -35,18 +36,34 @@ func (s *Server) customerList(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, http.StatusOK, "customers", block, Page{Title: "Müşteriler", Nav: "customers", Data: map[string]any{"List": list, "Q": q}})
 }
 
+// customerForm embeds the customer so the template keeps using .Name etc.
+type customerForm struct {
+	customers.Customer
+	DBAvailable bool // MSSQL running: offer "create login"
+	CreateLogin bool
+}
+
 func (s *Server) customerNew(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, http.StatusOK, "customer_form", "layout", Page{Title: "Yeni müşteri", Nav: "customers", Data: customers.Customer{}})
+	s.render(w, r, http.StatusOK, "customer_form", "layout", Page{Title: "Yeni müşteri", Nav: "customers",
+		Data: customerForm{DBAvailable: s.DBs.Available(r.Context())}})
 }
 
 func (s *Server) customerCreate(w http.ResponseWriter, r *http.Request) {
 	c := customerFromForm(r)
+	createLogin := r.PostFormValue("create_login") == "1"
 	if err := s.Customers.Create(r.Context(), &c); err != nil {
-		s.render(w, r, http.StatusBadRequest, "customer_form", "layout", Page{Title: "Yeni müşteri", Nav: "customers", Data: c, Error: err.Error()})
+		s.render(w, r, http.StatusBadRequest, "customer_form", "layout", Page{Title: "Yeni müşteri", Nav: "customers",
+			Data: customerForm{Customer: c, DBAvailable: s.DBs.Available(r.Context()), CreateLogin: createLogin}, Error: err.Error()})
 		return
 	}
 	s.Activity.Record(r.Context(), logs.Entry{Action: "customer.create", TargetType: "customer", TargetID: strconv.FormatInt(c.ID, 10),
 		Summary: "Müşteri eklendi: " + c.Name}, map[string]any{"name": c.Name, "company": c.Company, "email": c.Email})
+	if createLogin {
+		if _, _, err := s.DBs.EnsureLogin(r.Context(), c.ID); err != nil {
+			s.Activity.Record(r.Context(), logs.Entry{Action: "db.login.create", TargetType: "customer", TargetID: strconv.FormatInt(c.ID, 10),
+				Status: logs.StatusFailed, Error: err.Error(), Summary: "MSSQL login'i oluşturulamadı"}, nil)
+		}
+	}
 	http.Redirect(w, r, fmt.Sprintf("/customers/%d", c.ID), http.StatusSeeOther)
 }
 
@@ -78,9 +95,16 @@ func (s *Server) customerDetail(w http.ResponseWriter, r *http.Request) {
 	for _, st := range siteList {
 		targets = append(targets, st.Domain)
 	}
+	dbs, _ := s.DBs.Store.Databases(r.Context(), databases.DBFilter{CustomerID: c.ID})
+	for _, d := range dbs {
+		targets = append(targets, d.Name)
+	}
 	recent, _ := s.Activity.Query(r.Context(), logs.Filter{TargetIDs: targets, Limit: 20})
-	s.render(w, r, http.StatusOK, "customer", "layout", Page{Title: c.Name, Nav: "customers",
-		Data: map[string]any{"C": c, "Sites": siteList, "Recent": recent}})
+	data := map[string]any{"C": c, "Sites": siteList, "Recent": recent, "DBs": dbs, "DBAvailable": s.DBs.Available(r.Context())}
+	if l, err := s.DBs.Store.LoginForCustomer(r.Context(), c.ID); err == nil {
+		data["Login"] = &l
+	}
+	s.render(w, r, http.StatusOK, "customer", "layout", Page{Title: c.Name, Nav: "customers", Data: data})
 }
 
 func (s *Server) customerEdit(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +112,7 @@ func (s *Server) customerEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.render(w, r, http.StatusOK, "customer_form", "layout", Page{Title: c.Name + " · Düzenle", Nav: "customers", Data: c})
+	s.render(w, r, http.StatusOK, "customer_form", "layout", Page{Title: c.Name + " · Düzenle", Nav: "customers", Data: customerForm{Customer: c}})
 }
 
 func (s *Server) customerUpdate(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +123,7 @@ func (s *Server) customerUpdate(w http.ResponseWriter, r *http.Request) {
 	c := customerFromForm(r)
 	c.ID = old.ID
 	if err := s.Customers.Update(r.Context(), &c); err != nil {
-		s.render(w, r, http.StatusBadRequest, "customer_form", "layout", Page{Title: old.Name, Nav: "customers", Data: c, Error: err.Error()})
+		s.render(w, r, http.StatusBadRequest, "customer_form", "layout", Page{Title: old.Name, Nav: "customers", Data: customerForm{Customer: c}, Error: err.Error()})
 		return
 	}
 	before := fmt.Sprintf("ad: %s\nfirma: %s\ntelefon: %s\ne-posta: %s", old.Name, old.Company, old.Phone, old.Email)
@@ -112,6 +136,15 @@ func (s *Server) customerUpdate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) customerDelete(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.loadCustomer(w, r)
 	if !ok {
+		return
+	}
+	if n, _ := s.Sites.Store.List(r.Context(), c.ID); len(n) > 0 {
+		http.Error(w, customers.ErrHasSites.Error(), http.StatusBadRequest)
+		return
+	}
+	// The SQL login is dropped on the server first (refused while it owns databases).
+	if err := s.DBs.PrepareCustomerDelete(r.Context(), c.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := s.Customers.Delete(r.Context(), c.ID); err != nil {
