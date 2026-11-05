@@ -1,0 +1,42 @@
+[Unit]
+Description=HostPanel hosting control panel
+Documentation=https://github.com/OWNER/hostpanel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hostpanel
+Group=hostpanel
+ExecStart=/opt/hostpanel/bin/hostpanel serve --config /etc/hostpanel/config.yaml
+Restart=on-failure
+RestartSec=3
+
+# Resource budget: the panel must stay tiny so sites and MSSQL get the RAM.
+MemoryMax=256M
+Environment=GOMEMLIMIT=48MiB
+Environment=GOMAXPROCS=2
+TasksMax=256
+LimitNOFILE=8192
+UMask=0027
+
+# Hardening.
+# NOTE: NoNewPrivileges and ProtectSystem=strict are intentionally NOT set:
+# root helper scripts are started via sudo as children of this service and
+# inherit its sandbox; those options would block sudo (setuid) and stop the
+# helpers from writing /etc/nginx, /etc/systemd/system etc. Privilege is
+# instead constrained by the sudoers whitelist (deploy/sudoers/hostpanel).
+PrivateTmp=true
+ProtectHome=true
+ProtectHostname=true
+ProtectClock=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictNamespaces=false
+StateDirectory=hostpanel
+StateDirectoryMode=0750
+LogsDirectory=hostpanel
+LogsDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

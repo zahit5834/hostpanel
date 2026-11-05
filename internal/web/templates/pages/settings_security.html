@@ -1,0 +1,72 @@
+{{define "content"}}
+<h1>Ayarlar · Güvenlik</h1>
+{{with .Data}}
+<div class="grid two">
+<section class="card">
+  <h2>Şifre</h2>
+  <form method="post" action="/settings/password" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <input type="text" name="username" value="{{.Username}}" autocomplete="username" hidden>
+    <label>Mevcut şifre <input type="password" name="current" autocomplete="current-password" required></label>
+    <label>Yeni şifre (en az 12 karakter) <input type="password" name="new" autocomplete="new-password" minlength="12" required></label>
+    <label>Yeni şifre (tekrar) <input type="password" name="confirm" autocomplete="new-password" minlength="12" required></label>
+    <button type="submit">Şifreyi değiştir</button>
+    <p class="muted small">Değiştirince diğer tüm oturumlar kapatılır.</p>
+  </form>
+</section>
+
+<section class="card">
+  <h2>İki adımlı doğrulama (TOTP)</h2>
+  {{if .RecoveryCodes}}
+    <p>Kurtarma kodları (her biri tek kullanımlık):</p>
+    <pre class="codes" id="recovery-codes">{{range .RecoveryCodes}}{{.}}
+{{end}}</pre>
+    <button type="button" x-data="copy" data-target="recovery-codes" x-on:click="copy" x-text="label">Kopyala</button>
+  {{else if .Setup}}
+    <p>Google Authenticator vb. bir uygulamayla QR kodu tarayın, ardından gösterilen kodu girin.</p>
+    <img src="{{pngDataURL .Setup.QRImage}}" alt="TOTP QR kodu" class="qr" width="240" height="240">
+    <p class="muted small">Elle giriş: <code>{{.Setup.Secret}}</code></p>
+    <form method="post" action="/settings/2fa/enable" class="stack">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="sealed" value="{{.Setup.Sealed}}">
+      <label>Doğrulama kodu <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label>
+      <button type="submit" class="primary">Etkinleştir</button>
+    </form>
+  {{else if .TOTPEnabled}}
+    <p>Durum: <span class="badge success">Etkin</span> · Kalan kurtarma kodu: <strong>{{.RecoveryLeft}}</strong></p>
+    <form method="post" action="/settings/recovery" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <button type="submit">Kurtarma kodlarını yenile</button>
+    </form>
+    <details>
+      <summary>2FA'yı kapat</summary>
+      <form method="post" action="/settings/2fa/disable" class="stack">
+        <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+        <label>Şifre <input type="password" name="password" autocomplete="current-password" required></label>
+        <label>Doğrulama kodu <input name="code" autocomplete="one-time-code" required></label>
+        <button type="submit" class="danger">2FA'yı kapat</button>
+      </form>
+    </details>
+  {{else}}
+    <p>Durum: <span class="badge failed">Kapalı</span></p>
+    <form method="post" action="/settings/2fa/start">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <button type="submit" class="primary">2FA kur</button>
+    </form>
+  {{end}}
+</section>
+
+<section class="card">
+  <h2>IP izin listesi</h2>
+  <form method="post" action="/settings/allowlist" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>İzin verilen IP / CIDR (satır başına bir tane; boş = herkes)
+      <textarea name="allowlist" rows="5" placeholder="203.0.113.10&#10;198.51.100.0/24">{{.Allowlist}}</textarea>
+    </label>
+    <p class="muted small">Şu anki IP adresiniz: <code>{{.ClientIP}}</code>. 127.0.0.1 (SSH tüneli) her zaman izinlidir.</p>
+    <button type="submit">Kaydet</button>
+  </form>
+</section>
+</div>
+{{end}}
+{{end}}

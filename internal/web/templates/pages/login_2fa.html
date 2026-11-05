@@ -1,0 +1,9 @@
+{{define "content"}}
+<form method="post" action="/login/2fa" class="stack">
+  <input type="hidden" name="_csrf" value="{{.CSRF}}">
+  <p class="muted">Kimlik doğrulama uygulamanızdaki 6 haneli kodu ya da bir kurtarma kodunu girin.</p>
+  <label>Doğrulama kodu <input name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus maxlength="11"></label>
+  <button type="submit" class="primary">Doğrula</button>
+  <a href="/login" class="muted small">Başka hesapla giriş</a>
+</form>
+{{end}}

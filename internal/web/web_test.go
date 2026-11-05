@@ -1,0 +1,253 @@
+package web
+
+import (
+	"bufio"
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/cookiejar"
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/pquerna/otp"
+	"github.com/pquerna/otp/totp"
+
+	"hostpanel/internal/auth"
+	"hostpanel/internal/config"
+	"hostpanel/internal/crypto"
+	"hostpanel/internal/exec"
+	"hostpanel/internal/jobs"
+	"hostpanel/internal/logs"
+	"hostpanel/internal/store"
+)
+
+func newTestServer(t *testing.T) (*httptest.Server, *Server) {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := config.Defaults()
+	cfg.DataDir, cfg.LogDir, cfg.SecureCookies, cfg.DryRun = dir, dir, false, true
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	db, err := store.Open(cfg.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	store.Migrate(ctx, db)
+	key, _ := crypto.LoadKey(filepath.Join(dir, "k"), true, true)
+	box, _ := crypto.New(key)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	act := logs.NewActivity(db)
+	a := auth.New(db, box, key)
+	a.SetAdminPassword(ctx, "admin", "correct-horse-1")
+	jm := jobs.NewManager(db, cfg.JobLogDir(), act, jobs.NewBroker(), log)
+	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: &exec.DryRun{Activity: act}, Log: log, Version: "test"}
+	s.RegisterJobs()
+	if err := s.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	jm.Start(ctx, 1)
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	return ts, s
+}
+
+func client() *http.Client {
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+var csrfRe = regexp.MustCompile(`name="csrf-token" content="([^"]+)"`)
+
+func login(t *testing.T, ts *httptest.Server, c *http.Client) string {
+	t.Helper()
+	res, err := c.PostForm(ts.URL+"/login", url.Values{"username": {"admin"}, "password": {"correct-horse-1"}})
+	if err != nil || res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/" {
+		t.Fatalf("login: %v %v", err, res.Status)
+	}
+	res, _ = c.Get(ts.URL + "/")
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	m := csrfRe.FindSubmatch(body)
+	if res.StatusCode != 200 || m == nil {
+		t.Fatalf("dashboard %d", res.StatusCode)
+	}
+	return string(m[1])
+}
+
+func TestSecurityHeadersAndAuthRedirect(t *testing.T) {
+	ts, _ := newTestServer(t)
+	res, err := client().Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/login" {
+		t.Fatalf("unauth status %d", res.StatusCode)
+	}
+	csp := res.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src 'self'") || strings.Contains(csp, "unsafe") {
+		t.Fatalf("csp %q", csp)
+	}
+	if res.Header.Get("X-Frame-Options") != "DENY" {
+		t.Fatal("no XFO")
+	}
+}
+
+func TestLoginCSRFAndPages(t *testing.T) {
+	ts, _ := newTestServer(t)
+	c := client()
+	csrf := login(t, ts, c)
+
+	for _, p := range []string{"/logs/activity", "/logs/jobs", "/logs/system", "/settings/security", "/healthz"} {
+		res, _ := c.Get(ts.URL + p)
+		if res.StatusCode != 200 {
+			t.Fatalf("%s → %d", p, res.StatusCode)
+		}
+		res.Body.Close()
+	}
+
+	// POST without token is rejected.
+	res, _ := c.PostForm(ts.URL+"/logs/selftest", nil)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("no-csrf status %d", res.StatusCode)
+	}
+	// Cross-site POST with a valid token is rejected too.
+	req, _ := http.NewRequest("POST", ts.URL+"/logs/selftest", nil)
+	req.Header.Set("X-CSRF-Token", csrf)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	res, _ = c.Do(req)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-site status %d", res.StatusCode)
+	}
+	// Valid request starts a job.
+	req, _ = http.NewRequest("POST", ts.URL+"/logs/selftest", nil)
+	req.Header.Set("X-CSRF-Token", csrf)
+	res, _ = c.Do(req)
+	loc := res.Header.Get("HX-Redirect")
+	if res.StatusCode != http.StatusNoContent || !strings.HasPrefix(loc, "/logs/jobs/") {
+		t.Fatalf("selftest %d %q", res.StatusCode, loc)
+	}
+
+	// Stream the job via SSE until "done".
+	sc := &http.Client{Jar: c.Jar, Timeout: 15 * time.Second}
+	res, err := sc.Get(ts.URL + loc + "/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var got []string
+	r := bufio.NewScanner(res.Body)
+	for r.Scan() {
+		got = append(got, r.Text())
+		if r.Text() == "event: done" {
+			break
+		}
+	}
+	all := strings.Join(got, "\n")
+	if !strings.Contains(all, "[DRY-RUN] sudo -n") || !strings.Contains(all, "Adım 5/5") || !strings.Contains(all, "event: done") {
+		t.Fatalf("stream:\n%s", all)
+	}
+	// Job detail page and activity detail render.
+	res2, _ := c.Get(ts.URL + loc)
+	if res2.StatusCode != 200 {
+		t.Fatalf("job page %d", res2.StatusCode)
+	}
+}
+
+func TestLoginRateLimit(t *testing.T) {
+	ts, s := newTestServer(t)
+	c := client()
+	for i := 0; i < auth.MaxFailures; i++ {
+		res, _ := c.PostForm(ts.URL+"/login", url.Values{"username": {"admin"}, "password": {"nope"}})
+		if res.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("attempt %d → %d", i, res.StatusCode)
+		}
+	}
+	res, _ := c.PostForm(ts.URL+"/login", url.Values{"username": {"admin"}, "password": {"correct-horse-1"}})
+	if res.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", res.StatusCode)
+	}
+	lines, _ := logs.TailLines(s.Cfg.AuthLogPath(), 10)
+	if len(lines) < auth.MaxFailures || !strings.Contains(lines[0], "login failed ip=127.0.0.1") {
+		t.Fatalf("auth log %q", lines)
+	}
+}
+
+func TestAllowlist(t *testing.T) {
+	p, err := parseAllowlist("203.0.113.0/24\n198.51.100.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]bool{"203.0.113.9": true, "198.51.100.7": true, "198.51.100.8": false, "127.0.0.1": true, "::1": true}
+	for ip, want := range cases {
+		if allowed(p, ip) != want {
+			t.Errorf("%s: want %v", ip, want)
+		}
+	}
+	if !allowed(nil, "1.2.3.4") {
+		t.Error("empty list must allow all")
+	}
+}
+
+func TestTwoFactorWebFlow(t *testing.T) {
+	ts, _ := newTestServer(t)
+	c := client()
+	csrf := login(t, ts, c)
+	post := func(path string, v url.Values) (*http.Response, string) {
+		v.Set("_csrf", csrf)
+		res, err := c.PostForm(ts.URL+path, v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		return res, string(b)
+	}
+	_, body := post("/settings/2fa/start", url.Values{})
+	if !strings.Contains(body, `src="data:image/png;base64,`) {
+		t.Fatal("QR image not rendered")
+	}
+	secret := regexp.MustCompile(`Elle giriş: <code>([A-Z2-7]+)</code>`).FindStringSubmatch(body)
+	sealed := regexp.MustCompile(`name="sealed" value="([^"]+)"`).FindStringSubmatch(body)
+	if secret == nil || sealed == nil {
+		t.Fatal("setup fields missing")
+	}
+	code := func(at time.Time) string {
+		c, _ := totp.GenerateCodeCustom(secret[1], at, totp.ValidateOpts{Period: 30, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1})
+		return c
+	}
+	sealedVal := strings.ReplaceAll(sealed[1], "&#43;", "+")
+	_, body = post("/settings/2fa/enable", url.Values{"sealed": {sealedVal}, "code": {code(time.Now().Add(-30 * time.Second))}})
+	if !strings.Contains(body, "İki adımlı doğrulama etkin") {
+		t.Fatalf("enable failed: %s", regexp.MustCompile(`alert err">[^<]*`).FindString(body))
+	}
+	post("/logout", url.Values{})
+
+	// Password alone now yields the MFA stage, which cannot reach the dashboard.
+	res, _ := c.PostForm(ts.URL+"/login", url.Values{"username": {"admin"}, "password": {"correct-horse-1"}})
+	if res.Header.Get("Location") != "/login/2fa" {
+		t.Fatalf("expected 2fa redirect, got %q", res.Header.Get("Location"))
+	}
+	res, _ = c.Get(ts.URL + "/")
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("mfa-stage session reached dashboard: %d", res.StatusCode)
+	}
+	res, _ = c.Get(ts.URL + "/login/2fa")
+	b, _ := io.ReadAll(res.Body)
+	m := regexp.MustCompile(`name="_csrf" value="([^"]+)"`).FindSubmatch(b)
+	res, _ = c.PostForm(ts.URL+"/login/2fa", url.Values{"_csrf": {string(m[1])}, "code": {code(time.Now())}})
+	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/" {
+		t.Fatalf("2fa submit %d %q", res.StatusCode, res.Header.Get("Location"))
+	}
+	res, _ = c.Get(ts.URL + "/")
+	if res.StatusCode != 200 {
+		t.Fatalf("dashboard after 2fa %d", res.StatusCode)
+	}
+}

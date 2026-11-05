@@ -1,0 +1,38 @@
+{{define "content"}}
+<h1>Genel Bakış</h1>
+<div hx-get="/?part=metrics" hx-trigger="every 5s" hx-swap="innerHTML">
+{{template "metrics" .}}
+</div>
+
+<section class="card">
+  <div class="card-head"><h2>Son İşlemler</h2><a href="/logs/activity" class="small">Tümü →</a></div>
+  {{with .Data.Recent}}
+  <table class="table compact">
+    <tbody>
+    {{range .}}
+      <tr class="{{if .Failed}}row-failed{{end}}">
+        <td class="nowrap muted"><time datetime="{{iso .TS}}">{{datetime .TS}}</time></td>
+        <td><a href="/logs/activity?open={{.ID}}"><code>{{.Action}}</code></a></td>
+        <td>{{.TargetID}}</td>
+        <td class="right">{{template "badge" .Status}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="muted">Henüz işlem yok.</p>{{end}}
+</section>
+{{end}}
+
+{{define "metrics"}}{{with .Data.Sys}}
+<div class="grid metrics">
+  <div class="card stat"><div class="label">Sunucu</div><div class="value small-value">{{.Hostname}}</div><div class="muted small">Açık: {{uptime .Uptime}}</div></div>
+  <div class="card stat"><div class="label">Yük ortalaması</div><div class="value">{{printf "%.2f" .Load1}}</div><div class="muted small">5 dk {{printf "%.2f" .Load5}} · 15 dk {{printf "%.2f" .Load15}}</div></div>
+  <div class="card stat"><div class="label">RAM</div><div class="value">%{{.MemUsedPct}}</div>
+    <meter class="{{meterClass .MemUsedPct}}" min="0" max="100" low="75" high="90" optimum="0" value="{{.MemUsedPct}}"></meter>
+    <div class="muted small">{{bytes .MemAvail}} boş / {{bytes .MemTotal}}</div></div>
+  <div class="card stat"><div class="label">Disk (/)</div><div class="value">%{{.DiskUsedPct}}</div>
+    <meter min="0" max="100" low="75" high="85" optimum="0" value="{{.DiskUsedPct}}"></meter>
+    <div class="muted small">{{bytes .DiskFree}} boş / {{bytes .DiskTotal}}</div></div>
+  <div class="card stat"><div class="label">Panel</div><div class="value">{{bytes .PanelRSS}}</div><div class="muted small">RSS · {{.Goroutines}} goroutine</div></div>
+</div>
+{{end}}{{end}}

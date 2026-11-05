@@ -1,0 +1,26 @@
+{{define "content"}}
+<h1>Log Merkezi</h1>
+{{template "logs-tabs" "system"}}
+{{with .Data}}
+<form class="filters" id="syslog-form" hx-get="/logs/system" hx-target="#syslog" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, keyup changed delay:400ms from:input[name=q]">
+  <select name="source">
+    {{range .Sources}}<option value="{{.ID}}" {{if eq $.Data.Source .ID}}selected{{end}}>{{.Label}}</option>{{end}}
+  </select>
+  <select name="level">
+    <option value="">Tüm seviyeler</option>
+    {{range $l := list "info" "warn" "error"}}<option value="{{$l}}" {{if eq $.Data.Level $l}}selected{{end}}>{{$l}}</option>{{end}}
+  </select>
+  <select name="n">
+    {{range $n := list 100 500 1000}}<option value="{{$n}}" {{if eq $.Data.N $n}}selected{{end}}>Son {{$n}} satır</option>{{end}}
+  </select>
+  <input type="search" name="q" value="{{.Q}}" placeholder="Metin ara…">
+  <a class="button" href="/logs/system?source={{.Source}}&n={{.N}}&q={{.Q}}&level={{.Level}}&download=1">İndir</a>
+</form>
+<p class="muted small">Canlı takip ve diğer kaynaklar (journald, nginx, certbot, docker, auth.log) Faz 5'te eklenecek.</p>
+{{template "syslog-lines" $}}
+{{end}}
+{{end}}
+
+{{define "syslog-lines"}}{{$d := .Data}}
+<div id="syslog" class="console tall">{{range $d.Lines}}<div>{{.}}</div>{{else}}<div class="muted">(boş)</div>{{end}}</div>
+{{end}}

@@ -1,0 +1,40 @@
+{{define "content"}}
+<h1>Log Merkezi</h1>
+{{template "logs-tabs" "jobs"}}
+{{with .Data}}
+<div class="toolbar">
+  <form class="filters" hx-get="/logs/jobs" hx-target="#job-table" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, keyup changed delay:400ms">
+    <input name="kind" value="{{.Kind}}" placeholder="İş türü (örn. backup.)">
+    <select name="status">
+      <option value="">Tüm durumlar</option>
+      {{range $s := list "queued" "running" "success" "failed" "canceled"}}<option value="{{$s}}" {{if eq $.Data.Status $s}}selected{{end}}>{{statusLabel $s}}</option>{{end}}
+    </select>
+  </form>
+  <button type="button" hx-post="/logs/selftest">Öz test işi başlat</button>
+</div>
+{{template "job-table" $}}
+{{end}}
+{{end}}
+
+{{define "job-table"}}{{$d := .Data}}
+<div id="job-table" class="card table-wrap">
+  <table class="table">
+    <thead><tr><th>#</th><th>Tür</th><th>Hedef</th><th>Oluşturma</th><th>Süre</th><th>İlerleme</th><th>Durum</th></tr></thead>
+    <tbody>
+    {{range $d.Jobs}}
+      <tr class="{{if eq .Status "failed"}}row-failed{{end}}">
+        <td><a href="/logs/jobs/{{.ID}}">{{.ID}}</a></td>
+        <td><a href="/logs/jobs/{{.ID}}"><code>{{.Kind}}</code></a></td>
+        <td>{{.TargetID}}</td>
+        <td class="nowrap">{{datetime .CreatedAt}}</td>
+        <td class="nowrap muted">{{if not .StartedAt.IsZero}}{{.Duration}}{{end}}</td>
+        <td><progress max="100" value="{{.Progress}}"></progress></td>
+        <td>{{template "badge" .Status}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not $d.Jobs}}<p class="muted pad">İş bulunamadı.</p>{{end}}
+  {{if $d.NextID}}<p class="center"><a href="/logs/jobs?before={{$d.NextID}}&status={{$d.Status}}&kind={{$d.Kind}}">Daha eski işler →</a></p>{{end}}
+</div>
+{{end}}

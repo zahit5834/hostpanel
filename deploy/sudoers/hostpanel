@@ -1,0 +1,17 @@
+# /etc/sudoers.d/hostpanel — installed by install.sh, mode 0440 root:root.
+#
+# The panel user may run ONLY the helper scripts listed below as root, with no
+# password. Each script is listed by full path (no wildcards: a "*" in sudoers
+# also matches arguments and any file later dropped into the directory).
+# /opt/hostpanel/scripts and its files are root:root 0755/0644+x, so the panel
+# user cannot modify them. Every script re-validates its own arguments.
+#
+# Add new helpers here AND in deploy/scripts/; `make check-sudoers` verifies they match.
+
+Defaults:hostpanel !requiretty, env_reset, !lecture
+Defaults:hostpanel secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+Cmnd_Alias HOSTPANEL_HELPERS = \
+    /opt/hostpanel/scripts/hp-selftest.sh
+
+hostpanel ALL=(root) NOPASSWD: HOSTPANEL_HELPERS

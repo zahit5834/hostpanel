@@ -1,0 +1,28 @@
+{{define "content"}}
+{{with .Data}}{{with .Job}}
+<p><a href="/logs/jobs" class="small">← İş Logları</a></p>
+<div class="card-head">
+  <h1>İş #{{.ID}} <code>{{.Kind}}</code></h1>
+  <div class="actions">
+    {{if $.Data.Active}}<button type="button" class="danger" hx-post="/logs/jobs/{{.ID}}/cancel" hx-confirm="İş iptal edilsin mi?">İptal et</button>{{end}}
+    {{if and .Retryable (or (eq .Status "failed") (eq .Status "canceled"))}}<button type="button" hx-post="/logs/jobs/{{.ID}}/retry">Yeniden dene</button>{{end}}
+  </div>
+</div>
+<dl class="kv inline">
+  {{if .TargetID}}<dt>Hedef</dt><dd>{{.TargetType}}: {{.TargetID}}</dd>{{end}}
+  <dt>Oluşturma</dt><dd>{{datetime .CreatedAt}}</dd>
+  <dt>Başlangıç</dt><dd>{{datetime .StartedAt}}</dd>
+  <dt>Bitiş</dt><dd>{{datetime .FinishedAt}}</dd>
+  {{if .ActivityID}}<dt>İşlem kaydı</dt><dd><a href="/logs/activity?open={{.ActivityID}}">#{{.ActivityID}}</a></dd>{{end}}
+</dl>
+{{if .Error}}<pre class="err-box">{{.Error}}</pre>{{end}}
+
+<div class="card" hx-ext="sse" sse-connect="/logs/jobs/{{.ID}}/stream" sse-close="done">
+  <div class="card-head">
+    <div class="progress-line" sse-swap="progress"><progress max="100" value="{{.Progress}}"></progress> <span>%{{.Progress}}</span></div>
+    <div sse-swap="status,done">{{template "badge" .Status}}</div>
+  </div>
+  <div class="console" id="console" sse-swap="line" hx-swap="beforeend"></div>
+</div>
+{{end}}{{end}}
+{{end}}

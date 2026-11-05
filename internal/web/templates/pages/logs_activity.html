@@ -1,0 +1,84 @@
+{{define "content"}}
+<h1>Log Merkezi</h1>
+{{template "logs-tabs" "activity"}}
+{{with .Data}}
+<form class="filters" hx-get="/logs/activity" hx-target="#activity-table" hx-swap="outerHTML" hx-push-url="true"
+      hx-trigger="change, keyup changed delay:400ms from:input[name=q]">
+  <input type="search" name="q" value="{{.Filter.Text}}" placeholder="Ara (özet, hedef, hata)…">
+  <input name="action" value="{{.Filter.Action}}" placeholder="İşlem (örn. site.)" list="action-list">
+  <datalist id="action-list">
+    <option value="login."><option value="settings."><option value="system."><option value="exec."><option value="site."><option value="ssl."><option value="db."><option value="backup.">
+  </datalist>
+  <select name="status">
+    <option value="">Tüm sonuçlar</option>
+    <option value="success" {{if eq .Filter.Status "success"}}selected{{end}}>Başarılı</option>
+    <option value="failed" {{if eq .Filter.Status "failed"}}selected{{end}}>Başarısız</option>
+    <option value="running" {{if eq .Filter.Status "running"}}selected{{end}}>Devam ediyor</option>
+  </select>
+  <select name="source">
+    <option value="">Tüm kaynaklar</option>
+    <option value="user" {{if eq .Filter.Source "user"}}selected{{end}}>Ben</option>
+    <option value="system" {{if eq .Filter.Source "system"}}selected{{end}}>Sistem</option>
+  </select>
+  <input type="date" name="from" value="{{.From}}" aria-label="Başlangıç">
+  <input type="date" name="to" value="{{.To}}" aria-label="Bitiş">
+</form>
+<div class="split">
+  {{template "activity-table" $}}
+  <aside id="detail" class="card detail" {{if .OpenID}}hx-get="/logs/activity/{{.OpenID}}" hx-trigger="load"{{end}}>
+    <p class="muted">Ayrıntı için bir kayda tıklayın.</p>
+  </aside>
+</div>
+{{end}}
+{{end}}
+
+{{define "activity-table"}}{{$d := .Data}}
+<div id="activity-table" class="card table-wrap">
+  <table class="table">
+    <thead><tr><th>Zaman</th><th>Kaynak</th><th>İşlem</th><th>Hedef</th><th>Özet</th><th>Süre</th><th>Sonuç</th></tr></thead>
+    <tbody>
+      {{template "activity-rows" .}}
+    </tbody>
+  </table>
+  {{if not $d.Entries}}<p class="muted pad">Kayıt bulunamadı.</p>{{end}}
+</div>
+{{end}}
+
+{{define "activity-rows"}}{{$d := .Data}}
+{{range $d.Entries}}
+<tr class="clickable {{if .Failed}}row-failed{{end}}" hx-get="/logs/activity/{{.ID}}" hx-target="#detail">
+  <td class="nowrap"><time datetime="{{iso .TS}}">{{datetime .TS}}</time></td>
+  <td><span class="tag {{.Source}}">{{if eq .Source "user"}}ben{{else}}sistem{{end}}</span>{{if .IP}} <span class="muted small">{{.IP}}</span>{{end}}</td>
+  <td><code>{{.Action}}</code></td>
+  <td>{{if .TargetID}}{{.TargetType}}: {{.TargetID}}{{end}}</td>
+  <td class="ellipsis">{{.Summary}}{{if .Error}} <span class="err-text">— {{.Error}}</span>{{end}}</td>
+  <td class="nowrap muted">{{if .DurationMS}}{{ms .DurationMS}}{{end}}</td>
+  <td>{{template "badge" .Status}}</td>
+</tr>
+{{end}}
+{{if $d.NextID}}
+<tr id="load-more-row"><td colspan="7" class="center">
+  <button type="button" class="link-btn" hx-get="/logs/activity?{{$d.Query}}&before={{$d.NextID}}" hx-target="#load-more-row" hx-swap="outerHTML">Daha fazla yükle</button>
+</td></tr>
+{{end}}
+{{end}}
+
+{{define "activity-detail"}}{{with .Data}}{{with .E}}
+<div class="card-head"><h2><code>{{.Action}}</code></h2>{{template "badge" .Status}}</div>
+<dl class="kv">
+  <dt>Zaman</dt><dd>{{datetime .TS}}</dd>
+  <dt>Kaynak</dt><dd>{{if eq .Source "user"}}Ben{{else}}Sistem{{end}}{{if .IP}} · {{.IP}}{{end}}</dd>
+  {{if .TargetID}}<dt>Hedef</dt><dd>{{.TargetType}}: {{.TargetID}}</dd>{{end}}
+  {{if .DurationMS}}<dt>Süre</dt><dd>{{ms .DurationMS}}</dd>{{end}}
+  {{if .Summary}}<dt>Özet</dt><dd>{{.Summary}}</dd>{{end}}
+</dl>
+{{if .Error}}<h3>Hata</h3><pre class="err-box">{{.Error}}</pre>{{end}}
+{{if .Params}}<h3>Parametreler</h3><pre>{{prettyJSON .Params}}</pre>{{end}}
+{{if .Diff}}<h3>Değişiklik</h3><pre class="diff">{{range diffLines .Diff}}<span class="{{.Kind}}">{{.Text}}</span>
+{{end}}</pre>{{end}}
+{{end}}
+{{with .Job}}
+<h3>İlgili iş</h3>
+<p><a href="/logs/jobs/{{.ID}}">İş #{{.ID}} · {{.Kind}}</a> {{template "badge" .Status}}</p>
+{{end}}
+{{end}}{{end}}

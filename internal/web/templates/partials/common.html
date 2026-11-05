@@ -1,0 +1,9 @@
+{{define "badge"}}<span class="badge {{.}}">{{statusLabel .}}</span>{{end}}
+
+{{define "logs-tabs"}}
+<div class="tabs">
+  <a href="/logs/activity" class="{{if eq . "activity"}}active{{end}}">İşlem Geçmişi</a>
+  <a href="/logs/jobs" class="{{if eq . "jobs"}}active{{end}}">İş Logları</a>
+  <a href="/logs/system" class="{{if eq . "system"}}active{{end}}">Sistem Logları</a>
+</div>
+{{end}}

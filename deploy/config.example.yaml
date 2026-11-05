@@ -1,0 +1,16 @@
+# /etc/hostpanel/config.yaml — HostPanel configuration.
+# Without a public domain the panel listens on loopback only; reach it with:
+#   ssh -L 8443:127.0.0.1:8443 user@server   → http://127.0.0.1:8443
+listen: 127.0.0.1:8443
+data_dir: /var/lib/hostpanel
+log_dir: /var/log/hostpanel
+master_key: /etc/hostpanel/master.key
+scripts_dir: /opt/hostpanel/scripts
+templates_dir: /opt/hostpanel/templates
+runtimes_dir: /etc/hostpanel/runtimes
+# true when served over HTTPS (nginx in front). false only for SSH tunnel over plain HTTP.
+secure_cookies: true
+# true when nginx proxies to the panel (honour X-Real-IP from 127.0.0.1 only).
+trust_proxy: true
+dry_run: false
+workers: 1

@@ -1,0 +1,52 @@
+{{define "layout"}}<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · HostPanel</title>
+<meta name="csrf-token" content="{{.CSRF}}">
+<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"historyCacheSize":0}'>
+<link rel="stylesheet" href="/static/app.css?v={{.Version}}">
+<script defer src="/static/htmx.min.js?v={{.Version}}"></script>
+<script defer src="/static/sse.js?v={{.Version}}"></script>
+<script defer src="/static/app.js?v={{.Version}}"></script>
+<script defer src="/static/alpine-csp.min.js?v={{.Version}}"></script>
+</head>
+<body>
+{{if .LoggedIn}}
+<div class="shell" x-data="nav">
+  <header class="topbar">
+    <button class="icon-btn menu-btn" type="button" x-on:click="toggle" aria-label="Menü">☰</button>
+    <a class="brand" href="/">HostPanel</a>
+    {{if .DryRun}}<span class="badge dry" title="Sistem komutları çalıştırılmıyor, yalnızca loglanıyor">DRY-RUN</span>{{end}}
+    {{if .Dev}}<span class="badge">DEV</span>{{end}}
+    <span class="spacer"></span>
+    <button class="icon-btn" type="button" x-data="theme" x-on:click="toggle" aria-label="Tema değiştir">◐</button>
+    <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="link-btn" type="submit">Çıkış</button></form>
+  </header>
+  <nav class="sidebar" x-bind:class="openClass">
+    <a href="/" class="{{if eq .Nav "dashboard"}}active{{end}}">Genel Bakış</a>
+    <span class="nav-soon">Müşteriler</span>
+    <span class="nav-soon">Siteler</span>
+    <span class="nav-soon">SSL</span>
+    <span class="nav-soon">Veritabanları</span>
+    <span class="nav-soon">Yedekler</span>
+    <a href="/logs/activity" class="{{if eq .Nav "logs"}}active{{end}}">Log Merkezi</a>
+    <a href="/settings/security" class="{{if eq .Nav "settings"}}active{{end}}">Ayarlar</a>
+    <div class="version">{{.Version}}</div>
+  </nav>
+  <main class="content">
+    {{if .Error}}<div class="alert err">{{.Error}}</div>{{end}}
+    {{if .Notice}}<div class="alert ok">{{.Notice}}</div>{{end}}
+    {{template "content" .}}
+  </main>
+</div>
+{{else}}
+<main class="auth-box">
+  <h1 class="brand">HostPanel</h1>
+  {{if .Error}}<div class="alert err">{{.Error}}</div>{{end}}
+  {{template "content" .}}
+</main>
+{{end}}
+</body>
+</html>{{end}}
