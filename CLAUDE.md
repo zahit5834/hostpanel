@@ -104,6 +104,13 @@ Planlanan (ilgili fazda eklenecek): `robfig/cron/v3` (Faz 4 yedek planları), `m
 - [ ] Faz 5 — İzleme ve ekler
 - [ ] Faz 6 — Dağıtım
 
+## Bekleyen manuel testler (kullanıcı sonra yapacak)
+Faz 0:
+- [ ] `sudo apt install -y make shellcheck`, ardından `make lint test`
+- [ ] `sudo visudo -cf deploy/sudoers/hostpanel`
+- [ ] `sudo deploy/scripts/hp-selftest.sh ping` (gerçek sudo zinciri)
+- [ ] Tarayıcı (SSH tüneli `-L 8080:127.0.0.1:8080`): giriş → 2FA kur (QR) → çıkış/giriş TOTP ve kurtarma kodu → öz test işi canlı akış + iptal → İşlem Geçmişi kayıtları → tema ve mobil menü
+
 ## Açık konular
 - Modül yolu geçici `hostpanel`; GitHub kullanıcı adı gelince `github.com/<ad>/hostpanel` (Faz 6). `deploy/systemd/hostpanel.service` içindeki `OWNER` da.
 - Sunucuda `make` ve `shellcheck` yok (`sudo apt install make shellcheck`).
