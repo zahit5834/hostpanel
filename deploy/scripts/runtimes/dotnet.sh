@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # runtimes/dotnet.sh — install/remove an ASP.NET Core runtime side by side in /usr/share/dotnet.
 # Called only by hp-runtime.sh (already validated): dotnet.sh install|remove <X.Y.Z>
+#   dotnet.sh install-sdk <X.Y>   — latest SDK of the channel (needed for git deploy builds)
+#   dotnet.sh remove-sdk <X.Y.Z>
 # Downloads from Microsoft's release metadata and verifies the published SHA-512.
 source "$(dirname "$(readlink -f "$0")")/../lib.sh"
 require_root
@@ -11,6 +13,11 @@ case $(dpkg --print-architecture) in
   amd64) rid=x64 ;;
   arm64) rid=arm64 ;;
   *) die "desteklenmeyen mimari" ;;
+esac
+
+case $action in
+  install | remove)
+    [[ $version =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,4}$ ]] || die ".NET sürümü X.Y.Z olmalı" ;;
 esac
 
 case $action in
@@ -53,6 +60,47 @@ case $action in
     chmod -R a+rX,go-w "$DOTNET_ROOT"
     log "kuruldu: ASP.NET Core ${version}"
     "$DOTNET_ROOT/dotnet" --list-runtimes
+    ;;
+  install-sdk)
+    command -v jq >/dev/null || die "jq kurulu değil"
+    meta="https://builds.dotnet.microsoft.com/dotnet/release-metadata/${version}/releases.json"
+    log "sürüm bilgisi: ${meta}"
+    json=$(curl -fsSL --retry 3 "$meta") || die "sürüm bilgisi alınamadı"
+    sdk=$(jq -r '."latest-sdk" // empty' <<<"$json")
+    [[ $sdk =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,4}$ ]] || die "${version} kanalında SDK bulunamadı"
+    read -r url hash < <(jq -r --arg v "$sdk" --arg n "dotnet-sdk-linux-${rid}.tar.gz" \
+      '[.releases[] | (.sdks // [.sdk])[] | select(.version == $v) | .files[] | select(.name == $n)][0] | "\(.url) \(.hash)"' <<<"$json") || true
+    [[ -n ${url:-} && ${hash:-} =~ ^[0-9a-f]{128}$ ]] || die "SDK ${sdk} için dotnet-sdk-linux-${rid} bulunamadı"
+    [[ $url == https://builds.dotnet.microsoft.com/* || $url == https://download.visualstudio.microsoft.com/* ]] || die "beklenmeyen indirme adresi: ${url}"
+    [[ ! -d $DOTNET_ROOT/sdk/$sdk ]] || { log "SDK ${sdk} zaten kurulu"; "$DOTNET_ROOT/dotnet" --list-sdks; exit 0; }
+
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    log "indiriliyor: ${url}"
+    curl -fsSL --retry 3 -o "$work/sdk.tar.gz" "$url"
+    echo "${hash}  $work/sdk.tar.gz" | sha512sum -c --quiet - || die "SHA-512 doğrulaması başarısız"
+    log "SHA-512 doğrulandı"
+    mkdir -p "$work/x"
+    tar -xzf "$work/sdk.tar.gz" -C "$work/x"
+    [[ -d $work/x/sdk/$sdk ]] || die "arşivde sdk/${sdk} yok"
+    install -d -m 0755 "$DOTNET_ROOT"
+    # Merge without overwriting what is installed (runtimes, packs, fxr).
+    for part in sdk sdk-manifests packs templates shared host; do
+      [[ -d $work/x/$part ]] && cp -a -n "$work/x/$part" "$DOTNET_ROOT/"
+    done
+    newest=$(printf '%s\n' "$DOTNET_ROOT"/host/fxr/* | xargs -n1 basename | sort -V | tail -n1)
+    if [[ ! -x $DOTNET_ROOT/dotnet || -d $work/x/host/fxr/$newest ]]; then
+      install -m 0755 "$work/x/dotnet" "$DOTNET_ROOT/dotnet"
+    fi
+    chown -R root:root "$DOTNET_ROOT"
+    chmod -R a+rX,go-w "$DOTNET_ROOT"
+    log "kuruldu: .NET SDK ${sdk}"
+    "$DOTNET_ROOT/dotnet" --list-sdks
+    ;;
+  remove-sdk)
+    rm -rf "${DOTNET_ROOT:?}/sdk/$version"
+    log "SDK kaldırıldı: ${version}"
+    [[ -x $DOTNET_ROOT/dotnet ]] && "$DOTNET_ROOT/dotnet" --list-sdks || true
     ;;
   remove)
     for fw in Microsoft.NETCore.App Microsoft.AspNetCore.App; do

@@ -34,7 +34,7 @@ func TestDefaultDefinitionsLoad(t *testing.T) {
 	for _, p := range r.All() {
 		ids = append(ids, p.Def().ID)
 	}
-	if strings.Join(ids, ",") != "dotnet,node,static" {
+	if strings.Join(ids, ",") != "dotnet,node,php,static" {
 		t.Fatalf("ids %v", ids)
 	}
 }
@@ -119,5 +119,51 @@ func TestRemoteParsers(t *testing.T) {
 	n, err := parseNodeIndex(strings.NewReader(`[{"version":"v27.0.0","lts":false},{"version":"v24.22.2","lts":"Krypton"},{"version":"v24.22.1","lts":"Krypton"},{"version":"v22.23.4","lts":"Jod"}]`))
 	if err != nil || len(n) != 2 || n[0].Version != "24.22.2" {
 		t.Fatalf("%v %v", n, err)
+	}
+}
+
+func TestPHPDefinition(t *testing.T) {
+	p, _ := load(t, "PHP 8.3.6 (fpm-fcgi) (built: Jul 14 2025 18:30:55)\nCopyright (c) The PHP Group\n").Get("php")
+	if !p.Def().HasUnit() || p.Def().Type != TypeFastCGI {
+		t.Fatal("php must be a fastcgi runtime with its own unit")
+	}
+	vs, _ := p.InstalledVersions(context.Background())
+	if strings.Join(vs, ",") != "8.3" {
+		t.Fatalf("versions %v", vs)
+	}
+	av, _ := p.AvailableVersions(context.Background())
+	if len(av) != 1 || av[0].Version != "8.3" {
+		t.Fatalf("available %v", av)
+	}
+	f, err := p.ValidateFields(map[string]string{"docroot": "public"})
+	if err != nil || f["index"] != "index.php" || f["maxChildren"] != "5" || f["memoryLimit"] != "256" || f["frontController"] != "evet" {
+		t.Fatalf("%v %v", f, err)
+	}
+	for _, bad := range []map[string]string{{"docroot": "../x"}, {"docroot": "/abs"}, {"maxChildren": "51"}, {"maxChildren": "0"}, {"memoryLimit": "5000"}, {"memoryLimit": "8"}} {
+		if _, err := p.ValidateFields(bad); err == nil {
+			t.Errorf("accepted %v", bad)
+		}
+	}
+	argv, err := p.StartArgs(Vars{Domain: "ornek.com", Version: "8.3", Fields: f})
+	if err != nil || strings.Join(argv, " ") != "/usr/sbin/php-fpm8.3 --nodaemonize --fpm-config=/etc/hostpanel/php/ornek.com.conf" {
+		t.Fatalf("%v %v", argv, err)
+	}
+	if !ValidInstallVersion("8.3") || !ValidInstallVersion("10.0.14") || ValidInstallVersion("8") || ValidInstallVersion("8.3;x") {
+		t.Fatal("ValidInstallVersion")
+	}
+}
+
+func TestDotnetSDKs(t *testing.T) {
+	p, _ := load(t, "8.0.415 [/usr/share/dotnet/sdk]\n10.0.403 [/usr/share/dotnet/sdk]\n").Get("dotnet")
+	sdks := p.InstalledSDKs(context.Background())
+	if strings.Join(sdks, ",") != "10.0.403,8.0.415" {
+		t.Fatalf("%v", sdks)
+	}
+	if !HasSDKFor(sdks, "10.0.14") || HasSDKFor(sdks, "9.0.1") {
+		t.Fatal("HasSDKFor")
+	}
+	n, _ := load(t, "").Get("node")
+	if n.InstalledSDKs(context.Background()) != nil {
+		t.Fatal("node has no SDK definition")
 	}
 }

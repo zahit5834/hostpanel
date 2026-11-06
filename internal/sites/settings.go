@@ -55,7 +55,7 @@ func (s *Service) UpdateSettings(ctx context.Context, site Site, in SettingsInpu
 	default:
 		return res, errors.New("geçersiz www seçeneği")
 	}
-	if def.Type == runtimes.TypeProxy && in.RuntimeVersion != site.RuntimeVersion {
+	if def.HasUnit() && in.RuntimeVersion != site.RuntimeVersion {
 		installed, _ := prov.InstalledVersions(ctx)
 		if !contains(installed, in.RuntimeVersion) {
 			return res, errors.New("seçilen sürüm kurulu değil")
@@ -88,7 +88,7 @@ func (s *Service) UpdateSettings(ctx context.Context, site Site, in SettingsInpu
 	if err := ValidateSnippet(next.CustomSnippet, site.Domain); err != nil {
 		return res, err
 	}
-	if def.Type == runtimes.TypeProxy {
+	if def.HasUnit() {
 		if _, err := prov.StartArgs(s.vars(next)); err != nil {
 			return res, err
 		}
@@ -106,7 +106,15 @@ func (s *Service) UpdateSettings(ctx context.Context, site Site, in SettingsInpu
 		}
 		res.NginxDiff = logs.LineDiff(oldConf, newConf)
 	}
-	if def.Type == runtimes.TypeProxy && (next.MemoryMaxMB != site.MemoryMaxMB || next.CPUQuotaPct != site.CPUQuotaPct ||
+	if def.Type == runtimes.TypeFastCGI && (next.MaxUploadMB != site.MaxUploadMB || !maps.Equal(next.Fields, site.Fields)) {
+		if err := s.installPool(ctx, nil, next); err != nil {
+			s.applyNginx(context.WithoutCancel(ctx), nil, site, ModeFor(site.Status))
+			return res, err
+		}
+		res.UnitChanged = true
+		res.RestartAdvised = next.Status == StatusRunning
+	}
+	if def.HasUnit() && (next.MemoryMaxMB != site.MemoryMaxMB || next.CPUQuotaPct != site.CPUQuotaPct ||
 		next.RuntimeVersion != site.RuntimeVersion || !maps.Equal(next.Fields, site.Fields)) {
 		if err := s.installUnit(ctx, nil, next); err != nil {
 			// Roll nginx back so config and unit don't diverge.

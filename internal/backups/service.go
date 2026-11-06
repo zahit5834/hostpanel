@@ -19,13 +19,13 @@ import (
 	"sync"
 	"time"
 
+	"hostpanel/internal/crons"
 	"hostpanel/internal/crypto"
 	"hostpanel/internal/databases"
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
 	"hostpanel/internal/notify"
-	"hostpanel/internal/runtimes"
 	"hostpanel/internal/sites"
 	"hostpanel/internal/store"
 )
@@ -54,8 +54,9 @@ type Service struct {
 	Store      *Store
 	DB         *sql.DB
 	Box        *crypto.Box
-	Runner     exec.Runner // privileged helpers (dry-run in dev)
-	Probe      exec.Runner // unprivileged reads (rclone version)
+	Runner     exec.Runner    // privileged helpers (dry-run in dev)
+	Probe      exec.Runner    // unprivileged reads (rclone version)
+	Crons      *crons.Service // optional: crons go into config.json
 	Jobs       *jobs.Manager
 	Activity   *logs.Activity
 	Log        *slog.Logger
@@ -531,6 +532,7 @@ func (s *Service) create(ctx context.Context, l *jobs.Log, site sites.Site, b Ba
 		}
 	}
 	cfg := ConfigFor(site, active, env, cfgDBs)
+	cfg.Crons, cfg.Git = s.configExtras(ctx, site.ID)
 	if !b.Has(CompConfig) {
 		cfg = SiteConfig{Version: 1, CreatedAt: cfg.CreatedAt, Domain: site.Domain, ShortName: site.ShortName,
 			RuntimeID: site.RuntimeID, RuntimeVersion: site.RuntimeVersion, ActiveRelease: active, Databases: cfgDBs}
@@ -1113,7 +1115,9 @@ func (s *Service) readConfig(ctx context.Context, l *jobs.Log, b Backup) (SiteCo
 			dbs = append(dbs, ConfigDB{Name: d.Name, EnvKey: d.EnvKey})
 		}
 		l.Printf("[DRY-RUN] config.json yerine kaynak sitenin güncel ayarları kullanılıyor")
-		return ConfigFor(src, s.Sites.Store.ActiveRelease(ctx, src.ID), env, dbs), nil
+		cfg := ConfigFor(src, s.Sites.Store.ActiveRelease(ctx, src.ID), env, dbs)
+		cfg.Crons, cfg.Git = s.configExtras(ctx, src.ID)
+		return cfg, nil
 	}
 	if res.Truncated {
 		return SiteConfig{}, errors.New("config.json çok büyük")
@@ -1206,9 +1210,72 @@ func (s *Service) jobRestore(ctx context.Context, l *jobs.Log, p map[string]any)
 	return nil
 }
 
+// configExtras collects the site's crons and git settings for config.json.
+func (s *Service) configExtras(ctx context.Context, siteID int64) ([]ConfigCron, *ConfigGit) {
+	var out []ConfigCron
+	if s.Crons != nil {
+		list, _ := s.Crons.Store.BySite(ctx, siteID)
+		for _, c := range list {
+			out = append(out, ConfigCron{Name: c.Name, Schedule: c.Schedule, Command: c.Command, Enabled: c.Enabled, TimeoutSec: c.TimeoutSec})
+		}
+	}
+	var g *ConfigGit
+	if gs, err := s.Sites.Store.Git(ctx, siteID); err == nil {
+		g = &ConfigGit{RepoURL: gs.RepoURL, Branch: gs.Branch, BuildCommand: gs.BuildCommand, OutputDir: gs.OutputDir, BuildTimeout: gs.BuildTimeout}
+	}
+	return out, g
+}
+
+// restoreExtras re-creates crons (missing ones, by name) and git settings
+// (when the target has none). A clone gets its crons disabled so two sites
+// don't run the same job. Problems are logged, not fatal.
+func (s *Service) restoreExtras(ctx context.Context, l *jobs.Log, cfg SiteConfig, target sites.Site) {
+	clone := cfg.Domain != target.Domain
+	if s.Crons != nil && len(cfg.Crons) > 0 {
+		existing, _ := s.Crons.Store.BySite(ctx, target.ID)
+		have := map[string]bool{}
+		for _, c := range existing {
+			have[c.Name] = true
+		}
+		n := 0
+		for _, c := range cfg.Crons {
+			if have[c.Name] {
+				continue
+			}
+			cr := crons.Cron{Name: c.Name, Schedule: c.Schedule, Command: c.Command, Enabled: c.Enabled && !clone, TimeoutSec: c.TimeoutSec}
+			if _, err := s.Crons.Save(ctx, target, cr); err != nil {
+				l.Printf("Uyarı: cron %q geri yüklenemedi: %v", c.Name, err)
+				continue
+			}
+			n++
+		}
+		if n > 0 {
+			msg := "Cron görevleri geri yüklendi (%d)"
+			if clone {
+				msg += " — klonda devre dışı; kontrol edip açın"
+			}
+			l.Printf(msg, n)
+		}
+	}
+	if cfg.Git != nil {
+		if _, err := s.Sites.Store.Git(ctx, target.ID); err == nil {
+			return // target keeps its own git settings
+		}
+		g := sites.GitSettings{RepoURL: cfg.Git.RepoURL, Branch: cfg.Git.Branch, BuildCommand: cfg.Git.BuildCommand,
+			OutputDir: cfg.Git.OutputDir, BuildTimeout: cfg.Git.BuildTimeout}
+		if saved, err := s.Sites.SaveGit(ctx, target, g); err != nil {
+			l.Printf("Uyarı: git ayarları geri yüklenemedi: %v", err)
+		} else if saved.PublicKey != "" {
+			l.Printf("Git ayarları geri yüklendi; yeni deploy key üretildi (repo'ya eklenmeli): %s", saved.PublicKey)
+		} else {
+			l.Printf("Git ayarları geri yüklendi")
+		}
+	}
+}
+
 func (s *Service) restoreConfig(ctx context.Context, l *jobs.Log, cfg SiteConfig, target sites.Site) error {
 	in := cfg.SettingsFor(target)
-	if prov, ok := s.Sites.Runtimes.Get(target.RuntimeID); ok && prov.Def().Type == runtimes.TypeProxy {
+	if prov, ok := s.Sites.Runtimes.Get(target.RuntimeID); ok && prov.Def().HasUnit() {
 		installed, _ := prov.InstalledVersions(ctx)
 		if !slices.Contains(installed, in.RuntimeVersion) {
 			l.Printf("Uyarı: %s sürümü kurulu değil, hedefin sürümü (%s) korunuyor", in.RuntimeVersion, target.RuntimeVersion)
@@ -1219,6 +1286,7 @@ func (s *Service) restoreConfig(ctx context.Context, l *jobs.Log, cfg SiteConfig
 		return fmt.Errorf("ayarlar uygulanamadı: %w", err)
 	}
 	l.Printf("Site ayarları uygulandı")
+	s.restoreExtras(ctx, l, cfg, target)
 	if cfg.EnvSealed == nil {
 		return nil
 	}

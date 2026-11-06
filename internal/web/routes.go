@@ -131,6 +131,14 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 	mux.Handle("POST /sites/{id}/health", s.requireAuth(s.siteHealthSave))
 	mux.Handle("POST /sites/{id}/health/check", s.requireAuth(s.siteHealthCheck))
+	mux.Handle("POST /sites/{id}/crons", s.requireAuth(s.siteCronSave))
+	mux.Handle("POST /sites/{id}/crons/{cid}/delete", s.requireAuth(s.siteCronDelete))
+	mux.Handle("POST /sites/{id}/crons/{cid}/run", s.requireAuth(s.siteCronRun))
+	mux.Handle("POST /sites/{id}/git", s.requireAuth(s.siteGitSave))
+	mux.Handle("POST /sites/{id}/git/keygen", s.requireAuth(s.siteGitKeygen))
+	mux.Handle("POST /sites/{id}/git/hostkey-reset", s.requireAuth(s.siteGitHostKeyReset))
+	mux.Handle("POST /sites/{id}/git/deploy", s.requireAuth(s.siteGitDeploy))
+	mux.Handle("GET /logs/cron", s.requireAuth(s.cronLogs))
 	mux.Handle("GET /logs/system/stream", s.requireAuth(s.systemLogStream))
 }
 

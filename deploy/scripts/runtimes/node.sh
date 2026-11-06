@@ -5,6 +5,8 @@
 source "$(dirname "$(readlink -f "$0")")/../lib.sh"
 require_root
 action=$1 version=$2
+[[ $action == install || $action == remove ]] || die "geçersiz işlem: ${action}"
+[[ $version =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,4}$ ]] || die "Node sürümü X.Y.Z olmalı"
 NODE_ROOT=/opt/node
 
 case $(dpkg --print-architecture) in

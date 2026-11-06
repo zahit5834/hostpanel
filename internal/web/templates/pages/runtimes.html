@@ -6,7 +6,7 @@
 {{range .Rows}}{{$def := .Def}}
 <section class="card">
   <div class="card-head"><h2>{{$def.DisplayName}}</h2><span class="tag">{{$def.Type}}</span></div>
-  {{if eq $def.Type "proxy"}}
+  {{if $def.HasUnit}}{{$apt := eq $def.Versions.Available "php-ubuntu"}}
   <div class="grid two">
     <div class="table-wrap">
       <h3>Kurulu sürümler</h3>
@@ -16,7 +16,7 @@
         {{range .Installed}}<tr><td><code>{{.Version}}</code></td><td class="right">{{.Sites}}</td><td class="right">
           {{if eq .Sites 0}}<form method="post" action="/runtimes/{{$def.ID}}/remove" class="inline-form">
             <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.Version}}">
-            <button type="submit" class="danger">Kaldır</button></form>{{else}}<span class="muted small">kullanımda</span>{{end}}
+            <button type="submit" class="danger"{{if $apt}} data-confirm="PHP paketleri apt ile kaldırılacak. Devam edilsin mi?"{{end}}>Kaldır</button></form>{{else}}<span class="muted small">kullanımda</span>{{end}}
         </td></tr>{{end}}
         </tbody>
       </table>
@@ -30,11 +30,28 @@
         <input type="hidden" name="_csrf" value="{{$.CSRF}}">
         <select name="version">{{range .Available}}<option value="{{.Version}}">{{.Version}}{{if .Label}} · {{.Label}}{{end}}</option>{{end}}</select>
         <div><button type="submit" class="primary">Kur</button></div>
-        <p class="muted small">Resmi dağıtımdan indirilir, sağlama toplamı doğrulanır.</p>
+        <p class="muted small">{{if $apt}}Ubuntu deposundan apt ile kurulur (php8.3-fpm, cli, yaygın eklentiler, composer). Dağıtımın kendi php8.3-fpm servisi kapatılır; her PHP sitesi kendi php-fpm sürecini çalıştırır.{{else}}Resmi dağıtımdan indirilir, sağlama toplamı doğrulanır.{{end}}</p>
       </form>
       {{else if not .RemoteErr}}<p class="muted">Tüm güncel sürümler kurulu.</p>{{end}}
     </div>
   </div>
+  {{if $def.SDK}}
+  <div class="table-wrap">
+    <h3>SDK'lar <span class="muted small">(git deploy'da sunucuda build için)</span></h3>
+    {{if .SDKs}}<table class="table compact"><tbody>
+      {{range .SDKs}}<tr><td><code>{{.}}</code></td><td class="right">
+        <form method="post" action="/runtimes/{{$def.ID}}/remove-sdk" class="inline-form">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.}}">
+          <button type="submit" class="danger" data-confirm="SDK {{.}} kaldırılsın mı?">Kaldır</button></form></td></tr>{{end}}
+    </tbody></table>{{else}}<p class="muted">Kurulu SDK yok.</p>{{end}}
+    {{range .SDKChannels}}
+    <form method="post" action="/runtimes/{{$def.ID}}/install-sdk" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.}}">
+      <button type="submit">{{.}} SDK'sını kur</button></form>
+    {{end}}
+    <p class="muted small">Kanalın en yeni SDK'sı resmi dağıtımdan indirilir (SHA-512 doğrulanır, ~250 MB). Zip deploy için gerekmez.</p>
+  </div>
+  {{end}}
   {{else}}
   <p class="muted">Kurulum gerektirmez (nginx doğrudan sunar).</p>
   {{end}}

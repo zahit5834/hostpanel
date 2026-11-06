@@ -23,6 +23,7 @@ import (
 	"hostpanel/internal/auth"
 	"hostpanel/internal/backups"
 	"hostpanel/internal/config"
+	"hostpanel/internal/crons"
 	"hostpanel/internal/crypto"
 	"hostpanel/internal/customers"
 	"hostpanel/internal/databases"
@@ -90,7 +91,10 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 		Notify: notifySvc.Send, DryRun: true, DiskFunc: func() int { return 10 }}
 	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
 		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc,
-		Monitor: monSvc, Notify: notifySvc}
+		Monitor: monSvc, Notify: notifySvc,
+		Crons: &crons.Service{Store: crons.NewStore(db), Sites: svc, Runner: runner, Activity: act, Log: log,
+			ScriptsDir: cfg.ScriptsDir, DryRun: true, Notify: notifySvc.Send}, BaseCtx: ctx}
+	bkSvc.Crons = s.Crons
 	s.RegisterJobs()
 	if err := s.Init(ctx); err != nil {
 		t.Fatal(err)
@@ -106,6 +110,12 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 type fakeProbe struct{}
 
 func (fakeProbe) Run(ctx context.Context, c exec.Cmd) (exec.Result, error) {
+	if strings.HasSuffix(c.Name, "dotnet") && len(c.Args) == 1 && c.Args[0] == "--list-sdks" {
+		return exec.Result{Stdout: "10.0.403 [/usr/share/dotnet/sdk]\n"}, nil
+	}
+	if strings.HasSuffix(c.Name, "php-fpm8.3") {
+		return exec.Result{Stdout: "PHP 8.3.6 (fpm-fcgi) (built: Jul 14 2025 18:30:55)\n"}, nil
+	}
 	if strings.HasSuffix(c.Name, "dotnet") {
 		return exec.Result{Stdout: "Microsoft.AspNetCore.App 10.0.14 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\n"}, nil
 	}

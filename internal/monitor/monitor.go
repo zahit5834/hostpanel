@@ -370,7 +370,7 @@ func (s *Service) checkSite(ctx context.Context, site sites.Site, c Check, now t
 		s.send(ctx, notify.Event{Kind: notify.KindSiteStatus, Key: "up:" + site.Domain, NoDedupe: true,
 			Title: "🟢 " + site.Domain + " tekrar erişilebilir"})
 	}
-	if s.isProxy(site) {
+	if s.hasUnit(site) {
 		s.checkRestarts(ctx, site, &c, now)
 	}
 	s.Store.saveResult(ctx, c)
@@ -380,6 +380,12 @@ func (s *Service) checkSite(ctx context.Context, site sites.Site, c Check, now t
 func (s *Service) isProxy(site sites.Site) bool {
 	p, ok := s.Sites.Runtimes.Get(site.RuntimeID)
 	return ok && p.Def().Type == runtimes.TypeProxy
+}
+
+// hasUnit: proxy apps and PHP sites run their own unit (restart counting).
+func (s *Service) hasUnit(site sites.Site) bool {
+	p, ok := s.Sites.Runtimes.Get(site.RuntimeID)
+	return ok && p.Def().HasUnit()
 }
 
 func (s *Service) checkRestarts(ctx context.Context, site sites.Site, c *Check, now time.Time) {

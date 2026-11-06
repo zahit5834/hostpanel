@@ -1,0 +1,41 @@
+id: php
+displayName: "PHP"
+type: fastcgi
+versions:
+  # Only PHP 8.3 from the Ubuntu 24.04 archive (apt). Each site runs its own
+  # php-fpm master (hp-site-<short>.service) with its own pool config.
+  list-command: ["/usr/sbin/php-fpm8.3", "-v"]
+  list-regex: '^PHP (8\.3)\.'
+  available: php-ubuntu
+  install-script: php.sh
+startCommand: "/usr/sbin/php-fpm8.3 --nodaemonize --fpm-config=/etc/hostpanel/php/{{domain}}.conf"
+systemdTemplate: "php-fpm.service.tpl"
+nginxTemplate: "fastcgi.conf.tpl"
+siteFields:
+  - key: docroot
+    label: "Web kök dizini (isteğe bağlı)"
+    pattern: '^[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$'
+    placeholder: "public"
+    help: "Zip'in/repo'nun köküne göre; Laravel için public. Boş bırakılırsa kök."
+  - key: index
+    label: "İndeks dosyası"
+    pattern: '^[A-Za-z0-9._-]+$'
+    default: "index.php"
+  - key: frontController
+    label: "Ön denetleyici (bilinmeyen yolları index.php'ye yönlendir)"
+    pattern: '^(evet|hayır)$'
+    default: "evet"
+  - key: memoryLimit
+    label: "PHP memory_limit (MB)"
+    pattern: '^([1-9][0-9]|[1-9][0-9]{2}|[1-3][0-9]{3}|40[0-8][0-9]|409[0-6])$'
+    default: "256"
+  - key: maxChildren
+    label: "En fazla PHP işlemi (pm.max_children)"
+    pattern: '^([1-9]|[1-4][0-9]|50)$'
+    default: "5"
+    help: "Aynı anda işlenebilecek istek sayısı. Boşta işlem çalışmaz (pm = ondemand)."
+info: >-
+  PHP 8.3 (Ubuntu deposu), site başına ayrı php-fpm süreci ve kullanıcısı.
+  Kurulu eklentiler: opcache, mysql, pgsql, sqlite3, curl, mbstring, xml, zip,
+  gd, intl, bcmath, sybase (pdo_dblib — MSSQL'e FreeTDS ile). Ortam değişkenleri
+  getenv() / $_SERVER ile okunur. composer sunucuda kurulu.

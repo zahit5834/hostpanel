@@ -25,6 +25,12 @@ var semverRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 // IsSemver reports whether v looks like X.Y.Z.
 func IsSemver(v string) bool { return semverRe.MatchString(v) }
 
+var installVersionRe = regexp.MustCompile(`^\d{1,3}\.\d{1,3}(\.\d{1,4})?$`)
+
+// ValidInstallVersion: X.Y.Z, or X.Y for runtimes versioned by distribution
+// package (PHP 8.3). hp-runtime.sh applies the same rule.
+func ValidInstallVersion(v string) bool { return installVersionRe.MatchString(v) }
+
 // remoteCache fetches version metadata on demand and caches it for an hour.
 // Nothing is fetched until a page asks, so idle cost is zero.
 type remoteCache struct {
@@ -57,6 +63,10 @@ func (c *remoteCache) get(ctx context.Context, source string) ([]Available, erro
 		return e.list, nil
 	}
 	c.mu.Unlock()
+	if source == "php-ubuntu" {
+		// The only PHP is the one in the Ubuntu 24.04 archive.
+		return []Available{{Version: "8.3", Label: "Ubuntu deposu"}}, nil
+	}
 	url, ok := c.urls[source]
 	if !ok {
 		return nil, fmt.Errorf("bilinmeyen sürüm kaynağı %q", source)

@@ -21,6 +21,7 @@ import (
 	"hostpanel/internal/auth"
 	"hostpanel/internal/backups"
 	"hostpanel/internal/config"
+	"hostpanel/internal/crons"
 	"hostpanel/internal/crypto"
 	"hostpanel/internal/customers"
 	"hostpanel/internal/databases"
@@ -207,9 +208,12 @@ func serve(args []string) error {
 	sslSvc.Notify, bkSvc.Notify = notifySvc.Send, notifySvc.Send
 	monSvc := &monitor.Service{Store: monitor.NewStore(a.db), Sites: siteSvc, Probe: probe, Activity: activity, Log: log,
 		Notify: notifySvc.Send, DryRun: cfg.DryRun}
+	cronSvc := &crons.Service{Store: crons.NewStore(a.db), Sites: siteSvc, Runner: runner, Activity: activity, Log: log,
+		ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun, Notify: notifySvc.Send}
+	bkSvc.Crons = cronSvc
 	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version,
 		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc,
-		Monitor: monSvc, Notify: notifySvc}
+		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc}
 	srv.RegisterJobs()
 	if err := srv.Init(ctx); err != nil {
 		return err
@@ -221,10 +225,13 @@ func serve(args []string) error {
 		cancelJobs()
 		return err
 	}
-	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, log)
+	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, cronSvc, log)
 	go bkSvc.RunScheduler(jobCtx)
 	go notifySvc.Run(jobCtx)
 	go monSvc.Run(jobCtx)
+	cronDone := make(chan struct{})
+	go func() { cronSvc.Run(jobCtx); close(cronDone) }()
+	srv.BaseCtx = jobCtx
 
 	hs := srv.HTTPServer()
 	errc := make(chan error, 1)
@@ -247,12 +254,14 @@ func serve(args []string) error {
 	hs.Shutdown(shutCtx) // SSE handlers end via their request context
 	cancelJobs()
 	jm.Wait()
+	<-cronDone // running crons are stopped with their context
 	activity.Record(context.Background(), logs.Entry{Action: "system.stop", Summary: "Panel durduruldu"}, nil)
 	return nil
 }
 
 // maintenance runs the daily cleanup: one timer, no polling.
-func maintenance(ctx context.Context, a *app, activity *logs.Activity, jm *jobs.Manager, sslSvc *ssl.Service, dbSvc *databases.Service, log *slog.Logger) {
+func maintenance(ctx context.Context, a *app, activity *logs.Activity, jm *jobs.Manager, sslSvc *ssl.Service, dbSvc *databases.Service,
+	cronSvc *crons.Service, log *slog.Logger) {
 	t := time.NewTimer(time.Minute)
 	defer t.Stop()
 	for {
@@ -273,6 +282,7 @@ func maintenance(ctx context.Context, a *app, activity *logs.Activity, jm *jobs.
 		nJobs, _ := jm.Purge(ctx, days("retention_job_days", 30))
 		sslSvc.Maintain(ctx)
 		dbSvc.Maintain(ctx)
+		cronSvc.Maintain(ctx)
 		a.db.ExecContext(ctx, `PRAGMA optimize`)
 		if nAct+int64(nJobs) > 0 {
 			activity.Record(ctx, logs.Entry{Action: "system.cleanup",

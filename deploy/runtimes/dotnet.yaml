@@ -28,3 +28,7 @@ info: >-
   app.UseForwardedHeaders(new ForwardedHeadersOptions { ForwardedHeaders =
   ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto }) ekleyin;
   aksi halde HTTPS yönlendirmeleri ve istemci IP'leri hatalı olur.
+sdk:
+  # SDKs (for git deploy builds) live beside the runtimes in /usr/share/dotnet.
+  list-command: ["/usr/share/dotnet/dotnet", "--list-sdks"]
+  list-regex: '^(\d+\.\d+\.\d+) '

@@ -1,0 +1,21 @@
+{{define "content"}}
+<h1>Log Merkezi</h1>
+{{template "logs-tabs" "cron"}}
+{{with .Data}}
+<form class="filters" method="get" action="/logs/cron">
+  <select name="site">
+    <option value="">Tüm siteler</option>
+    {{range .Sites}}<option value="{{.ID}}" {{if eq .ID $.Data.SiteID}}selected{{end}}>{{.Domain}}</option>{{end}}
+  </select>
+  <select name="status">
+    <option value="">Tüm durumlar</option>
+    {{range .Statuses}}<option value="{{.}}" {{if eq . $.Data.Status}}selected{{end}}>{{cronStatus .}}</option>{{end}}
+  </select>
+  <label class="small">Başlangıç <input type="datetime-local" name="since" value="{{.Since}}"></label>
+  <label class="small">Bitiş <input type="datetime-local" name="until" value="{{.Until}}"></label>
+  <button type="submit">Filtrele</button>
+</form>
+<p class="muted small">Site cron görevlerinin her çalışması (cron başına son 100, en fazla 30 gün). Başarısız çalışmalar ayrıca İşlem Geçmişi'ne <code>site.cron.failed</code> olarak düşer ve bildirim gönderir.</p>
+<section class="card table-wrap">{{template "cron-runs" .Runs}}</section>
+{{end}}
+{{end}}

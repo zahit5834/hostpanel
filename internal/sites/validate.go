@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // domainRe mirrors validate_domain in deploy/scripts/lib.sh: keep them identical.
@@ -106,6 +107,35 @@ func ParsePersistentDirs(raw string) ([]string, error) {
 	return out, nil
 }
 
+var relDirRe = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$`)
+
+// ValidRelDir mirrors validate_reldir: relative, no "..", no segment starting with ".".
+func ValidRelDir(d string) bool {
+	return len(d) <= 200 && relDirRe.MatchString(d) && !strings.Contains(d, "..")
+}
+
+// ValidCommand checks a user command (site cron, git build): one line, no
+// control characters, 1–1000 bytes. It only ever runs as the site user, with
+// bash inside a sandboxed transient unit (run_as_site in lib.sh, which
+// applies the same rule).
+func ValidCommand(c string) error {
+	if strings.TrimSpace(c) == "" {
+		return errors.New("komut boş olamaz")
+	}
+	if len(c) > 1000 {
+		return errors.New("komut en fazla 1000 bayt olabilir")
+	}
+	if !utf8.ValidString(c) {
+		return errors.New("komut geçerli UTF-8 değil")
+	}
+	for _, r := range c {
+		if r < 0x20 || r == 0x7f {
+			return errors.New("komut tek satır olmalı, kontrol karakteri içeremez")
+		}
+	}
+	return nil
+}
+
 var envKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // ValidEnvKey mirrors the check in hp-site-env.sh.
@@ -175,7 +205,8 @@ func ValidateSnippet(s, domain string) error {
 		return errors.New("süslü parantezler dengesiz")
 	}
 	for _, d := range confDirectives(s) {
-		if d.name == "access_log" || d.name == "error_log" || sslFileNames.MatchString(d.name) {
+		if d.name == "access_log" || d.name == "error_log" || sslFileNames.MatchString(d.name) ||
+			d.name == "fastcgi_pass" || d.name == "fastcgi_param" {
 			return fmt.Errorf("snippet içinde %s kullanılamaz", d.name)
 		}
 	}
@@ -230,6 +261,10 @@ func sslPathOK(p, domain string) bool {
 	return strings.HasPrefix(p, "/etc/letsencrypt/live/"+domain+"/") || strings.HasPrefix(p, "/etc/hostpanel/ssl/"+domain+"/")
 }
 
+// PHPSocket is the php-fpm socket of a PHP site (created by its own master in
+// the setgid www-data site tree; see hp-php-pool.sh).
+func PHPSocket(domain string) string { return SitesRoot + "/" + domain + "/run/php.sock" }
+
 // ValidateConf rejects directives that would let the config make the root
 // nginx master open arbitrary files or load code.
 func ValidateConf(conf, domain string) error {
@@ -242,6 +277,8 @@ func ValidateConf(conf, domain string) error {
 		case d.name == "access_log" && d.arg != "off" && d.arg != "/var/log/nginx/hp-"+domain+".access.log",
 			d.name == "error_log" && d.arg != "/var/log/nginx/hp-"+domain+".error.log":
 			return fmt.Errorf("%s yalnızca site log dosyasına yazabilir", d.name)
+		case d.name == "fastcgi_pass" && d.arg != "unix:"+PHPSocket(domain):
+			return errors.New("fastcgi_pass yalnızca sitenin kendi PHP soketini gösterebilir")
 		}
 	}
 	return nil

@@ -19,7 +19,6 @@ import (
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
-	"hostpanel/internal/runtimes"
 	"hostpanel/internal/sites"
 	"hostpanel/internal/store"
 )
@@ -930,7 +929,7 @@ func (s *Service) StartCreate(ctx context.Context, in CreateInput) (Database, in
 
 func (s *Service) siteHasEnv(site sites.Site) bool {
 	p, ok := s.Sites.Runtimes.Get(site.RuntimeID)
-	return ok && p.Def().Type == runtimes.TypeProxy
+	return ok && p.Def().HasUnit()
 }
 
 func (s *Service) jobCreate(ctx context.Context, l *jobs.Log, p map[string]any) error {

@@ -58,19 +58,7 @@ case $action in
       as_user rmdir "$only"
     fi
 
-    for d in "$@"; do
-      as_user mkdir -p -- "$dir/shared/$d"
-      if [[ -e $rel/$d || -L $rel/$d ]]; then
-        log "kalıcı dizin '${d}' sürümden kaldırılıp shared/'a bağlanıyor"
-        as_user rm -rf -- "$rel/$d"
-      fi
-      as_user mkdir -p -- "$(dirname "$rel/$d")"
-      as_user ln -s -- "$dir/shared/$d" "$rel/$d"
-    done
-
-    # nginx (group www-data) must read static files; others get nothing.
-    as_user chmod -R u+rwX,g+rX,g-w,o-rwx -- "$rel"
-    log "sürüm hazır: ${release} ($(du -sh "$rel" | cut -f1), $(find "$rel" -type f | wc -l) dosya)"
+    finalize_release "$dir" "$user" "$rel" "$@"
     ;;
 
   activate)

@@ -165,6 +165,8 @@ validate_nginx_conf() {
         [[ $arg == off || $arg == "/var/log/nginx/hp-${domain}.access.log" ]] || die "nginx: access_log yalnızca site log dosyasına yazabilir" ;;
       error_log)
         [[ $arg == "/var/log/nginx/hp-${domain}.error.log" ]] || die "nginx: error_log yalnızca site log dosyasına yazabilir" ;;
+      fastcgi_pass)
+        [[ $arg == "unix:${SITES_ROOT}/${domain}/run/php.sock" ]] || die "nginx: fastcgi_pass yalnızca sitenin kendi PHP soketini gösterebilir" ;;
     esac
   done < <(conf_directives "$file")
   return 0
@@ -350,4 +352,118 @@ ports_overlap() {
     fi
   done
   return 1
+}
+
+# ---------------------------------------------------------------------------
+# Site crons, git deploy, PHP (Faz 5b)
+# ---------------------------------------------------------------------------
+
+GIT_KEY_ROOT=/etc/hostpanel/git
+PHP_CONF_DIR=/etc/hostpanel/php
+
+# validate_user_command CMD — one line, no control characters, 1–1000 bytes.
+# The command only ever runs as the site user inside run_as_site (bash -c
+# there, never here). Mirrors crons.ValidCommand.
+validate_user_command() {
+  local c=${1:-}
+  [[ -n ${c//[[:space:]]/} ]] || die "komut boş"
+  ((${#c} <= 1000)) || die "komut çok uzun (en fazla 1000 bayt)"
+  [[ $c != *[[:cntrl:]]* ]] || die "komut kontrol karakteri içeremez (tek satır olmalı)"
+}
+
+# read_user_command — read the command from stdin (at most 1000 bytes) and validate it.
+read_user_command() {
+  local c
+  c=$(head -c 1001)
+  validate_user_command "$c"
+  printf '%s' "$c"
+}
+
+# validate_git_url URL — git@host:path, ssh://[user@]host[:port]/path or
+# https://host[:port]/path (no credentials). Mirrors sites.ValidGitURL.
+validate_git_url() {
+  local u=${1:-}
+  local host='[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*'
+  local path='[A-Za-z0-9_~][A-Za-z0-9._~/-]*'
+  ((${#u} <= 300)) || die "repo adresi çok uzun"
+  [[ $u != *..* ]] || die "geçersiz repo adresi: ${u}"
+  [[ $u =~ ^[A-Za-z0-9][A-Za-z0-9._-]*@${host}:${path}$ ||
+    $u =~ ^ssh://([A-Za-z0-9][A-Za-z0-9._-]*@)?${host}(:[0-9]{1,5})?/${path}$ ||
+    $u =~ ^https://${host}(:[0-9]{1,5})?/${path}$ ]] || die "geçersiz repo adresi: ${u}"
+}
+
+# validate_git_branch NAME — conservative subset of git's ref rules.
+validate_git_branch() {
+  local b=${1:-}
+  [[ $b =~ ^[A-Za-z0-9_][A-Za-z0-9._/-]{0,99}$ ]] || die "geçersiz branch: '${b}'"
+  [[ $b != *..* && $b != *//* && $b != */ && $b != *. && $b != *.lock && $b != */.* ]] || die "geçersiz branch: '${b}'"
+}
+
+# validate_outdir D — "." or a relative directory (build output).
+validate_outdir() {
+  [[ ${1:-} == . ]] || validate_reldir "${1:-}"
+}
+
+# validate_limits TIMEOUT MEM CPU — seconds / MB / percent for run_as_site.
+validate_limits() {
+  [[ $1 =~ ^[0-9]{1,5}$ ]] && (($1 >= 10 && $1 <= 7200)) || die "geçersiz zaman aşımı: $1"
+  [[ $2 =~ ^[0-9]{2,5}$ ]] && (($2 >= 64 && $2 <= 65536)) || die "geçersiz bellek limiti: $2"
+  [[ $3 =~ ^[0-9]{1,4}$ ]] && (($3 >= 5 && $3 <= 1600)) || die "geçersiz CPU kotası: $3"
+}
+
+# runtime_path ID VERSION — PATH prefix for a runtime's binaries (may be empty).
+runtime_path() {
+  case $1 in
+    dotnet) printf '%s' /usr/share/dotnet ;;
+    node)
+      [[ $2 =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,4}$ ]] || die "geçersiz Node sürümü: $2"
+      printf '%s' "/opt/node/v$2/bin" ;;
+    php | static) ;;
+    *) die "geçersiz altyapı: $1" ;;
+  esac
+}
+
+# run_as_site DIR USER UNIT TIMEOUT MEM CPU WORKDIR PATHPREFIX CMD — run CMD
+# with bash as the site user in a transient, sandboxed unit (same isolation as
+# the site's own service). Arguments must already be validated. Variable
+# expansion by systemd is off: "$" in CMD is the shell's business. The fixed
+# unit name means a second run of the same job cannot start while one runs.
+# Exit status is the command's.
+run_as_site() {
+  local dir=$1 user=$2 unit=$3 timeout=$4 mem=$5 cpu=$6 workdir=$7 pathpre=$8 cmd=$9
+  local domain path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  domain=$(basename "$dir")
+  [[ -n $pathpre ]] && path=$pathpre:$path
+  local home=$dir/.home
+  [[ ! -L $home ]] || die "${home} symlink olamaz"
+  [[ -d $home ]] || install -d -o "$user" -g "$user" -m 0700 "$home"
+  local args=(--wait --pipe --collect --expand-environment=no --unit="$unit"
+    --uid="$user" --gid="$user" --working-directory="$workdir"
+    --setenv=HOME="$home" --setenv=PATH="$path"
+    -p RuntimeMaxSec="$timeout" -p MemoryMax="${mem}M" -p CPUQuota="${cpu}%" -p TasksMax=256
+    -p NoNewPrivileges=yes -p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes
+    -p PrivateDevices=yes -p ProtectKernelTunables=yes -p ProtectKernelModules=yes
+    -p ProtectControlGroups=yes -p RestrictSUIDSGID=yes -p LockPersonality=yes
+    -p ReadWritePaths="$dir" -p UMask=0027 -p SyslogIdentifier="$unit")
+  [[ -f $ENV_DIR/$domain.env ]] && args+=(-p EnvironmentFile="$ENV_DIR/$domain.env")
+  systemd-run "${args[@]}" -- /bin/bash -c "$cmd" </dev/null
+}
+
+# finalize_release DIR USER REL [persistent_dir...] — link persistent dirs from
+# shared/ into a release and fix permissions (nginx's group may read). Runs the
+# file operations as the site user.
+finalize_release() {
+  local dir=$1 user=$2 rel=$3 d
+  shift 3
+  for d in "$@"; do
+    runuser -u "$user" -- mkdir -p -- "$dir/shared/$d"
+    if [[ -e $rel/$d || -L $rel/$d ]]; then
+      log "kalıcı dizin '${d}' sürümden kaldırılıp shared/'a bağlanıyor"
+      runuser -u "$user" -- rm -rf -- "$rel/$d"
+    fi
+    runuser -u "$user" -- mkdir -p -- "$(dirname "$rel/$d")"
+    runuser -u "$user" -- ln -s -- "$dir/shared/$d" "$rel/$d"
+  done
+  runuser -u "$user" -- chmod -R u+rwX,g+rX,g-w,o-rwx -- "$rel"
+  log "sürüm hazır: $(basename "$rel") ($(du -sh "$rel" | cut -f1), $(find "$rel" -type f | wc -l) dosya)"
 }

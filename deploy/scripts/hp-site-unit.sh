@@ -26,9 +26,15 @@ case $action in
 
     bin=$1
     shift
-    [[ $bin == /usr/share/dotnet/dotnet || $bin =~ ^/opt/node/v[0-9]+\.[0-9]+\.[0-9]+/bin/node$ ]] \
+    [[ $bin == /usr/share/dotnet/dotnet || $bin =~ ^/opt/node/v[0-9]+\.[0-9]+\.[0-9]+/bin/node$ || $bin == /usr/sbin/php-fpm8.3 ]] \
       || die "izin verilmeyen çalıştırılabilir: ${bin}"
     [[ -x $bin ]] || die "çalıştırılabilir bulunamadı (altyapı kurulu mu?): ${bin}"
+    if [[ $bin == /usr/sbin/php-fpm8.3 ]]; then
+      # php-fpm only ever reads the config hp-php-pool.sh wrote for this domain.
+      [[ $# -eq 2 && $1 == --nodaemonize && $2 == "--fpm-config=$PHP_CONF_DIR/$domain.conf" ]] \
+        || die "php-fpm argümanları: --nodaemonize --fpm-config=${PHP_CONF_DIR}/${domain}.conf"
+      [[ -f $PHP_CONF_DIR/$domain.conf ]] || die "php-fpm yapılandırması yok (hp-php-pool.sh install)"
+    fi
     execline=$bin
     for a in "$@"; do
       # No spaces, quotes, $ or % (systemd would expand them), no traversal, no absolute paths.

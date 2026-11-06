@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -22,7 +23,7 @@ import (
 const (
 	TypeProxy   = "proxy"   // app listens on 127.0.0.1:<port>, nginx proxies
 	TypeStatic  = "static"  // nginx serves files directly
-	TypeFastCGI = "fastcgi" // php-fpm (Faz 5)
+	TypeFastCGI = "fastcgi" // php-fpm master per site, nginx speaks FastCGI to its socket
 )
 
 // Field is a runtime-specific site setting shown in the wizard.
@@ -61,13 +62,27 @@ type Definition struct {
 	NginxTemplate   string            `yaml:"nginxTemplate"`
 	SiteFields      []Field           `yaml:"siteFields"`
 	Info            string            `yaml:"info"` // shown on the site page
+	SDK             *SDK              `yaml:"sdk"`  // build toolchain for git deploy (optional)
 }
+
+// SDK describes how to list installed SDKs (e.g. .NET SDKs for dotnet publish).
+type SDK struct {
+	ListCommand []string `yaml:"list-command"`
+	ListRegex   string   `yaml:"list-regex"`
+
+	re *regexp.Regexp
+}
+
+// HasUnit reports whether sites of this runtime run as their own systemd
+// unit (proxy apps and PHP's per-site php-fpm master).
+func (d *Definition) HasUnit() bool { return d.Type == TypeProxy || d.Type == TypeFastCGI }
 
 // Provider is what the rest of the panel uses. The YAML-backed implementation
 // covers every runtime for now; a code-backed one can implement it later.
 type Provider interface {
 	Def() *Definition
 	InstalledVersions(ctx context.Context) ([]string, error)
+	InstalledSDKs(ctx context.Context) []string
 	AvailableVersions(ctx context.Context) ([]Available, error)
 	ValidateFields(values map[string]string) (map[string]string, error)
 	StartArgs(v Vars) ([]string, error)
@@ -105,11 +120,11 @@ func Parse(b []byte) (*Definition, error) {
 		d.DisplayName = d.ID
 	}
 	switch d.Type {
-	case TypeProxy:
+	case TypeProxy, TypeFastCGI:
 		if strings.TrimSpace(d.StartCommand) == "" || d.SystemdTemplate == "" {
-			return nil, fmt.Errorf("%s: proxy tipi startCommand ve systemdTemplate ister", d.ID)
+			return nil, fmt.Errorf("%s: %s tipi startCommand ve systemdTemplate ister", d.ID, d.Type)
 		}
-	case TypeStatic, TypeFastCGI:
+	case TypeStatic:
 	default:
 		return nil, fmt.Errorf("%s: bilinmeyen tip %q", d.ID, d.Type)
 	}
@@ -130,6 +145,13 @@ func Parse(b []byte) (*Definition, error) {
 			return nil, fmt.Errorf("%s: list-regex bir yakalama grubu içermeli", d.ID)
 		}
 		d.Versions.re = re
+	}
+	if d.SDK != nil {
+		re, err := regexp.Compile(d.SDK.ListRegex)
+		if err != nil || re.NumSubexp() < 1 || len(d.SDK.ListCommand) == 0 {
+			return nil, fmt.Errorf("%s: sdk list-command ve yakalama gruplu list-regex ister", d.ID)
+		}
+		d.SDK.re = re
 	}
 	for k := range d.Environment {
 		if !envKeyRe.MatchString(k) {
@@ -213,6 +235,47 @@ func (p *yamlProvider) InstalledVersions(ctx context.Context) ([]string, error) 
 	return out, nil
 }
 
+// InstalledSDKs lists installed SDK versions (newest first); nil when the
+// runtime has no SDK definition.
+func (p *yamlProvider) InstalledSDKs(ctx context.Context) []string {
+	sdk := p.def.SDK
+	if sdk == nil {
+		return nil
+	}
+	var out []string
+	res, err := p.runner.Run(ctx, exec.Cmd{Name: sdk.ListCommand[0], Args: sdk.ListCommand[1:]})
+	if err == nil {
+		for _, l := range strings.Split(res.Stdout, "\n") {
+			if m := sdk.re.FindStringSubmatch(strings.TrimSpace(l)); m != nil && !slices.Contains(out, m[1]) {
+				out = append(out, m[1])
+			}
+		}
+	}
+	if len(out) == 0 && p.fake {
+		// Dry-run: one SDK per installed runtime channel.
+		vs, _ := p.InstalledVersions(ctx)
+		for _, v := range vs {
+			if f := strings.Split(v, "."); len(f) == 3 && !slices.Contains(out, f[0]+"."+f[1]+".100") {
+				out = append(out, f[0]+"."+f[1]+".100")
+			}
+		}
+	}
+	SortVersions(out)
+	return out
+}
+
+// HasSDKFor reports whether an SDK of the same major version as runtime
+// version v is installed.
+func HasSDKFor(sdks []string, v string) bool {
+	major, _, _ := strings.Cut(v, ".")
+	for _, s := range sdks {
+		if m, _, _ := strings.Cut(s, "."); m == major {
+			return true
+		}
+	}
+	return false
+}
+
 // AvailableVersions returns installable versions from the official source.
 func (p *yamlProvider) AvailableVersions(ctx context.Context) ([]Available, error) {
 	if p.def.Versions.Available == "" || p.remote == nil {
@@ -269,7 +332,7 @@ func expand(s string, v Vars) string {
 // StartArgs renders startCommand into argv. Every token must be a plain
 // path/word; the root helper re-checks this before writing the unit.
 func (p *yamlProvider) StartArgs(v Vars) ([]string, error) {
-	if p.def.Type != TypeProxy {
+	if !p.def.HasUnit() {
 		return nil, nil
 	}
 	var argv []string

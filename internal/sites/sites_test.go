@@ -226,7 +226,8 @@ func TestEnvDiffHidesValues(t *testing.T) {
 type recRunner struct {
 	mu     sync.Mutex
 	calls  []string
-	failOn string // "script action" prefix
+	failOn string            // "script action" prefix
+	out    map[string]string // "script action" prefix → stdout
 }
 
 func (r *recRunner) Run(ctx context.Context, c exec.Cmd) (exec.Result, error) {
@@ -243,6 +244,14 @@ func (r *recRunner) Run(ctx context.Context, c exec.Cmd) (exec.Result, error) {
 	}
 	if r.failOn != "" && strings.HasPrefix(call, r.failOn) {
 		return exec.Result{ExitCode: 1}, errors.New("simulated failure")
+	}
+	for prefix, out := range r.out {
+		if strings.HasPrefix(call, prefix) {
+			if c.Output != nil {
+				io.WriteString(c.Output, out)
+			}
+			return exec.Result{Stdout: out}, nil
+		}
 	}
 	return exec.Result{}, nil
 }

@@ -34,6 +34,7 @@ const (
 	KindDisk        = "disk.high"
 	KindLoginFailed = "login.failed"
 	KindLoginNewIP  = "login.newip"
+	KindCron        = "cron.failed"
 	KindTest        = "test"
 )
 
@@ -44,12 +45,13 @@ var Kinds = []struct{ ID, Label string }{
 	{KindSSLExpiring, "SSL sertifikası bitiyor"},
 	{KindBackup, "Yedek başarısız"},
 	{KindDisk, "Disk %85 üzeri"},
+	{KindCron, "Site cron görevi başarısız"},
 	{KindLoginFailed, "Başarısız panel girişi"},
 	{KindLoginNewIP, "Yeni IP'den panel girişi"},
 }
 
 // DefaultKinds are enabled until the admin changes the selection.
-var DefaultKinds = []string{KindSiteStatus, KindRestarting, KindSSLExpiring, KindBackup, KindDisk, KindLoginNewIP}
+var DefaultKinds = []string{KindSiteStatus, KindRestarting, KindSSLExpiring, KindBackup, KindDisk, KindCron, KindLoginNewIP}
 
 // Event is one notification.
 type Event struct {

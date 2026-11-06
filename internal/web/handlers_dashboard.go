@@ -12,7 +12,6 @@ import (
 	"hostpanel/internal/backups"
 	"hostpanel/internal/logs"
 	"hostpanel/internal/monitor"
-	"hostpanel/internal/runtimes"
 	"hostpanel/internal/sites"
 	"hostpanel/internal/ssl"
 	"hostpanel/internal/system"
@@ -95,7 +94,7 @@ func (s *Server) dashboardRows(ctx context.Context) []siteRow {
 	rows := make([]siteRow, 0, len(list))
 	for _, site := range list {
 		r := siteRow{Site: site, Cert: certs[site.ID], Health: health[site.ID]}
-		if p, ok := s.Runtimes.Get(site.RuntimeID); ok && p.Def().Type == runtimes.TypeProxy {
+		if p, ok := s.Runtimes.Get(site.RuntimeID); ok && p.Def().HasUnit() {
 			r.Proxy = true
 			units = append(units, site.Unit())
 		}

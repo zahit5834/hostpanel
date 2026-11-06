@@ -17,3 +17,6 @@ ssl_certificate data:$var;
 proxy_ssl_certificate_key /etc/ssh/ssh_host_rsa_key;
 ssl_trusted_certificate /etc/hostpanel/master.key;
 ssl_conf_command Options x;
+fastcgi_pass 127.0.0.1:9000;
+fastcgi_pass unix:/var/www/sites/baska.com/run/php.sock;
+location ~ \.php$ { fastcgi_pass unix:/run/php/php8.3-fpm.sock; }

@@ -37,6 +37,26 @@ type SiteConfig struct {
 	ActiveRelease  string            `json:"active_release"`
 	EnvSealed      map[string]string `json:"env_sealed"`
 	Databases      []ConfigDB        `json:"databases"`
+	Crons          []ConfigCron      `json:"crons,omitempty"`
+	Git            *ConfigGit        `json:"git,omitempty"` // the deploy key is not included
+}
+
+// ConfigCron is a site cron in config.json.
+type ConfigCron struct {
+	Name       string `json:"name"`
+	Schedule   string `json:"schedule"`
+	Command    string `json:"command"`
+	Enabled    bool   `json:"enabled"`
+	TimeoutSec int    `json:"timeout_sec"`
+}
+
+// ConfigGit is the git deploy configuration in config.json.
+type ConfigGit struct {
+	RepoURL      string `json:"repo_url"`
+	Branch       string `json:"branch"`
+	BuildCommand string `json:"build_command"`
+	OutputDir    string `json:"output_dir"`
+	BuildTimeout int    `json:"build_timeout"`
 }
 
 // ConfigDB is a database included in (or referenced by) the backup.

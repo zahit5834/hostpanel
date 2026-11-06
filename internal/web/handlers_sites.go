@@ -7,12 +7,14 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"hostpanel/internal/backups"
+	"hostpanel/internal/crons"
 	"hostpanel/internal/customers"
 	"hostpanel/internal/databases"
 	"hostpanel/internal/exec"
@@ -42,9 +44,6 @@ func (s *Server) runtimeOptions() []runtimeOption {
 	var out []runtimeOption
 	for _, p := range s.Runtimes.All() {
 		d := p.Def()
-		if d.Type == runtimes.TypeFastCGI {
-			continue // PHP arrives in Faz 5
-		}
 		out = append(out, runtimeOption{ID: d.ID, Name: d.DisplayName, Type: d.Type})
 	}
 	return out
@@ -171,7 +170,7 @@ func (s *Server) wizardDatabase(r *http.Request, site sites.Site) {
 	}
 	p, ok := s.Runtimes.Get(site.RuntimeID)
 	in := databases.CreateInput{CustomerID: site.CustomerID, Name: name, SiteID: site.ID,
-		WriteEnv: ok && p.Def().Type == runtimes.TypeProxy}
+		WriteEnv: ok && p.Def().HasUnit()}
 	if _, _, err := s.DBs.StartCreate(r.Context(), in); err != nil {
 		s.Activity.Record(r.Context(), logs.Entry{Action: "db.create", TargetType: "database", TargetID: name,
 			Status: logs.StatusFailed, Error: err.Error(), Summary: "Site için veritabanı oluşturulamadı: " + site.Domain}, nil)
@@ -228,12 +227,24 @@ type siteData struct {
 	EnvKeyHint string
 	DBNameHint string
 	MaxBakMB   int64
+
+	Crons        []crons.Cron
+	CronRuns     []crons.Run
+	CronEdit     crons.Cron
+	CronRunning  map[int64]bool
+	CronPresets  []struct{ Expr, Label string }
+	CronEligible bool
+
+	Git         sites.GitSettings
+	GitSet      bool
+	GitInfo     sites.GitInfo
+	GitDefaults sites.GitSettings
 }
 
 type envRow struct{ Key, Value string }
 
 var siteTabs = map[string]bool{"overview": true, "deploy": true, "env": true, "ssl": true, "settings": true, "logs": true,
-	"backups": true, "import": true}
+	"backups": true, "import": true, "cron": true}
 
 func (s *Server) siteDetail(w http.ResponseWriter, r *http.Request) {
 	site, ok := s.loadSite(w, r)
@@ -244,10 +255,20 @@ func (s *Server) siteDetail(w http.ResponseWriter, r *http.Request) {
 	if !siteTabs[tab] {
 		tab = "overview"
 	}
-	s.renderSite(w, r, http.StatusOK, site, tab, "", "")
+	notice := ""
+	if tab == "cron" && r.URL.Query().Get("started") == "1" {
+		notice = "Cron başlatıldı; sonucu “Son çalışmalar” listesinde görünür (sayfayı yenileyin)."
+	}
+	s.renderSite(w, r, http.StatusOK, site, tab, "", notice)
 }
 
 func (s *Server) renderSite(w http.ResponseWriter, r *http.Request, status int, site sites.Site, tab, errMsg, notice string) {
+	s.renderSiteWith(w, r, status, site, tab, errMsg, nil, notice)
+}
+
+// renderSiteWith lets a failed form keep its values (pre fills siteData
+// before the tab data is loaded).
+func (s *Server) renderSiteWith(w http.ResponseWriter, r *http.Request, status int, site sites.Site, tab, errMsg string, pre func(*siteData), notice ...string) {
 	ctx := r.Context()
 	p, ok := s.Runtimes.Get(site.RuntimeID)
 	d := siteData{Site: site, Tab: tab, JobID: parseInt64(r.URL.Query().Get("job")), DryRun: s.Cfg.DryRun}
@@ -256,7 +277,7 @@ func (s *Server) renderSite(w http.ResponseWriter, r *http.Request, status int, 
 	} else {
 		d.Def = &runtimes.Definition{ID: site.RuntimeID, DisplayName: site.RuntimeID + " (tanım yok)"}
 	}
-	if d.Def.Type == runtimes.TypeProxy {
+	if d.Def.HasUnit() {
 		res, _ := s.Sites.Probe.Run(ctx, exec.Cmd{Name: "systemctl", Args: []string{"is-active", site.Unit() + ".service"}, Timeout: 5 * time.Second})
 		d.Unit = strings.TrimSpace(res.Stdout)
 	}
@@ -264,7 +285,14 @@ func (s *Server) renderSite(w http.ResponseWriter, r *http.Request, status int, 
 	d.Active = s.Sites.Store.ActiveRelease(ctx, site.ID)
 	d.DBs, _ = s.DBs.Store.Databases(ctx, databases.DBFilter{SiteID: site.ID})
 	d.DBAvailable = s.DBs.Available(ctx)
+	if pre != nil {
+		pre(&d)
+	}
 	switch tab {
+	case "cron":
+		s.cronTabData(r, &d)
+	case "deploy":
+		s.gitTabData(r, &d)
 	case "overview":
 		d.Health = s.healthData(r, site)
 	case "ssl":
@@ -315,7 +343,7 @@ func (s *Server) renderSite(w http.ResponseWriter, r *http.Request, status int, 
 			return
 		}
 	}
-	s.render(w, r, status, "site", "layout", Page{Title: site.Domain, Nav: "sites", Data: d, Error: errMsg, Notice: notice})
+	s.render(w, r, status, "site", "layout", Page{Title: site.Domain, Nav: "sites", Data: d, Error: errMsg, Notice: strings.Join(notice, "")})
 }
 
 var opLabels = map[string]string{
@@ -551,10 +579,12 @@ func (s *Server) siteDelete(w http.ResponseWriter, r *http.Request) {
 // --- runtimes page ---
 
 type runtimeRow struct {
-	Def       *runtimes.Definition
-	Installed []installedVersion
-	Available []runtimes.Available
-	RemoteErr string
+	Def         *runtimes.Definition
+	Installed   []installedVersion
+	Available   []runtimes.Available
+	RemoteErr   string
+	SDKs        []string // installed SDK versions (runtimes with an SDK definition)
+	SDKChannels []string // X.Y channels of installed runtimes without an SDK
 }
 
 type installedVersion struct {
@@ -581,6 +611,15 @@ func (s *Server) runtimesPage(w http.ResponseWriter, r *http.Request) {
 				row.Available = append(row.Available, a)
 			}
 		}
+		if p.Def().SDK != nil {
+			row.SDKs = p.InstalledSDKs(r.Context())
+			for _, v := range inst {
+				f := strings.Split(v, ".")
+				if len(f) == 3 && !runtimes.HasSDKFor(row.SDKs, v) && !slices.Contains(row.SDKChannels, f[0]+"."+f[1]) {
+					row.SDKChannels = append(row.SDKChannels, f[0]+"."+f[1])
+				}
+			}
+		}
 		rows = append(rows, row)
 	}
 	var loadErrs []string
@@ -593,12 +632,14 @@ func (s *Server) runtimesPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) runtimeAction(w http.ResponseWriter, r *http.Request) {
 	action := r.PathValue("action")
-	if action != "install" && action != "remove" {
+	switch action {
+	case "install", "remove", "install-sdk", "remove-sdk":
+	default:
 		http.NotFound(w, r)
 		return
 	}
 	id, version := r.PathValue("id"), r.PostFormValue("version")
-	if _, ok := s.Runtimes.Get(id); !ok || !runtimes.IsSemver(version) {
+	if _, ok := s.Runtimes.Get(id); !ok || !runtimes.ValidInstallVersion(version) {
 		http.Error(w, "geçersiz altyapı veya sürüm", http.StatusBadRequest)
 		return
 	}

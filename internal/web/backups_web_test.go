@@ -228,6 +228,14 @@ func TestBackupsLifecycleDryRun(t *testing.T) {
 		t.Fatalf("env after restore %q", env["API_TOKEN"])
 	}
 
+	// Crons and git settings travel in config.json (clone: crons disabled).
+	if res := w.post(shopBase+"/crons", url.Values{"name": {"Temizlik"}, "schedule": {"0 3 * * *"}, "command": {"echo ok"}, "enabled": {"1"}}); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("cron save %d", res.StatusCode)
+	}
+	if res := w.post(shopBase+"/git", url.Values{"repo_url": {"https://github.com/acme/shop.git"}, "branch": {"main"},
+		"build_command": {"dotnet publish -c Release -o hp-publish"}, "output_dir": {"hp-publish"}, "build_timeout": {"900"}}); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("git save %d", res.StatusCode)
+	}
 	// 5. Clone into the other site: database mapped to a new one owned by the customer, env rewritten.
 	res = w.post(restoreURL, url.Values{"target": {strconv.FormatInt(staging.ID, 10)}, "components": {"files", "db", "config"}, "confirm": {"staging.example.com"}})
 	_, log = mustJob(t, s, res)
@@ -245,6 +253,12 @@ func TestBackupsLifecycleDryRun(t *testing.T) {
 	staging, _ = s.Sites.Store.Get(ctx, staging.ID)
 	if staging.Status != sites.StatusRunning || len(staging.Aliases) != 0 {
 		t.Fatalf("clone site %+v", staging)
+	}
+	if cl, _ := s.Crons.Store.BySite(ctx, staging.ID); len(cl) != 1 || cl[0].Name != "Temizlik" || cl[0].Enabled {
+		t.Fatalf("clone crons %+v", cl)
+	}
+	if g, err := s.Sites.Store.Git(ctx, staging.ID); err != nil || g.RepoURL != "https://github.com/acme/shop.git" || g.OutputDir != "hp-publish" {
+		t.Fatalf("clone git %+v %v", g, err)
 	}
 
 	// 6. Taşıma: .bak upload and env paste.

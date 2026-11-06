@@ -5,7 +5,23 @@
   <a href="/logs/activity" class="{{if eq . "activity"}}active{{end}}">İşlem Geçmişi</a>
   <a href="/logs/jobs" class="{{if eq . "jobs"}}active{{end}}">İş Logları</a>
   <a href="/logs/system" class="{{if eq . "system"}}active{{end}}">Sistem Logları</a>
+  <a href="/logs/cron" class="{{if eq . "cron"}}active{{end}}">Cron Çalışmaları</a>
 </div>
+{{end}}
+{{define "cron-runs"}}
+<table class="table">
+  <thead><tr><th>Zaman</th><th>Site / görev</th><th>Durum</th><th class="right">Süre</th><th>Çıktı</th></tr></thead>
+  <tbody>
+  {{range .}}<tr class="{{if .Failed}}row-failed{{end}}">
+    <td class="nowrap muted">{{datetime .StartedAt}}{{if eq .Source "user"}} <span class="tag">elle</span>{{end}}</td>
+    <td><a href="/sites/{{.SiteID}}?tab=cron">{{.Domain}}</a><br><span class="small">{{.CronName}}</span></td>
+    <td class="nowrap"><span class="badge {{cronClass .Status}}">{{cronStatus .Status}}</span>{{if and .Failed (ne .ExitCode 0)}} <span class="muted small">kod {{.ExitCode}}</span>{{end}}</td>
+    <td class="right nowrap">{{ms (int64 .DurationMS)}}</td>
+    <td>{{if .Output}}<details><summary class="small">göster</summary><pre class="small">{{.Output}}</pre></details>{{else}}<span class="muted small">—</span>{{end}}</td>
+  </tr>{{end}}
+  </tbody>
+</table>
+{{if not .}}<p class="muted pad">Kayıt yok.</p>{{end}}
 {{end}}
 {{define "site-badge"}}<span class="badge st-{{.}}">{{siteStatus .}}</span>{{end}}
 {{define "cert-kind"}}{{if eq . "letsencrypt"}}Let's Encrypt{{else}}Ücretli{{end}}{{end}}

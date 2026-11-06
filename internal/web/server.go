@@ -18,6 +18,7 @@ import (
 	"hostpanel/internal/auth"
 	"hostpanel/internal/backups"
 	"hostpanel/internal/config"
+	"hostpanel/internal/crons"
 	"hostpanel/internal/customers"
 	"hostpanel/internal/databases"
 	"hostpanel/internal/exec"
@@ -53,6 +54,11 @@ type Server struct {
 	Backups   *backups.Service
 	Monitor   *monitor.Service
 	Notify    *notify.Service
+	Crons     *crons.Service
+
+	// BaseCtx outlives requests (cancelled on shutdown); background work
+	// started from a handler (cron "run now") uses it.
+	BaseCtx context.Context
 
 	metrics metricsState
 	srvInfo serverCache

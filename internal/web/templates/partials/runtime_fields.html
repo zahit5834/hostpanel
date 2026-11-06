@@ -3,7 +3,7 @@
 {{define "runtime-fields"}}{{template "runtime-fields-inner" .Data}}{{end}}
 
 {{define "runtime-fields-inner"}}
-{{with .Def}}{{if eq .Type "proxy"}}
+{{with .Def}}{{if .HasUnit}}
 <label>Sürüm *
   <select name="version" required>
     {{range $.Installed}}<option value="{{.}}" {{if eq . $.Version}}selected{{end}}>{{.}}</option>{{end}}

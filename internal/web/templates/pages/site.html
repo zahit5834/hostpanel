@@ -1,5 +1,5 @@
 {{define "content"}}
-{{with .Data}}{{$s := .Site}}{{$proxy := eq .Def.Type "proxy"}}
+{{with .Data}}{{$s := .Site}}{{$proxy := .Def.HasUnit}}
 <p><a href="/sites" class="small">← Siteler</a></p>
 <div class="card-head">
   <h1>{{$s.Domain}} {{template "site-badge" $s.Status}}</h1>
@@ -10,6 +10,7 @@
   <a href="/sites/{{$s.ID}}?tab=deploy" class="{{if eq .Tab "deploy"}}active{{end}}">Deploy</a>
   {{if $proxy}}<a href="/sites/{{$s.ID}}?tab=env" class="{{if eq .Tab "env"}}active{{end}}">Ortam Değişkenleri</a>{{end}}
   <a href="/sites/{{$s.ID}}?tab=ssl" class="{{if eq .Tab "ssl"}}active{{end}}">SSL</a>
+  <a href="/sites/{{$s.ID}}?tab=cron" class="{{if eq .Tab "cron"}}active{{end}}">Cron</a>
   <a href="/sites/{{$s.ID}}?tab=settings" class="{{if eq .Tab "settings"}}active{{end}}">Ayarlar</a>
   <a href="/sites/{{$s.ID}}?tab=backups" class="{{if eq .Tab "backups"}}active{{end}}">Yedekler</a>
   <a href="/sites/{{$s.ID}}?tab=import" class="{{if eq .Tab "import"}}active{{end}}">Taşıma</a>
@@ -25,6 +26,7 @@
 {{else if eq .Tab "settings"}}{{template "site-settings" $}}
 {{else if eq .Tab "backups"}}{{template "site-backups" $}}
 {{else if eq .Tab "import"}}{{template "site-import" $}}
+{{else if eq .Tab "cron"}}{{template "site-cron" $}}
 {{else if eq .Tab "logs"}}{{template "site-logs-tab" $}}{{end}}
 {{end}}
 {{end}}
@@ -36,7 +38,7 @@
 </form>
 {{end}}
 
-{{define "site-overview"}}{{$d := .Data}}{{$s := $d.Site}}{{$proxy := eq $d.Def.Type "proxy"}}
+{{define "site-overview"}}{{$d := .Data}}{{$s := $d.Site}}{{$proxy := $d.Def.HasUnit}}
 <div class="grid two">
 <section class="card">
   <h2>Durum</h2>
@@ -45,7 +47,7 @@
     <dt>Aktif sürüm</dt><dd>{{if eq $d.Active "00000000-000000"}}<span class="muted">henüz deploy yok (“yakında” sayfası)</span>{{else}}<code>{{$d.Active}}</code>{{end}}</dd>
     {{if $proxy}}
     <dt>Servis</dt><dd><code>{{$s.Unit}}</code> · {{if eq $d.Unit "active"}}<span class="badge success">active</span>{{else if $d.Unit}}<span class="badge">{{$d.Unit}}</span>{{else}}<span class="muted">bilinmiyor</span>{{end}}</dd>
-    <dt>Port</dt><dd>127.0.0.1:{{$s.Port}}</dd>
+    {{if $s.Port}}<dt>Port</dt><dd>127.0.0.1:{{$s.Port}}</dd>{{end}}
     <dt>Limitler</dt><dd>{{$s.MemoryMaxMB}} MB bellek · %{{$s.CPUQuotaPct}} CPU</dd>
     {{end}}
     <dt>Linux kullanıcısı</dt><dd><code>{{$s.User}}</code></dd>
@@ -105,21 +107,23 @@
 {{define "site-deploy"}}{{$d := .Data}}{{$s := $d.Site}}
 <section class="card stack">
   <h2>Yeni sürüm yükle</h2>
-  <p class="muted small">Zip'in kökü uygulamanın kökü olmalı{{if eq $d.Def.ID "dotnet"}} (<code>dotnet publish</code> çıktısı){{end}}. Kalıcı dizinler ({{range $i, $p := $s.PersistentDirs}}{{if $i}}, {{end}}<code>{{$p}}</code>{{else}}yok{{end}}) korunur; son 5 sürüm saklanır.{{if eq $d.Def.Type "proxy"}} Yeni sürüm sağlık kontrolünden (<code>{{$s.HealthPath}}</code>) geçemezse önceki sürüme otomatik dönülür.{{end}}</p>
+  <p class="muted small">Zip'in kökü uygulamanın kökü olmalı{{if eq $d.Def.ID "dotnet"}} (<code>dotnet publish</code> çıktısı){{end}}. Kalıcı dizinler ({{range $i, $p := $s.PersistentDirs}}{{if $i}}, {{end}}<code>{{$p}}</code>{{else}}yok{{end}}) korunur; son 5 sürüm saklanır.{{if $d.Def.HasUnit}} Yeni sürüm sağlık kontrolünden (<code>{{$s.HealthPath}}</code>) geçemezse önceki sürüme otomatik dönülür.{{end}}</p>
   <form hx-post="/sites/{{$s.ID}}/deploy" hx-encoding="multipart/form-data" hx-disabled-elt="find button" x-data="upload" class="stack">
     <input type="file" name="zip" accept=".zip,application/zip" required>
     <progress class="upload-progress" max="100" value="0" x-show="active" x-bind:value="pct"></progress>
     <div><button type="submit" class="primary">Yükle ve deploy et</button> <span class="muted small" x-text="label"></span></div>
   </form>
 </section>
+{{template "site-git" $}}
 <section class="card table-wrap">
   <h2 class="pad">Sürümler</h2>
   <table class="table">
-    <thead><tr><th>Sürüm</th><th>Boyut</th><th>Durum</th><th>İş</th><th></th></tr></thead>
+    <thead><tr><th>Sürüm</th><th>Kaynak</th><th>Boyut</th><th>Durum</th><th>İş</th><th></th></tr></thead>
     <tbody>
     {{range $d.Releases}}{{if ne .Name "00000000-000000"}}
       <tr>
         <td><code>{{.Name}}</code></td>
+        <td class="nowrap">{{if eq .Source "git"}}git{{if .Commit}} <code title="{{.Commit}}">{{.ShortCommit}}</code>{{end}}{{else if eq .Source "backup"}}yedek{{else}}zip{{end}}</td>
         <td class="nowrap">{{if .Size}}{{kb .Size}}{{end}}</td>
         <td>{{template "site-badge" .Status}}</td>
         <td>{{if .JobID}}<a href="/logs/jobs/{{.JobID}}">#{{.JobID}}</a>{{end}}</td>
@@ -154,7 +158,7 @@
 </form>
 {{end}}
 
-{{define "site-settings"}}{{$d := .Data}}{{$s := $d.Site}}{{$proxy := eq $d.Def.Type "proxy"}}
+{{define "site-settings"}}{{$d := .Data}}{{$s := $d.Site}}{{$proxy := $d.Def.HasUnit}}
 <form method="post" action="/sites/{{$s.ID}}/settings" class="stack">
   <input type="hidden" name="_csrf" value="{{$.CSRF}}">
   <section class="card stack">
@@ -208,7 +212,7 @@
   <input type="hidden" name="tab" value="logs"><input type="hidden" name="part" value="logs">
   <select name="source">
     <option value="activity" {{if eq $d.LogSource "activity"}}selected{{end}}>İşlem geçmişi</option>
-    {{if eq $d.Def.Type "proxy"}}<option value="journal" {{if eq $d.LogSource "journal"}}selected{{end}}>Uygulama (journal)</option>{{end}}
+    {{if $d.Def.HasUnit}}<option value="journal" {{if eq $d.LogSource "journal"}}selected{{end}}>Uygulama (journal)</option>{{end}}
     <option value="access" {{if eq $d.LogSource "access"}}selected{{end}}>nginx erişim</option>
     <option value="error" {{if eq $d.LogSource "error"}}selected{{end}}>nginx hata</option>
   </select>
@@ -349,7 +353,7 @@ DNS henüz bu sunucuyu göstermiyorsa siteyi kendi bilgisayarınızda denemek i�
 </section>
 {{end}}
 
-{{define "site-import"}}{{$d := .Data}}{{$s := $d.Site}}{{$proxy := eq $d.Def.Type "proxy"}}
+{{define "site-import"}}{{$d := .Data}}{{$s := $d.Site}}{{$proxy := $d.Def.HasUnit}}
 <p class="muted">Başka bir sunucudaki siteyi buraya taşımak için adımları sırayla izleyin. DNS'i en son değiştirin; o zamana kadar siteyi kendi bilgisayarınızın hosts dosyasıyla test edebilirsiniz.</p>
 <section class="card stack">
   <h2>1 · Dosyalar</h2>
@@ -419,5 +423,93 @@ DNS henüz bu sunucuyu göstermiyorsa siteyi kendi bilgisayarınızda denemek i�
     <div class="ops"><button type="submit">Kaydet</button>
       {{if eq $h.Site.Status "running"}}<button type="submit" hx-post="/sites/{{$h.Site.ID}}/health/check" hx-target="#site-health" hx-swap="outerHTML">Şimdi kontrol et</button>{{end}}</div>
   </form>
+</section>
+{{end}}
+
+{{define "site-git"}}{{$d := .Data}}{{$s := $d.Site}}{{$g := $d.Git}}
+<section class="card stack" id="git">
+  <div class="card-head"><h2>Git'ten deploy</h2>{{if $d.GitSet}}<form method="post" action="/sites/{{$s.ID}}/git/deploy" class="inline-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" class="primary">Git'ten deploy et ({{$g.Branch}})</button></form>{{end}}</div>
+  <p class="muted small">Branch'in son commit'i sunucuda <strong>site kullanıcısı</strong> (<code>{{$s.User}}</code>) olarak, sitenin sandbox'ında çekilir ve build edilir; çıktı yeni sürüm olur ve zip deploy ile aynı yoldan (sağlık kontrolü, otomatik geri dönüş) yayına alınır. Submodule'ler desteklenmez.</p>
+  {{if and $d.GitSet $g.LastCommit}}<p class="small">Son deploy edilen commit: <code>{{slice $g.LastCommit 0 7}}</code> {{$g.LastSubject}}</p>{{end}}
+  <form method="post" action="/sites/{{$s.ID}}/git" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <div class="form-grid">
+      <label>Repo adresi * <input name="repo_url" value="{{$g.RepoURL}}" placeholder="git@github.com:firma/proje.git" required spellcheck="false"></label>
+      <label>Branch * <input name="branch" value="{{$g.Branch}}" required spellcheck="false"></label>
+      <label>Build komutu <input name="build_command" value="{{$g.BuildCommand}}" placeholder="{{$d.GitDefaults.BuildCommand}}" spellcheck="false">
+        <span class="muted small">Tek satır, bash ile repo kökünde çalışır. Boş: build yok, repo olduğu gibi yayınlanır.{{if eq $s.RuntimeID "dotnet"}} .NET SDK gerekir (Altyapılar).{{end}}</span></label>
+      <label>Çıktı dizini <input name="output_dir" value="{{$g.OutputDir}}" placeholder="{{$d.GitDefaults.OutputDir}}" spellcheck="false">
+        <span class="muted small">Yayınlanacak dizin (repo köküne göre); <code>.</code> = tüm repo.</span></label>
+      <label>Build zaman aşımı (sn) <input type="number" name="build_timeout" min="60" max="3600" value="{{$g.BuildTimeout}}"></label>
+    </div>
+    <div><button type="submit">Kaydet</button></div>
+  </form>
+  {{if $d.GitSet}}
+  <div class="grid two">
+    <div class="stack">
+      <h3>Deploy key</h3>
+      {{if $g.PublicKey}}<pre class="small">{{$g.PublicKey}}</pre>
+      <p class="muted small">Repo'nun <em>Settings → Deploy keys</em> bölümüne yalnızca okuma yetkisiyle ekleyin.{{if $d.GitInfo.KeyFingerprint}} Parmak izi: <code>{{$d.GitInfo.KeyFingerprint}}</code>{{end}} Private key yalnızca root'un okuyabildiği <code>/etc/hostpanel/git/{{$s.Domain}}/</code> altındadır.</p>
+      {{else}}<p class="muted small">HTTPS (açık) repo için deploy key gerekmez.</p>{{end}}
+      <form method="post" action="/sites/{{$s.ID}}/git/keygen" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" {{if $g.PublicKey}}data-confirm="Mevcut deploy key geçersiz olacak. Devam edilsin mi?"{{end}}>{{if $g.PublicKey}}Yeni deploy key üret{{else}}Deploy key üret{{end}}</button></form>
+    </div>
+    <div class="stack">
+      <h3>Sunucu (host) anahtarı</h3>
+      {{if $d.GitInfo.HostKeys}}<ul class="small">{{range $d.GitInfo.HostKeys}}<li><code>{{.}}</code></li>{{end}}</ul>
+      <p class="muted small">İlk bağlantıda kabul edildi. Anahtar değişirse fetch reddedilir; git sunucusunun anahtarını gerçekten değiştirdiğinden eminseniz sıfırlayın.</p>
+      <form method="post" action="/sites/{{$s.ID}}/git/hostkey-reset" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" data-confirm="Kayıtlı host anahtarı silinsin mi?">Host anahtarını sıfırla</button></form>
+      {{else}}<p class="muted small">Henüz bağlanılmadı; ilk deploy'da sunucunun anahtarı kaydedilir (parmak izini burada kontrol edin).</p>{{end}}
+    </div>
+  </div>
+  {{end}}
+</section>
+{{end}}
+
+{{define "site-cron"}}{{$d := .Data}}{{$s := $d.Site}}{{$e := $d.CronEdit}}
+<datalist id="cron-presets">{{range $d.CronPresets}}<option value="{{.Expr}}">{{.Label}}</option>{{end}}</datalist>
+{{if not $d.CronEligible}}<div class="alert info small">Cron'lar yalnızca site çalışırken (veya bakım modundayken) ve deploy edilmiş bir sürüm varken çalışır.</div>{{end}}
+<section class="card table-wrap">
+  <h2 class="pad">Görevler</h2>
+  <table class="table">
+    <thead><tr><th>Ad</th><th>Zamanlama</th><th>Komut</th><th>Son çalışma</th><th>Sonraki</th><th></th></tr></thead>
+    <tbody>
+    {{range $d.Crons}}<tr>
+      <td>{{.Name}}{{if not .Enabled}} <span class="tag">kapalı</span>{{end}}</td>
+      <td class="nowrap"><code>{{.Schedule}}</code><br><span class="muted small">{{schedule .Schedule}}</span></td>
+      <td><code class="small">{{.Command}}</code></td>
+      <td class="nowrap">{{if index $d.CronRunning .ID}}<span class="badge running">çalışıyor</span>{{else if .LastRunAt.IsZero}}<span class="muted small">hiç</span>{{else}}<span class="badge {{cronClass .LastStatus}}">{{cronStatus .LastStatus}}</span><br><span class="muted small">{{ago .LastRunAt}} · {{ms (int64 .LastMS)}}</span>{{end}}</td>
+      <td class="nowrap muted small">{{if and .Enabled (not .NextRunAt.IsZero)}}{{datetime .NextRunAt}}{{else}}—{{end}}</td>
+      <td class="right nowrap">
+        <form method="post" action="/sites/{{$s.ID}}/crons/{{.ID}}/run" class="inline-form"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" {{if not $d.CronEligible}}disabled{{end}}>Şimdi çalıştır</button></form>
+        <a class="button" href="/sites/{{$s.ID}}?tab=cron&edit={{.ID}}#cron-form">Düzenle</a>
+        <form method="post" action="/sites/{{$s.ID}}/crons/{{.ID}}/delete" class="inline-form"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" class="danger" data-confirm="“{{.Name}}” silinsin mi?">Sil</button></form>
+      </td>
+    </tr>{{end}}
+    </tbody>
+  </table>
+  {{if not $d.Crons}}<p class="muted pad">Bu sitenin cron görevi yok.</p>{{end}}
+</section>
+<section class="card stack" id="cron-form">
+  <h2>{{if $e.ID}}Görevi düzenle{{else}}Yeni görev{{end}}</h2>
+  <form method="post" action="/sites/{{$s.ID}}/crons" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="cron_id" value="{{if $e.ID}}{{$e.ID}}{{end}}">
+    <div class="form-grid">
+      <label>Ad * <input name="name" value="{{$e.Name}}" maxlength="60" required></label>
+      <label>Zamanlama (cron) * <input name="schedule" value="{{$e.Schedule}}" list="cron-presets" required spellcheck="false">
+        <span class="muted small">dakika saat gün ay haftanın-günü, sunucu saatiyle (ör. <code>*/5 * * * *</code>).</span></label>
+      <label>Zaman aşımı (sn) <input type="number" name="timeout_sec" min="60" max="3600" value="{{$e.TimeoutSec}}"></label>
+      <label class="check"><input type="checkbox" name="enabled" value="1" {{if $e.Enabled}}checked{{end}}> Etkin</label>
+    </div>
+    <label>Komut * <input name="command" value="{{$e.Command}}" maxlength="1000" required spellcheck="false" placeholder="cd current && php artisan schedule:run"></label>
+    <p class="muted small">Tek satır; <code>{{$s.User}}</code> kullanıcısı olarak <code>bash</code> ile <code>{{$s.Dir}}/current</code> dizininde, sitenin bellek/CPU sınırları ve sandbox'ı içinde çalışır. Ortam değişkenleri sitenin değişkenleridir; yazılabilir alan yalnızca site dizini. Çıktının son 16 KB'ı saklanır.</p>
+    <div><button type="submit" class="primary">Kaydet</button>{{if $e.ID}} <a href="/sites/{{$s.ID}}?tab=cron">Vazgeç</a>{{end}}</div>
+  </form>
+</section>
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Son çalışmalar</h2><a class="small" href="/logs/cron?site={{$s.ID}}">Tümü (Log Merkezi) →</a></div>
+  {{template "cron-runs" $d.CronRuns}}
 </section>
 {{end}}

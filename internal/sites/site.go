@@ -79,6 +79,23 @@ type Release struct {
 	Status    string
 	JobID     int64
 	CreatedAt time.Time
+	Source    string // zip | git | backup
+	Commit    string // git commit SHA (git releases)
+}
+
+// Release sources.
+const (
+	SourceZip    = "zip"
+	SourceGit    = "git"
+	SourceBackup = "backup"
+)
+
+// ShortCommit is the first 7 characters of the commit.
+func (r Release) ShortCommit() string {
+	if len(r.Commit) > 7 {
+		return r.Commit[:7]
+	}
+	return r.Commit
 }
 
 // Release statuses.
@@ -241,8 +258,11 @@ func (st *Store) CountByRuntimeVersion(ctx context.Context, runtimeID, version s
 
 // AddRelease records a new release.
 func (st *Store) AddRelease(ctx context.Context, r *Release) error {
-	res, err := st.db.ExecContext(ctx, `INSERT INTO releases(site_id, name, size, status, job_id, created_at) VALUES (?,?,?,?,?,?)`,
-		r.SiteID, r.Name, r.Size, r.Status, r.JobID, time.Now().Unix())
+	if r.Source == "" {
+		r.Source = SourceZip
+	}
+	res, err := st.db.ExecContext(ctx, `INSERT INTO releases(site_id, name, size, status, job_id, created_at, source, commit_sha) VALUES (?,?,?,?,?,?,?,?)`,
+		r.SiteID, r.Name, r.Size, r.Status, r.JobID, time.Now().Unix(), r.Source, r.Commit)
 	if err != nil {
 		return err
 	}
@@ -250,9 +270,15 @@ func (st *Store) AddRelease(ctx context.Context, r *Release) error {
 	return nil
 }
 
+// SetReleaseCommit stores the git commit of a release.
+func (st *Store) SetReleaseCommit(ctx context.Context, siteID int64, name, sha string) error {
+	_, err := st.db.ExecContext(ctx, `UPDATE releases SET commit_sha=? WHERE site_id=? AND name=?`, sha, siteID, name)
+	return err
+}
+
 // Releases lists a site's releases newest first.
 func (st *Store) Releases(ctx context.Context, siteID int64) ([]Release, error) {
-	rows, err := st.db.QueryContext(ctx, `SELECT id, site_id, name, size, status, COALESCE(job_id,0), created_at
+	rows, err := st.db.QueryContext(ctx, `SELECT id, site_id, name, size, status, COALESCE(job_id,0), created_at, source, commit_sha
 		FROM releases WHERE site_id=? ORDER BY name DESC`, siteID)
 	if err != nil {
 		return nil, err
@@ -262,7 +288,7 @@ func (st *Store) Releases(ctx context.Context, siteID int64) ([]Release, error) 
 	for rows.Next() {
 		var r Release
 		var c int64
-		if err := rows.Scan(&r.ID, &r.SiteID, &r.Name, &r.Size, &r.Status, &r.JobID, &c); err != nil {
+		if err := rows.Scan(&r.ID, &r.SiteID, &r.Name, &r.Size, &r.Status, &r.JobID, &c, &r.Source, &r.Commit); err != nil {
 			return nil, err
 		}
 		r.CreatedAt = time.Unix(c, 0)

@@ -63,6 +63,8 @@ func (s *Service) Register() {
 	s.Jobs.Register("site.delete", s.jobDelete)
 	s.Jobs.Register("runtime.install", s.jobRuntime("install"))
 	s.Jobs.Register("runtime.remove", s.jobRuntime("remove"))
+	s.Jobs.Register("runtime.install-sdk", s.jobRuntime("install-sdk"))
+	s.Jobs.Register("runtime.remove-sdk", s.jobRuntime("remove-sdk"))
 }
 
 // Lock serialises mutating operations on one site (also used by the ssl package).
@@ -154,10 +156,7 @@ func (s *Service) Prepare(ctx context.Context, in CreateInput) (Site, error) {
 		return site, errors.New("altyapı seçin")
 	}
 	def := p.Def()
-	if def.Type == runtimes.TypeFastCGI {
-		return site, errors.New("bu altyapı henüz desteklenmiyor")
-	}
-	if def.Type == runtimes.TypeProxy {
+	if def.HasUnit() {
 		installed, _ := p.InstalledVersions(ctx)
 		if !contains(installed, in.RuntimeVersion) {
 			return site, errors.New("seçilen sürüm sunucuda kurulu değil; önce Altyapılar sayfasından kurun")
@@ -185,6 +184,8 @@ func (s *Service) Prepare(ctx context.Context, in CreateInput) (Site, error) {
 		if site.Port, err = FreePort(used); err != nil {
 			return site, err
 		}
+	}
+	if def.HasUnit() {
 		if _, err := p.StartArgs(s.vars(site)); err != nil {
 			return site, err
 		}
@@ -263,13 +264,22 @@ func (s *Service) jobCreate(ctx context.Context, l *jobs.Log, p map[string]any) 
 	}
 	s.Store.AddRelease(ctx, &Release{SiteID: site.ID, Name: PlaceholderRelease, Status: ReleaseActive})
 	l.Progress(40)
-	if def.Type == runtimes.TypeProxy {
+	if def.HasUnit() {
 		if err := sg.step("Ortam değişkenleri dosyası", func() error {
 			return s.writeEnv(ctx, l, site, nil)
 		}, func(c context.Context) error {
 			return s.helper(c, l, nil, nil, "hp-site-env.sh", "delete", site.Domain)
 		}); err != nil {
 			return fail(err)
+		}
+		if def.Type == runtimes.TypeFastCGI {
+			if err := sg.step("php-fpm yapılandırması", func() error {
+				return s.installPool(ctx, l, site)
+			}, func(c context.Context) error {
+				return s.helper(c, l, nil, nil, "hp-php-pool.sh", "remove", site.Domain)
+			}); err != nil {
+				return fail(err)
+			}
 		}
 		if err := sg.step("systemd servisi: "+site.Unit(), func() error {
 			return s.installUnit(ctx, l, site)
@@ -430,7 +440,7 @@ func (s *Service) SaveEnv(ctx context.Context, site Site, values map[string]stri
 			return "", err
 		}
 	}
-	if prov.Def().Type == runtimes.TypeProxy {
+	if prov.Def().HasUnit() {
 		if err := s.writeEnv(ctx, nil, site, values); err != nil {
 			return "", err
 		}
@@ -491,10 +501,10 @@ func (s *Service) Operate(ctx context.Context, site Site, op string) (string, er
 	if err != nil {
 		return site.Status, err
 	}
-	proxy := prov.Def().Type == runtimes.TypeProxy
+	unit := prov.Def().HasUnit()
 	hasRelease := s.Store.ActiveRelease(ctx, site.ID) != PlaceholderRelease
 	svc := func(action string) error {
-		if !proxy {
+		if !unit {
 			return nil
 		}
 		return s.helper(ctx, nil, nil, nil, "hp-site-service.sh", action, site.ShortName)
@@ -540,8 +550,13 @@ func (s *Service) Operate(ctx context.Context, site Site, op string) (string, er
 		next = StatusDisabled
 	case OpReapplyNginx:
 	case OpReinstallService:
-		if !proxy {
+		if !unit {
 			return site.Status, errors.New("statik sitede servis yok")
+		}
+		if prov.Def().Type == runtimes.TypeFastCGI {
+			if err := s.installPool(ctx, nil, site); err != nil {
+				return site.Status, err
+			}
 		}
 		if err := s.installUnit(ctx, nil, site); err != nil {
 			return site.Status, err
@@ -632,12 +647,28 @@ func (s *Service) jobDeploy(ctx context.Context, l *jobs.Log, p map[string]any) 
 	if err != nil {
 		return err
 	}
-	proxy := prov.Def().Type == runtimes.TypeProxy
 	previous := s.Store.ActiveRelease(ctx, site.ID)
 	rollbackTo, _ := p["rollback"].(string)
 	release := rollbackTo
 
-	if rollbackTo == "" {
+	if git, _ := p["git"].(bool); git && rollbackTo == "" {
+		release = time.Now().Format("20060102-150405")
+		if release == previous {
+			release = time.Now().Add(time.Second).Format("20060102-150405")
+		}
+		rel := &Release{SiteID: site.ID, Name: release, Status: ReleasePrevious, JobID: l.ID(), Source: SourceGit}
+		if err := s.Store.AddRelease(ctx, rel); err != nil {
+			return err
+		}
+		l.Printf("Yeni sürüm: %s (git)", release)
+		sha, err := s.gitBuild(ctx, l, site, release)
+		if err != nil {
+			s.Store.SetReleaseStatus(ctx, site.ID, release, ReleaseFailed)
+			return err
+		}
+		s.Store.SetReleaseCommit(ctx, site.ID, release, sha)
+		l.Progress(40)
+	} else if rollbackTo == "" {
 		upload, _ := p["upload"].(string)
 		if !uploadNameOK(upload) {
 			return errors.New("geçersiz yükleme dosyası")
@@ -661,13 +692,13 @@ func (s *Service) jobDeploy(ctx context.Context, l *jobs.Log, p map[string]any) 
 		l.Printf("Önceki sürüme dönülüyor: %s", rollbackTo)
 	}
 
-	return s.goLive(ctx, l, site, proxy, release, previous)
+	return s.goLive(ctx, l, site, prov.Def(), release, previous)
 }
 
 // goLive activates release, restarts + health-checks proxy apps (reverting to
 // previous on failure), re-applies nginx and prunes old releases. The site
 // lock must be held.
-func (s *Service) goLive(ctx context.Context, l *jobs.Log, site Site, proxy bool, release, previous string) error {
+func (s *Service) goLive(ctx context.Context, l *jobs.Log, site Site, def *runtimes.Definition, release, previous string) error {
 	activate := func(name string) error {
 		if err := s.helper(ctx, l, nil, nil, "hp-site-deploy.sh", "activate", site.Domain, name); err != nil {
 			return err
@@ -679,12 +710,12 @@ func (s *Service) goLive(ctx context.Context, l *jobs.Log, site Site, proxy bool
 	}
 	l.Progress(60)
 
-	if proxy {
+	if def.HasUnit() {
 		if err := s.helper(ctx, l, nil, nil, "hp-site-service.sh", "restart", site.ShortName); err != nil {
 			return s.revert(ctx, l, site, release, previous, err)
 		}
 		l.Progress(70)
-		if err := s.healthCheck(ctx, l, site); err != nil {
+		if err := s.healthCheck(ctx, l, site, def); err != nil {
 			return s.revert(ctx, l, site, release, previous, err)
 		}
 	}
@@ -725,7 +756,7 @@ func (s *Service) RestoreRelease(ctx context.Context, l *jobs.Log, site Site, ex
 	if release == previous {
 		release = time.Now().Add(time.Second).Format("20060102-150405")
 	}
-	if err := s.Store.AddRelease(ctx, &Release{SiteID: site.ID, Name: release, Status: ReleasePrevious, JobID: l.ID()}); err != nil {
+	if err := s.Store.AddRelease(ctx, &Release{SiteID: site.ID, Name: release, Status: ReleasePrevious, JobID: l.ID(), Source: SourceBackup}); err != nil {
 		return err
 	}
 	l.Printf("Yedekten yeni sürüm: %s", release)
@@ -733,7 +764,7 @@ func (s *Service) RestoreRelease(ctx context.Context, l *jobs.Log, site Site, ex
 		s.Store.SetReleaseStatus(ctx, site.ID, release, ReleaseFailed)
 		return err
 	}
-	return s.goLive(ctx, l, site, prov.Def().Type == runtimes.TypeProxy, release, previous)
+	return s.goLive(ctx, l, site, prov.Def(), release, previous)
 }
 
 // markPruned mirrors the helper's prune policy in the DB.
@@ -775,8 +806,13 @@ func (s *Service) revert(ctx context.Context, l *jobs.Log, site Site, failed, pr
 	return fmt.Errorf("deploy başarısız, %s sürümüne geri dönüldü: %w", previous, cause)
 }
 
-// healthCheck polls the app until it answers with a status < 500.
-func (s *Service) healthCheck(ctx context.Context, l *jobs.Log, site Site) error {
+// healthCheck polls the app until it answers with a status < 500. A PHP
+// site's php-fpm master must stay active for a few seconds instead (its HTTP
+// path goes through nginx, which the monitor checks).
+func (s *Service) healthCheck(ctx context.Context, l *jobs.Log, site Site, def *runtimes.Definition) error {
+	if def.Type == runtimes.TypeFastCGI {
+		return s.unitStaysActive(ctx, l, site)
+	}
 	url := fmt.Sprintf("http://127.0.0.1:%d%s", site.Port, site.HealthPath)
 	if s.DryRun {
 		l.Printf("[DRY-RUN] health check atlandı: %s", url)
@@ -806,6 +842,39 @@ func (s *Service) healthCheck(ctx context.Context, l *jobs.Log, site Site) error
 		}
 	}
 	return fmt.Errorf("health check 30 sn içinde başarılı olmadı (son sonuç: %s)", last)
+}
+
+// unitStaysActive checks that the site's unit is active three times over ~5 s.
+func (s *Service) unitStaysActive(ctx context.Context, l *jobs.Log, site Site) error {
+	if s.DryRun {
+		l.Printf("[DRY-RUN] servis kontrolü atlandı: %s", site.Unit())
+		return nil
+	}
+	for i := 0; i < 3; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+		res, _ := s.Probe.Run(ctx, exec.Cmd{Name: "systemctl", Args: []string{"is-active", site.Unit() + ".service"}, Timeout: 5 * time.Second})
+		if st := strings.TrimSpace(res.Stdout); st != "active" {
+			return fmt.Errorf("php-fpm çalışmıyor (%s); site loglarına (journal) bakın", st)
+		}
+	}
+	l.Printf("php-fpm çalışıyor: %s", site.Unit())
+	return nil
+}
+
+// installPool asks the root helper to write the site's php-fpm config.
+func (s *Service) installPool(ctx context.Context, w io.Writer, site Site) error {
+	mem, children := site.Fields["memoryLimit"], site.Fields["maxChildren"]
+	if mem == "" {
+		mem = "256"
+	}
+	if children == "" {
+		children = "5"
+	}
+	return s.helper(ctx, w, nil, nil, "hp-php-pool.sh", "install", site.Domain, site.ShortName, mem, children, strconv.Itoa(site.MaxUploadMB))
 }
 
 // --- delete ---
@@ -846,10 +915,15 @@ func (s *Service) jobDelete(ctx context.Context, l *jobs.Log, p map[string]any) 
 	}
 	dctx := context.WithoutCancel(ctx)
 	prov, _ := s.provider(site)
-	if prov == nil || prov.Def().Type == runtimes.TypeProxy {
+	try("cron ve build işleri durduruluyor", func() error { return s.helper(dctx, l, nil, nil, "hp-site-cron.sh", "stop-all", site.ShortName) })
+	if prov == nil || prov.Def().HasUnit() {
 		try("systemd servisi kaldırılıyor", func() error { return s.helper(dctx, l, nil, nil, "hp-site-unit.sh", "remove", site.ShortName) })
 		try("ortam değişkenleri siliniyor", func() error { return s.helper(dctx, l, nil, nil, "hp-site-env.sh", "delete", site.Domain) })
 	}
+	if prov == nil || prov.Def().Type == runtimes.TypeFastCGI {
+		try("php-fpm yapılandırması siliniyor", func() error { return s.helper(dctx, l, nil, nil, "hp-php-pool.sh", "remove", site.Domain) })
+	}
+	try("git deploy anahtarı siliniyor", func() error { return s.helper(dctx, l, nil, nil, "hp-site-git.sh", "remove", site.Domain) })
 	try("nginx yapılandırması kaldırılıyor", func() error { return s.helper(dctx, l, nil, nil, "hp-nginx-site.sh", "remove", site.Domain) })
 	try("SSL sertifikaları siliniyor", func() error { return s.helper(dctx, l, nil, nil, "hp-ssl.sh", "delete", site.Domain, "all") })
 	l.Progress(60)
@@ -880,11 +954,14 @@ func (s *Service) jobRuntime(action string) jobs.Handler {
 		if !ok || prov.Def().Versions.InstallScript == "" {
 			return errors.New("bu altyapı için kurulum desteklenmiyor")
 		}
-		if !runtimes.IsSemver(version) {
+		if !runtimes.ValidInstallVersion(version) {
 			return errors.New("geçersiz sürüm")
 		}
 		if action == "remove" && s.Store.CountByRuntimeVersion(ctx, id, version) > 0 {
 			return errors.New("bu sürümü kullanan siteler var")
+		}
+		if strings.HasSuffix(action, "-sdk") && prov.Def().SDK == nil {
+			return errors.New("bu altyapının SDK'sı yok")
 		}
 		c := exec.Helper(s.ScriptsDir, "hp-runtime.sh", action, strings.TrimSuffix(prov.Def().Versions.InstallScript, ".sh"), version)
 		c.Output, c.Timeout = l, 20*time.Minute
@@ -898,7 +975,11 @@ func (s *Service) SubmitRuntime(ctx context.Context, action, id, version string)
 	if action == "remove" && s.Store.CountByRuntimeVersion(ctx, id, version) > 0 {
 		return 0, errors.New("bu sürümü kullanan siteler var; kaldırılamaz")
 	}
-	label := map[string]string{"install": "kuruluyor", "remove": "kaldırılıyor"}[action]
+	label, ok := map[string]string{"install": "kuruluyor", "remove": "kaldırılıyor",
+		"install-sdk": "SDK kuruluyor", "remove-sdk": "SDK kaldırılıyor"}[action]
+	if !ok {
+		return 0, errors.New("geçersiz işlem")
+	}
 	return s.Jobs.Submit(ctx, jobs.Spec{Kind: "runtime." + action, TargetType: "runtime", TargetID: id + "@" + version,
 		Summary: id + " " + version + " " + label, Params: map[string]any{"runtime": id, "version": version}, Retryable: true})
 }

@@ -54,6 +54,46 @@ ok  validate_site_user site_ornek_com
 bad validate_site_user root
 bad validate_site_user site_
 
+# Faz 5b: user commands, git, limits, runtime PATH.
+ok  validate_user_command "cd current && php artisan schedule:run >/dev/null 2>&1"
+ok  validate_user_command 'echo "$HOME" | tee -a log.txt'
+bad validate_user_command ""
+bad validate_user_command "   "
+bad validate_user_command "$(printf 'echo a\necho b')"
+bad validate_user_command "$(printf 'echo\ta')"
+bad validate_user_command "$(printf 'x%.0s' {1..1001})"
+ok  validate_git_url git@github.com:acme/app.git
+ok  validate_git_url ssh://git@gitlab.example.com:2222/acme/app.git
+ok  validate_git_url https://github.com/acme/app
+bad validate_git_url file:///etc/passwd
+bad validate_git_url "ext::sh -c id"
+bad validate_git_url -oProxyCommand=x
+bad validate_git_url git@-host:x
+bad validate_git_url https://user:pw@github.com/a/b
+bad validate_git_url https://github.com/../x
+bad validate_git_url git@github.com:-x
+bad validate_git_url 'ssh://h/$(id)'
+bad validate_git_url http://github.com/a/b
+ok  validate_git_branch main
+ok  validate_git_branch release/1.2
+bad validate_git_branch -f
+bad validate_git_branch a..b
+bad validate_git_branch a.lock
+bad validate_git_branch a/.b
+bad validate_git_branch "x y"
+ok  validate_outdir .
+ok  validate_outdir hp-publish
+bad validate_outdir .hp-out
+bad validate_outdir ../x
+ok  validate_limits 600 512 100
+bad validate_limits 5 512 100
+bad validate_limits 600 32 100
+bad validate_limits 600 512 2000
+ok  runtime_path node 24.11.1
+ok  runtime_path php 8.3
+bad runtime_path node "24;id"
+bad runtime_path java 1.2.3
+
 # nginx config validation: every line of testdata_nginx_bad.txt must be rejected on its own.
 tmpc=$(mktemp)
 while IFS= read -r line; do

@@ -37,24 +37,28 @@ func ModeFor(status string) string {
 
 // NginxData is passed to the nginx templates.
 type NginxData struct {
-	Domain       string
-	ServerNames  []string // names served by the main server block
-	RedirectFrom []string // names that 301 to RedirectTo
-	RedirectTo   string
-	Mode         string
-	Type         string
-	Port         int
-	Root         string
-	Index        string
-	SPA          bool
-	MaxUploadMB  int
-	Gzip         bool
-	Snippet      string
-	AccessLog    string
-	ErrorLog     string
-	PagesDir     string
-	ErrorPage    string // page served for 503 in non-app modes
-	ACMERoot     string
+	Domain          string
+	ServerNames     []string // names served by the main server block
+	RedirectFrom    []string // names that 301 to RedirectTo
+	RedirectTo      string
+	Mode            string
+	Type            string
+	Port            int
+	Root            string
+	Index           string
+	SPA             bool
+	DocRoot         string   // PHP: Root + optional docroot field
+	PHPSocket       string   // PHP: php-fpm socket
+	FrontController bool     // PHP: unknown paths go to index.php
+	NoExecDirs      []string // PHP: persistent dirs where .php is denied
+	MaxUploadMB     int
+	Gzip            bool
+	Snippet         string
+	AccessLog       string
+	ErrorLog        string
+	PagesDir        string
+	ErrorPage       string // page served for 503 in non-app modes
+	ACMERoot        string
 
 	TLS        *TLSPaths // nil: HTTP only
 	ForceHTTPS bool      // effective only with TLS
@@ -122,6 +126,29 @@ func NginxDataFor(s Site, def *runtimes.Definition, mode, templatesDir string) N
 		d.Index = v
 	}
 	d.SPA = s.Fields["spa"] == "evet"
+	if def.Type == runtimes.TypeFastCGI {
+		d.Index = "index.php"
+		if v := s.Fields["index"]; v != "" {
+			d.Index = v
+		}
+		d.DocRoot = d.Root
+		if v := s.Fields["docroot"]; v != "" {
+			d.DocRoot = d.Root + "/" + v
+		}
+		d.PHPSocket = PHPSocket(s.Domain)
+		d.FrontController = s.Fields["frontController"] != "hayır"
+		for _, p := range s.PersistentDirs {
+			// Only dirs below the web root are reachable by URL.
+			rel := p
+			if v := s.Fields["docroot"]; v != "" {
+				var ok bool
+				if rel, ok = strings.CutPrefix(p, v+"/"); !ok {
+					continue
+				}
+			}
+			d.NoExecDirs = append(d.NoExecDirs, rel)
+		}
+	}
 	switch s.WWWMode {
 	case WWWToWWW:
 		d.ServerNames = append([]string{s.WWWName()}, s.Aliases...)
