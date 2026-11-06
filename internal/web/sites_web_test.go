@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 type webClient struct {

@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"hostpanel/internal/exec"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 // Log Center → Sistem Logları. Every source is read without root: panel files,
@@ -39,6 +39,7 @@ var systemSources = []sysSource{
 	{ID: "certbot", Label: "certbot (SSL yenileme)", Unit: "certbot.service"},
 	{ID: "ssl-renewals", Label: "SSL yenileme kayıtları"},
 	{ID: "rclone", Label: "rclone (Drive aktarımları)"},
+	{ID: "update", Label: "Panel güncelleme"},
 	{ID: "docker", Label: "Docker servisi", Unit: "docker.service"},
 	{ID: "mssql", Label: "MSSQL container"},
 	{ID: "fail2ban", Label: "fail2ban"},
@@ -105,6 +106,8 @@ func (s *Server) parseSysQuery(ctx context.Context, q url.Values) sysQuery {
 		sq.Path = s.Cfg.RenewLogPath()
 	case "rclone":
 		sq.Path = s.Cfg.RcloneLogPath()
+	case "update":
+		sq.Path = s.Cfg.UpdateLogPath()
 	case "fail2ban":
 		sq.Path = "/var/log/fail2ban.log"
 	case "sshauth":

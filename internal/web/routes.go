@@ -123,6 +123,12 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("GET /settings/notify", s.requireAuth(s.notifyPage))
 	mux.Handle("POST /settings/notify", s.requireAuth(s.notifySave))
 	mux.Handle("POST /settings/notify/test", s.requireAuth(s.notifyTest))
+	mux.Handle("GET /settings/update", s.requireAuth(s.updatePage))
+	mux.Handle("GET /settings/update/status", s.requireAuth(s.updateStatus))
+	mux.Handle("POST /settings/update/check", s.requireAuth(s.updateCheck))
+	mux.Handle("POST /settings/update/start", s.requireAuth(s.updateStart))
+	mux.Handle("GET /settings/transfer", s.requireAuth(s.transferPage))
+	mux.Handle("POST /settings/transfer/export", s.requireAuth(s.transferExport))
 
 	mux.Handle("GET /server", s.requireAuth(s.serverPage))
 	mux.Handle("GET /server/part/{part}", s.requireAuth(s.serverPart))

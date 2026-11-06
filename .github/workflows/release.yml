@@ -1,0 +1,34 @@
+# Tag push (v1.2.3): test, build linux/amd64 + linux/arm64, package with deploy/,
+# SHA256SUMS, publish a GitHub Release. The server needs no Go: install.sh and
+# the panel's updater download these assets and verify them against SHA256SUMS.
+name: release
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@v0.8.2 # 2026.2.2
+      - name: lint + test
+        run: make lint test
+      - name: dist
+        run: make dist VERSION="${GITHUB_REF_NAME}"
+      - name: smoke test (packaged binary reports the tag)
+        run: |
+          tar -xzf "dist/hostpanel-${GITHUB_REF_NAME}-linux-amd64.tar.gz" -C "$RUNNER_TEMP"
+          test "$("$RUNNER_TEMP/hostpanel-${GITHUB_REF_NAME}-linux-amd64/bin/hostpanel" version)" = "${GITHUB_REF_NAME}"
+          (cd dist && sha256sum -c SHA256SUMS)
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/hostpanel-*.tar.gz dist/install.sh dist/SHA256SUMS --title "HostPanel ${GITHUB_REF_NAME}" --generate-notes --verify-tag

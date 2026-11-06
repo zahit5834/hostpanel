@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"hostpanel/internal/customers"
-	"hostpanel/internal/databases"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/customers"
+	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 type dbPageData struct {

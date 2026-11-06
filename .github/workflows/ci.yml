@@ -1,0 +1,27 @@
+# Every push / pull request: vet, staticcheck, tests (Go + bash), sudoers check, shellcheck.
+name: ci
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@v0.8.2 # 2026.2.2
+      - name: lint
+        run: make lint
+      - name: test
+        run: make test
+      - name: build (amd64 + arm64)
+        run: make build build-arm64

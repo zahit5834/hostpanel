@@ -84,6 +84,16 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+// MigrationNames lists the embedded migrations this binary knows, in order.
+func MigrationNames() []string {
+	names, _ := fs.Glob(migrationFS, "migrations/*.sql")
+	sort.Strings(names)
+	for i, n := range names {
+		names[i] = strings.TrimPrefix(n, "migrations/")
+	}
+	return names
+}
+
 // GetSetting returns a settings value or def when unset.
 func GetSetting(ctx context.Context, db *sql.DB, key, def string) string {
 	var v string

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 // gitTabData fills the Git card of the Deploy tab.

@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"hostpanel/internal/backups"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/monitor"
-	"hostpanel/internal/sites"
-	"hostpanel/internal/ssl"
-	"hostpanel/internal/system"
+	"github.com/zahit5834/hostpanel/internal/backups"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/monitor"
+	"github.com/zahit5834/hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/ssl"
+	"github.com/zahit5834/hostpanel/internal/system"
 )
 
 // metricsState keeps the previous CPU samples so a percentage can be derived

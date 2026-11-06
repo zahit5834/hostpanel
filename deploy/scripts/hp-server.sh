@@ -25,15 +25,16 @@ protected_ports() {
   if command -v sshd >/dev/null; then
     while read -r p; do [[ $p =~ ^[0-9]+$ ]] && ports+=("$p"); done < <(sshd -T 2>/dev/null | awk '$1 == "port" {print $2}')
   fi
-  if [[ -f /etc/hostpanel/config.yaml ]]; then
-    p=$(sed -nE 's/^listen:[[:space:]]*"?[^"]*:([0-9]{1,5})"?[[:space:]]*$/\1/p' /etc/hostpanel/config.yaml | head -n1)
-    [[ $p =~ ^[0-9]+$ ]] && ports+=("$p")
-  fi
+  p=$(config_value listen)
+  p=${p##*:}
+  [[ $p =~ ^[0-9]{1,5}$ ]] && ports+=("$p")
+  p=$(config_value panel_port)
+  [[ $p =~ ^[0-9]{1,5}$ ]] && ports+=("$p")
   printf '%s\n' "${ports[@]}" | sort -un | paste -sd, -
 }
 
 need_ufw() { command -v ufw >/dev/null || die "UFW kurulu değil"; }
-ufw_active() { ufw status | head -n1 | grep -q '^Status: active'; }
+ufw_active() { [[ $(ufw status 2>/dev/null | head -n1) == "Status: active" ]]; }
 
 case $action in
   ufw-status)

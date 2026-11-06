@@ -10,8 +10,8 @@ import (
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 
-	"hostpanel/internal/crypto"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/crypto"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 func newService(t *testing.T) *Service {

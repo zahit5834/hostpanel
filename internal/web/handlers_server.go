@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"hostpanel/internal/exec"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/system"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/system"
 )
 
 // serverCache keeps slow, rarely changing server facts (apt-check takes a few

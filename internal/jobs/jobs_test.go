@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"hostpanel/internal/logs"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 func newManager(t *testing.T) (*Manager, context.CancelFunc) {

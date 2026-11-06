@@ -20,9 +20,9 @@ import (
 	"sync"
 	"time"
 
-	"hostpanel/internal/crypto"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/crypto"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 // Event kinds (each can be switched on/off in Ayarlar → Bildirimler).
@@ -35,6 +35,7 @@ const (
 	KindLoginFailed = "login.failed"
 	KindLoginNewIP  = "login.newip"
 	KindCron        = "cron.failed"
+	KindUpdate      = "panel.update"
 	KindTest        = "test"
 )
 
@@ -46,12 +47,13 @@ var Kinds = []struct{ ID, Label string }{
 	{KindBackup, "Yedek başarısız"},
 	{KindDisk, "Disk %85 üzeri"},
 	{KindCron, "Site cron görevi başarısız"},
+	{KindUpdate, "Panel güncellemesi (yeni sürüm / sonuç)"},
 	{KindLoginFailed, "Başarısız panel girişi"},
 	{KindLoginNewIP, "Yeni IP'den panel girişi"},
 }
 
 // DefaultKinds are enabled until the admin changes the selection.
-var DefaultKinds = []string{KindSiteStatus, KindRestarting, KindSSLExpiring, KindBackup, KindDisk, KindCron, KindLoginNewIP}
+var DefaultKinds = []string{KindSiteStatus, KindRestarting, KindSSLExpiring, KindBackup, KindDisk, KindCron, KindUpdate, KindLoginNewIP}
 
 // Event is one notification.
 type Event struct {

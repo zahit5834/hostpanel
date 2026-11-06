@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"hostpanel/internal/runtimes"
+	"github.com/zahit5834/hostpanel/internal/runtimes"
 )
 
 // nginx modes derived from site status.

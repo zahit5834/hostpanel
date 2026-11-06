@@ -16,7 +16,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
-	"hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/exec"
 )
 
 // Runtime types.

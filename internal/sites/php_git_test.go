@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostpanel/internal/exec"
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/runtimes"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/runtimes"
 )
 
 func TestPHPSiteLifecycle(t *testing.T) {

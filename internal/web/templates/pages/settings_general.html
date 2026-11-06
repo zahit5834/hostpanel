@@ -3,7 +3,7 @@
 {{template "settings-tabs" "general"}}
 {{with .Data}}
 <section class="card">
-  <h2>SSL / Let's Encrypt</h2>
+  <h2>Genel</h2>
   <form method="post" action="/settings/general" class="stack">
     <input type="hidden" name="_csrf" value="{{$.CSRF}}">
     <label>Let's Encrypt e-posta adresi
@@ -12,6 +12,17 @@
     <label>Sunucunun genel IP adresleri (isteğe bağlı)
       <textarea name="server_ips" rows="2" placeholder="203.0.113.10">{{.IPs}}</textarea>
       <span class="muted small">DNS ön kontrolünde kullanılır. Ağ arayüzlerinde bulunanlar: <code>{{or .LocalIPs "—"}}</code>. Sunucu NAT arkasındaysa genel IP'yi buraya girin.</span></label>
+    {{with .Defaults}}
+    <h2>Varsayılanlar</h2>
+    <div class="grid two">
+      <label>İşlem geçmişi saklama (gün) <input type="number" name="retention_activity_days" min="7" max="3650" value="{{.ActivityDays}}" required></label>
+      <label>İş logları saklama (gün) <input type="number" name="retention_job_days" min="1" max="365" value="{{.JobDays}}" required>
+        <span class="muted small">Eski kayıtlar günlük bakımda silinir.</span></label>
+      <label>Yeni site bellek sınırı (MB) <input type="number" name="default_memory_mb" min="64" max="65536" value="{{.MemoryMB}}" required></label>
+      <label>Yeni site CPU kotası (%) <input type="number" name="default_cpu_pct" min="5" max="1600" value="{{.CPUPct}}" required>
+        <span class="muted small">Site sihirbazında ön değer; her site ayrıca değiştirilebilir.</span></label>
+    </div>
+    {{end}}
     <div><button type="submit" class="primary">Kaydet</button></div>
   </form>
 </section>

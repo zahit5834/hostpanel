@@ -23,9 +23,9 @@ import (
 	"testing"
 	"time"
 
-	"hostpanel/internal/crypto"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/crypto"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 const testToken = "123456789:AAbbCCddEEffGGhhIIjjKKllMMnnOOppQQ"

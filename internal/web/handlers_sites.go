@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"hostpanel/internal/backups"
-	"hostpanel/internal/crons"
-	"hostpanel/internal/customers"
-	"hostpanel/internal/databases"
-	"hostpanel/internal/exec"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/runtimes"
-	"hostpanel/internal/sites"
-	"hostpanel/internal/ssl"
+	"github.com/zahit5834/hostpanel/internal/backups"
+	"github.com/zahit5834/hostpanel/internal/crons"
+	"github.com/zahit5834/hostpanel/internal/customers"
+	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/runtimes"
+	"github.com/zahit5834/hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/ssl"
 )
 
 // MaxUploadBytes caps a deploy zip.
@@ -61,8 +61,9 @@ type wizardData struct {
 }
 
 func (s *Server) siteNew(w http.ResponseWriter, r *http.Request) {
+	def := s.panelDefaults(r.Context())
 	s.renderWizard(w, r, http.StatusOK, sites.CreateInput{
-		CustomerID: parseInt64(r.URL.Query().Get("customer")), MemoryMaxMB: 512, CPUQuotaPct: 100, WWWMode: sites.WWWNone,
+		CustomerID: parseInt64(r.URL.Query().Get("customer")), MemoryMaxMB: def.MemoryMB, CPUQuotaPct: def.CPUPct, WWWMode: sites.WWWNone,
 	}, "")
 }
 

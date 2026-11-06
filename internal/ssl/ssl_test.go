@@ -132,6 +132,7 @@ func TestCSRAllKeyTypes(t *testing.T) {
 		{CommonName: "ornek.com", KeyType: "dsa"},
 		{CommonName: "ornek.com", KeyType: KeyRSA2048, Subject: Subject{Country: "TUR"}},
 		{CommonName: "ornek.com", KeyType: KeyRSA2048, Subject: Subject{Org: "x\ny"}},
+		{CommonName: "ornek.com", KeyType: KeyRSA2048, Subject: Subject{Org: strings.Repeat("ş", 65)}},
 		{CommonName: "ornek.com", KeyType: KeyRSA2048, SANs: []string{"bad_name.com"}},
 	}
 	for _, in := range bad {

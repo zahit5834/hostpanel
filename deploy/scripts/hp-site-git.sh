@@ -29,7 +29,8 @@ owner_check() {
 
 keydir() {
   validate_domain "$1"
-  install -d -o root -g root -m 0700 /etc/hostpanel "$GIT_KEY_ROOT"
+  ensure_etc_dir
+  install -d -o root -g root -m 0700 "$GIT_KEY_ROOT"
   kd="$GIT_KEY_ROOT/$1"
   [[ ! -L $kd ]] || die "${kd} symlink olamaz"
   install -d -o root -g root -m 0700 "$kd"

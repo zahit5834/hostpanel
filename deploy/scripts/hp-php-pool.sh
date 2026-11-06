@@ -32,6 +32,7 @@ case $action in
     done
     [[ ! -L $dir/.sessions ]] || die "${dir}/.sessions symlink olamaz"
     install -d -o "$user" -g "$user" -m 0700 "$dir/.sessions"
+    ensure_etc_dir
     install -d -o root -g root -m 0755 "$PHP_CONF_DIR"
 
     cat <<CONF | atomic_write "$PHP_CONF_DIR/$domain.conf" 0644 root:root

@@ -1,4 +1,4 @@
-module hostpanel
+module github.com/zahit5834/hostpanel
 
 go 1.27.3
 

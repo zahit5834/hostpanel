@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"hostpanel/internal/customers"
-	"hostpanel/internal/databases"
-	"hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/customers"
+	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/logs"
 )
 
 func customerFromForm(r *http.Request) customers.Customer {

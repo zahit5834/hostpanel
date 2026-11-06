@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -15,21 +16,23 @@ import (
 	"sync/atomic"
 	"time"
 
-	"hostpanel/internal/auth"
-	"hostpanel/internal/backups"
-	"hostpanel/internal/config"
-	"hostpanel/internal/crons"
-	"hostpanel/internal/customers"
-	"hostpanel/internal/databases"
-	"hostpanel/internal/exec"
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/monitor"
-	"hostpanel/internal/notify"
-	"hostpanel/internal/runtimes"
-	"hostpanel/internal/sites"
-	"hostpanel/internal/ssl"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/auth"
+	"github.com/zahit5834/hostpanel/internal/backups"
+	"github.com/zahit5834/hostpanel/internal/config"
+	"github.com/zahit5834/hostpanel/internal/crons"
+	"github.com/zahit5834/hostpanel/internal/customers"
+	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/monitor"
+	"github.com/zahit5834/hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/panelcfg"
+	"github.com/zahit5834/hostpanel/internal/runtimes"
+	"github.com/zahit5834/hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/ssl"
+	"github.com/zahit5834/hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/update"
 )
 
 //go:embed templates static
@@ -55,6 +58,10 @@ type Server struct {
 	Monitor   *monitor.Service
 	Notify    *notify.Service
 	Crons     *crons.Service
+	Update    *update.Service
+	// ExportConfig writes the encrypted panel configuration (main wires it:
+	// it needs the master key, which the web layer never holds otherwise).
+	ExportConfig func(ctx context.Context, passphrase string, w io.Writer) (panelcfg.Manifest, error)
 
 	// BaseCtx outlives requests (cancelled on shutdown); background work
 	// started from a handler (cron "run now") uses it.

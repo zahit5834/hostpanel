@@ -41,6 +41,7 @@ custom_dir() {
 
 setup() {
   install -d -o root -g root -m 0755 "$WEBROOT"
+  ensure_etc_dir
   install -d -o root -g root -m 0700 "$CUSTOM_ROOT"
   install -d -o root -g root -m 0755 "$(dirname "$HOOK")"
   root_log_file "$RENEW_LOG"

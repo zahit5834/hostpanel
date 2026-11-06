@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostpanel/internal/databases"
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/logs"
 )
 
 // postHX posts like HTMX does (CSRF header) and returns the fragment.

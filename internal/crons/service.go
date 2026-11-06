@@ -12,11 +12,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"hostpanel/internal/exec"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/notify"
-	"hostpanel/internal/schedule"
-	"hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/schedule"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 // Tunables.

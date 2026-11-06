@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 func TestMaskMap(t *testing.T) {

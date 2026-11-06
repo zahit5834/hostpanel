@@ -4,7 +4,7 @@ LDFLAGS  := -s -w -X main.version=$(VERSION)
 BUILD    := CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)"
 BIN      := bin
 
-.PHONY: build build-amd64 build-arm64 test test-scripts lint fmt run-dev measure check-sudoers clean
+.PHONY: build build-amd64 build-arm64 dist test test-scripts lint fmt run-dev measure check-sudoers clean
 
 build: build-amd64
 
@@ -16,17 +16,31 @@ build-arm64:
 	GOOS=linux GOARCH=arm64 $(BUILD) -o $(BIN)/hostpanel-linux-arm64 ./cmd/hostpanel
 	@ls -lh $(BIN)/hostpanel-linux-arm64 | awk '{print "binary size:", $$5}'
 
+# Release artifacts (what .github/workflows/release.yml publishes):
+#   make dist VERSION=v0.1.0 → dist/hostpanel-v0.1.0-linux-{amd64,arm64}.tar.gz, install.sh, SHA256SUMS
+dist:
+	@[[ "$(VERSION)" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$$ ]] || { echo "VERSION=vX.Y.Z gerekli (şu an: $(VERSION))"; exit 1; }
+	rm -rf dist && mkdir -p dist
+	for a in amd64 arm64; do \
+	  GOOS=linux GOARCH=$$a $(BUILD) -o dist/.bin-$$a ./cmd/hostpanel && \
+	  deploy/package.sh $(VERSION) $$a dist/.bin-$$a dist || exit 1; \
+	done
+	rm -f dist/.bin-*
+	cp install.sh dist/
+	cd dist && sha256sum hostpanel-*.tar.gz install.sh > SHA256SUMS && cat SHA256SUMS
+
 test: test-scripts
 	$(GO) test ./...
 
 test-scripts:
 	bash deploy/scripts/test_lib.sh
-	bash -n deploy/scripts/*.sh
+	bash deploy/scripts/test_install.sh
+	for f in deploy/scripts/*.sh deploy/scripts/runtimes/*.sh deploy/package.sh install.sh update.sh uninstall.sh; do bash -n $$f || exit 1; done
 
 lint: check-sudoers
 	$(GO) vet ./...
 	staticcheck ./...
-	@command -v shellcheck >/dev/null && shellcheck -x deploy/scripts/*.sh || echo "shellcheck yok, atlandı"
+	@if command -v shellcheck >/dev/null; then shellcheck -x -S error deploy/scripts/*.sh deploy/scripts/runtimes/*.sh deploy/package.sh install.sh update.sh uninstall.sh; else echo "shellcheck yok, atlandı"; fi
 
 fmt:
 	gofmt -w cmd internal
@@ -50,6 +64,6 @@ check-sudoers:
 	  && echo "sudoers ↔ scripts: eşleşiyor"
 
 clean:
-	rm -rf $(BIN)
+	rm -rf $(BIN) dist
 
 SHELL := /bin/bash

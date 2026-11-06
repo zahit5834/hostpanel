@@ -1,6 +1,6 @@
 package backups
 
-import "hostpanel/internal/schedule"
+import "github.com/zahit5834/hostpanel/internal/schedule"
 
 // Aliases kept so backup code and templates read as before; the parser lives
 // in internal/schedule (shared with site crons).

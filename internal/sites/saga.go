@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/jobs"
 )
 
 // saga runs provisioning steps and, on failure, undoes the completed ones in

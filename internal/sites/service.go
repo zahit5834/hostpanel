@@ -17,11 +17,11 @@ import (
 	"sync"
 	"time"
 
-	"hostpanel/internal/crypto"
-	"hostpanel/internal/exec"
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/runtimes"
+	"github.com/zahit5834/hostpanel/internal/crypto"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/runtimes"
 )
 
 // KeepReleases is how many releases stay on disk (plus the active one).
@@ -48,6 +48,8 @@ type Service struct {
 	CertFor func(ctx context.Context, siteID int64) *TLSPaths
 	// ProbeToken is served at /.well-known/hostpanel-probe for SSL pre-checks.
 	ProbeToken string
+	// PanelDomain is the panel's own nginx name (config panel_domain); sites can't use it.
+	PanelDomain string
 	// DeleteHook runs inside the site delete job before the site row is
 	// removed (databases inject "drop the site's databases"). The site lock is
 	// held: the hook must not call SaveEnv/Operate.
@@ -142,6 +144,9 @@ func (s *Service) Prepare(ctx context.Context, in CreateInput) (Site, error) {
 	}
 	var err error
 	if site.Aliases, err = ParseAliases(in.Aliases, site.Domain); err != nil {
+		return site, err
+	}
+	if err := s.notPanelDomain(append([]string{site.Domain, "www." + site.Domain}, site.Aliases...)); err != nil {
 		return site, err
 	}
 	switch site.WWWMode {
@@ -1016,3 +1021,16 @@ func contains(list []string, v string) bool {
 
 // ErrNotFound is returned for unknown sites.
 var ErrNotFound = sql.ErrNoRows
+
+// notPanelDomain rejects the panel's own name: its nginx vhost already owns it.
+func (s *Service) notPanelDomain(names []string) error {
+	if s.PanelDomain == "" {
+		return nil
+	}
+	for _, n := range names {
+		if n == s.PanelDomain {
+			return fmt.Errorf("%s panelin kendi adresi; site olarak kullanılamaz", n)
+		}
+	}
+	return nil
+}

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"errors"
@@ -12,30 +13,34 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
-	"hostpanel/internal/auth"
-	"hostpanel/internal/backups"
-	"hostpanel/internal/config"
-	"hostpanel/internal/crons"
-	"hostpanel/internal/crypto"
-	"hostpanel/internal/customers"
-	"hostpanel/internal/databases"
-	"hostpanel/internal/exec"
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/monitor"
-	"hostpanel/internal/notify"
-	"hostpanel/internal/runtimes"
-	"hostpanel/internal/sites"
-	"hostpanel/internal/ssl"
-	"hostpanel/internal/store"
-	"hostpanel/internal/system"
-	"hostpanel/internal/web"
+	"github.com/zahit5834/hostpanel/internal/auth"
+	"github.com/zahit5834/hostpanel/internal/backups"
+	"github.com/zahit5834/hostpanel/internal/config"
+	"github.com/zahit5834/hostpanel/internal/crons"
+	"github.com/zahit5834/hostpanel/internal/crypto"
+	"github.com/zahit5834/hostpanel/internal/customers"
+	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/monitor"
+	"github.com/zahit5834/hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/panelcfg"
+	"github.com/zahit5834/hostpanel/internal/runtimes"
+	"github.com/zahit5834/hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/ssl"
+	"github.com/zahit5834/hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/system"
+	"github.com/zahit5834/hostpanel/internal/update"
+	"github.com/zahit5834/hostpanel/internal/web"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -46,6 +51,10 @@ const usage = `Kullanım:
   hostpanel admin reset-password [--username admin] [--config PATH]
                                               Admin şifresini sıfırla (yeni şifre ekrana basılır)
   hostpanel admin disable-2fa [--config PATH] İki adımlı doğrulamayı kapat (kurtarma)
+  hostpanel admin init [--config PATH]        Admin yoksa oluştur ve şifresini bas (install.sh)
+  hostpanel admin import-config --file F [--force] [--config PATH]
+                                              Dışa aktarılmış panel yapılandırmasını içe al
+                                              (root, panel durdurulmuşken; parola: HP_IMPORT_PASS ya da stdin)
   hostpanel version
 `
 
@@ -186,6 +195,7 @@ func serve(args []string) error {
 		Jobs: jm, Activity: activity, Log: log, ScriptsDir: cfg.ScriptsDir, TemplatesDir: cfg.TemplatesDir,
 		UploadDir: filepath.Join(cfg.DataDir, "uploads"), DryRun: cfg.DryRun}
 	siteSvc.ProbeToken = ssl.EnsureServerID(ctx, a.db)
+	siteSvc.PanelDomain = cfg.PanelDomain
 	siteSvc.Register()
 	sslSvc := &ssl.Service{Store: ssl.NewStore(a.db), Sites: siteSvc, DB: a.db, Box: a.box, Runner: runner, Probe: probe,
 		Jobs: jm, Activity: activity, Log: log, ScriptsDir: cfg.ScriptsDir,
@@ -211,9 +221,25 @@ func serve(args []string) error {
 	cronSvc := &crons.Service{Store: crons.NewStore(a.db), Sites: siteSvc, Runner: runner, Activity: activity, Log: log,
 		ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun, Notify: notifySvc.Send}
 	bkSvc.Crons = cronSvc
+	statusPath := update.DefaultStatusPath
+	if cfg.Dev {
+		statusPath = filepath.Join(cfg.DataDir, "update-status.json")
+	}
+	updSvc := &update.Service{DB: a.db, Runner: runner, ScriptsDir: cfg.ScriptsDir, Activity: activity, Log: log,
+		Notify: notifySvc.Send, Version: version, Repo: cfg.UpdateRepo, StatusPath: statusPath,
+		LogPath: cfg.UpdateLogPath(), Dev: cfg.Dev}
+	updSvc.RecordFinished(ctx)
 	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version,
 		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc,
-		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc}
+		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc, Update: updSvc}
+	srv.ExportConfig = func(ctx context.Context, pass string, w io.Writer) (panelcfg.Manifest, error) {
+		server := store.GetSetting(ctx, a.db, "backup_server_name", "")
+		if server == "" {
+			server, _ = os.Hostname()
+		}
+		return panelcfg.Export(ctx, a.db, panelcfg.ExportOptions{DataDir: cfg.DataDir, MasterKey: a.key,
+			RuntimesDir: cfg.RuntimesDir, Version: version, Server: server}, pass, w)
+	}
 	srv.RegisterJobs()
 	if err := srv.Init(ctx); err != nil {
 		return err
@@ -225,7 +251,7 @@ func serve(args []string) error {
 		cancelJobs()
 		return err
 	}
-	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, cronSvc, log)
+	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, cronSvc, updSvc, log)
 	go bkSvc.RunScheduler(jobCtx)
 	go notifySvc.Run(jobCtx)
 	go monSvc.Run(jobCtx)
@@ -261,7 +287,7 @@ func serve(args []string) error {
 
 // maintenance runs the daily cleanup: one timer, no polling.
 func maintenance(ctx context.Context, a *app, activity *logs.Activity, jm *jobs.Manager, sslSvc *ssl.Service, dbSvc *databases.Service,
-	cronSvc *crons.Service, log *slog.Logger) {
+	cronSvc *crons.Service, updSvc *update.Service, log *slog.Logger) {
 	t := time.NewTimer(time.Minute)
 	defer t.Stop()
 	for {
@@ -283,6 +309,11 @@ func maintenance(ctx context.Context, a *app, activity *logs.Activity, jm *jobs.
 		sslSvc.Maintain(ctx)
 		dbSvc.Maintain(ctx)
 		cronSvc.Maintain(ctx)
+		if update.ValidTag(updSvc.Version) {
+			if _, err := updSvc.Check(ctx); err != nil {
+				log.Warn("update check failed", "err", err)
+			}
+		}
 		a.db.ExecContext(ctx, `PRAGMA optimize`)
 		if nAct+int64(nJobs) > 0 {
 			activity.Record(ctx, logs.Entry{Action: "system.cleanup",
@@ -301,11 +332,16 @@ func admin(args []string) error {
 	sub, args := args[0], args[1:]
 	fs := flag.NewFlagSet("admin "+sub, flag.ExitOnError)
 	username := fs.String("username", "admin", "admin kullanıcı adı")
+	file := fs.String("file", "", "içe aktarılacak .hpcfg dosyası (import-config)")
+	force := fs.Bool("force", false, "dolu bir panelin üzerine yaz (import-config)")
 	cfg, err := loadConfig(fs, args)
 	if err != nil {
 		return err
 	}
 	ctx := context.Background()
+	if sub == "import-config" {
+		return importConfig(ctx, cfg, *file, *force)
+	}
 	a, err := openApp(ctx, cfg)
 	if err != nil {
 		return err
@@ -320,6 +356,19 @@ func admin(args []string) error {
 		}
 		activity.Record(ctx, logs.Entry{Action: "settings.password", Summary: "Admin şifresi CLI ile sıfırlandı"}, nil)
 		fmt.Printf("Kullanıcı: %s\nŞifre:     %s\n", *username, pw)
+	case "init":
+		if _, err := a.auth.Admin(ctx); err == nil {
+			fmt.Println("Admin hesabı zaten var (şifreyi sıfırlamak için: hostpanel admin reset-password).")
+			return nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		pw := auth.RandomPassword(20)
+		if err := a.auth.SetAdminPassword(ctx, *username, pw); err != nil {
+			return err
+		}
+		activity.Record(ctx, logs.Entry{Action: "settings.password", Summary: "Admin hesabı kurulumda oluşturuldu"}, nil)
+		fmt.Printf("Kullanıcı: %s\nŞifre:     %s\n", *username, pw)
 	case "disable-2fa":
 		if err := a.auth.DisableTOTP(ctx); err != nil {
 			return err
@@ -329,5 +378,65 @@ func admin(args []string) error {
 	default:
 		return fmt.Errorf("bilinmeyen admin komutu: %s", sub)
 	}
+	return nil
+}
+
+// importConfig restores an exported panel configuration (run as root by
+// install.sh --import, with the panel stopped).
+func importConfig(ctx context.Context, cfg config.Config, file string, force bool) error {
+	if file == "" {
+		return errors.New("--file gerekli")
+	}
+	pass := os.Getenv("HP_IMPORT_PASS")
+	if pass == "" {
+		fmt.Fprint(os.Stderr, "Parola: ")
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && line == "" {
+			return errors.New("parola okunamadı")
+		}
+		pass = strings.TrimRight(line, "\r\n")
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	arc, err := panelcfg.Open(f, pass)
+	if err != nil {
+		return err
+	}
+	uid, gid := -1, -1
+	if os.Geteuid() == 0 && !cfg.Dev {
+		u, err := user.Lookup("hostpanel")
+		if err != nil {
+			return fmt.Errorf("hostpanel kullanıcısı yok: %w", err)
+		}
+		uid, _ = strconv.Atoi(u.Uid)
+		gid, _ = strconv.Atoi(u.Gid)
+	}
+	if err := panelcfg.Import(ctx, arc, panelcfg.ImportOptions{DBPath: cfg.DBPath(), MasterKeyPath: cfg.MasterKeyPath,
+		RuntimesDir: cfg.RuntimesDir, Force: force, UID: uid, GID: gid}); err != nil {
+		return err
+	}
+	a, err := openApp(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer a.db.Close()
+	m := arc.Manifest
+	logs.NewActivity(a.db).Record(ctx, logs.Entry{Action: "panel.import", Source: logs.SourceSystem,
+		Summary: fmt.Sprintf("Panel yapılandırması içe aktarıldı (%s, %s, %s)", m.Server, m.Version, m.Created.Format("2006-01-02"))},
+		map[string]any{"server": m.Server, "version": m.Version, "customers": m.Customers, "plans": m.Plans, "runtimes": m.Runtimes})
+	fmt.Printf(`Yapılandırma içe aktarıldı: %s (%s, %s) — %d müşteri, %d yedek planı.
+
+Sıradaki adımlar:
+  1. Yedekler → Ayarlar: Google Drive token'ını (ya da service account'u) yeniden girin;
+     crypt anahtarları dosyayla geldi, eski yedekler açılabilir.
+  2. Yedekler → "Drive'ı tara": eski sunucunun yedekleri listeye gelir.
+  3. Siteleri sihirbazla aynı domain'lerle oluşturun ve yedekten geri yükleyin.
+  4. MSSQL kullanılıyorsa: sunucuyu kurun, müşteri login'lerini yeniden oluşturun.
+  5. Git deploy kullanan siteler için yeni deploy key üretip repo'ya ekleyin.
+  6. Site kapsamlı yedek planları devre dışı geldi; siteleri seçip yeniden açın.
+`, m.Server, m.Version, m.Created.Format("2006-01-02 15:04"), m.Customers, m.Plans)
 	return nil
 }

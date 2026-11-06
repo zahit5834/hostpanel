@@ -19,15 +19,15 @@ import (
 	"sync"
 	"time"
 
-	"hostpanel/internal/crons"
-	"hostpanel/internal/crypto"
-	"hostpanel/internal/databases"
-	"hostpanel/internal/exec"
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/notify"
-	"hostpanel/internal/sites"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/crons"
+	"github.com/zahit5834/hostpanel/internal/crypto"
+	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 // Root is where local backups live (root only, 0700).

@@ -9,8 +9,8 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"hostpanel/internal/auth"
-	"hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/auth"
+	"github.com/zahit5834/hostpanel/internal/logs"
 )
 
 const sessionCookie = "hp_session"

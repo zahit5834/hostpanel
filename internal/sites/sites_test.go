@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"hostpanel/internal/crypto"
-	"hostpanel/internal/customers"
-	"hostpanel/internal/exec"
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/runtimes"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/crypto"
+	"github.com/zahit5834/hostpanel/internal/customers"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/runtimes"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 const templatesDir = "../../deploy/templates"

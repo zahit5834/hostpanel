@@ -218,7 +218,7 @@ case $action in
     fi
     [[ $cid == - || $cid =~ ^[A-Za-z0-9._-]{1,200}\.apps\.googleusercontent\.com$ ]] || die "geçersiz client_id"
     [[ $csec == - || $csec =~ ^[A-Za-z0-9_-]{10,100}$ ]] || die "geçersiz client_secret"
-    install -d -o root -g root -m 0750 /etc/hostpanel
+    ensure_etc_dir
     {
       echo "[hpdrive]"
       echo "type = drive"

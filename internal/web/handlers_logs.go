@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"hostpanel/internal/exec"
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/logs"
 )
 
 func pathID(r *http.Request) (int64, bool) {

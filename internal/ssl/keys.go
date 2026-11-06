@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Key types offered for CSRs.
@@ -134,8 +135,10 @@ type CSRInput struct {
 }
 
 var (
-	countryRe  = regexp.MustCompile(`^[A-Z]{2}$`)
-	dnTextRe   = regexp.MustCompile(`^[\p{L}\p{N} .,&'()/-]{0,64}$`)
+	countryRe = regexp.MustCompile(`^[A-Z]{2}$`)
+	// Length is checked separately: a counted repeat of Unicode classes
+	// ({0,64}) compiles to ~1.4 MB of rune sets kept for the process lifetime.
+	dnTextRe   = regexp.MustCompile(`^[\p{L}\p{N} .,&'()/-]*$`)
 	emailRe    = regexp.MustCompile(`^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}$`)
 	hostnameRe = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
 )
@@ -174,6 +177,9 @@ func (in *CSRInput) Validate() error {
 	}
 	for _, f := range []*string{&s.State, &s.Locality, &s.Org, &s.OrgUnit} {
 		*f = strings.TrimSpace(*f)
+		if utf8.RuneCountInString(*f) > 64 {
+			return fmt.Errorf("en fazla 64 karakter: %q", *f)
+		}
 		if !dnTextRe.MatchString(*f) {
 			return fmt.Errorf("geçersiz karakter: %q", *f)
 		}

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"hostpanel/internal/crons"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/crons"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 func TestCronGitPHPDryRun(t *testing.T) {

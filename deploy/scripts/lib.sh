@@ -82,6 +82,20 @@ atomic_write() {
   mv -f "$tmp" "$dest"
 }
 
+# ensure_etc_dir — /etc/hostpanel is root:hostpanel 0751: the panel reads
+# config.yaml, master.key and runtimes/ there but cannot create files; others
+# may only traverse (php-fpm runs as the site user and reads php/<domain>.conf).
+# Everything sensitive inside is 0600/0640 or in 0700 subdirectories. Helpers
+# must never "install -d" it with other modes: that would lock the panel out.
+ensure_etc_dir() {
+  local grp=root
+  getent group hostpanel >/dev/null && grp=hostpanel
+  [[ ! -L /etc/hostpanel ]] || die "/etc/hostpanel symlink olamaz"
+  if [[ ! -d /etc/hostpanel ]]; then
+    install -d -o root -g "$grp" -m 0751 /etc/hostpanel
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Site helpers (Faz 1)
 # ---------------------------------------------------------------------------
@@ -466,4 +480,244 @@ finalize_release() {
   done
   runuser -u "$user" -- chmod -R u+rwX,g+rX,g-w,o-rwx -- "$rel"
   log "sürüm hazır: $(basename "$rel") ($(du -sh "$rel" | cut -f1), $(find "$rel" -type f | wc -l) dosya)"
+}
+
+# ---------------------------------------------------------------------------
+# Install / update (Faz 6) — shared by install.sh and hp-update.sh
+# ---------------------------------------------------------------------------
+
+HP_CONFIG=/etc/hostpanel/config.yaml
+HP_OPT=/opt/hostpanel
+HP_SUDOERS=/etc/sudoers.d/hostpanel
+HP_UNIT=/etc/systemd/system/hostpanel.service
+HP_VHOST=/etc/nginx/sites-available/hostpanel.conf
+HP_VHOST_LINK=/etc/nginx/sites-enabled/hostpanel.conf
+PANEL_TLS_DIR=/etc/hostpanel/panel-tls
+PANEL_CERT_NAME=hostpanel-panel
+PANEL_UPSTREAM=127.0.0.1:8090
+UPDATE_DIR=/var/lib/hostpanel-update
+
+# config_value KEY — top-level scalar from config.yaml ("" when missing).
+# config.yaml is root:hostpanel 0640, so root may trust what it reads here.
+config_value() {
+  local k=$1
+  [[ $k =~ ^[a-z_]+$ ]] || die "geçersiz config anahtarı"
+  [[ -f $HP_CONFIG && ! -L $HP_CONFIG ]] || return 0
+  sed -nE "s/^${k}:[[:space:]]*\"?([^\"#[:space:]]*)\"?[[:space:]]*(#.*)?\$/\\1/p" "$HP_CONFIG" | head -n1
+}
+
+# validate_version V — release tags look like v1.2.3.
+validate_version() {
+  [[ ${1:-} =~ ^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]] || die "geçersiz sürüm: '${1:-}' (vX.Y.Z)"
+}
+
+# validate_repo OWNER/NAME — GitHub repository.
+validate_repo() {
+  [[ ${1:-} =~ ^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$ && ${1:-} != *..* ]] || die "geçersiz repo: '${1:-}'"
+}
+
+# validate_panel_port N — 443 or an unprivileged port, never 80.
+validate_panel_port() {
+  local p=${1:-}
+  [[ $p =~ ^[0-9]{1,5}$ ]] || die "geçersiz panel portu: '${p}'"
+  ((p == 443 || (p >= 1024 && p <= 65535))) || die "panel portu 443 ya da 1024-65535 olmalı: ${p}"
+  [[ $p != "${PANEL_UPSTREAM##*:}" ]] || die "panel portu iç port (${PANEL_UPSTREAM##*:}) ile aynı olamaz"
+}
+
+# hp_arch — release architecture name of this machine.
+hp_arch() {
+  case $(dpkg --print-architecture 2>/dev/null || uname -m) in
+    amd64 | x86_64) echo amd64 ;;
+    arm64 | aarch64) echo arm64 ;;
+    *) die "desteklenmeyen mimari: $(uname -m)" ;;
+  esac
+}
+
+# replace_tree SRC DEST — swap DEST for a root-owned copy of SRC (dirs 0755,
+# files 0644, *.sh 0755). The old tree is renamed first, so a running script
+# keeps its open file.
+replace_tree() {
+  local src=$1 dest=$2
+  [[ -d $src && ! -L $dest ]] || die "replace_tree: geçersiz argüman"
+  rm -rf -- "${dest}.new" "${dest}.old"
+  cp -R -- "$src" "${dest}.new"
+  chown -R root:root -- "${dest}.new"
+  find "${dest}.new" -type d -exec chmod 0755 {} +
+  find "${dest}.new" -type f -exec chmod 0644 {} +
+  find "${dest}.new" -type f -name '*.sh' -exec chmod 0755 {} +
+  [[ -e $dest ]] && mv -- "$dest" "${dest}.old"
+  mv -- "${dest}.new" "$dest"
+  rm -rf -- "${dest}.old"
+}
+
+# archive_ok TARBALL TOPDIR — only regular files and directories, all under
+# TOPDIR/, no "..". (No "cmd | grep -q" here: with pipefail an early grep exit
+# turns into a SIGPIPE failure and the check would silently pass.)
+archive_ok() {
+  local list
+  list=$(tar -tzvf "$1") || return 1
+  [[ -z $(awk 'substr($1,1,1) != "-" && substr($1,1,1) != "d"' <<<"$list") ]] || return 1
+  list=$(tar -tzf "$1") || return 1
+  [[ -z $(grep -vE "^${2//./\\.}(/|$)" <<<"$list") ]] || return 1
+  [[ -z $(grep -E '(^|/)\.\.(/|$)' <<<"$list") ]]
+}
+
+# install_release SRC — install an unpacked release (SRC/bin/hostpanel,
+# SRC/deploy/...): binary, helper scripts, templates, shipped runtime
+# definitions (same-named files are replaced, extra ones kept), sudoers
+# (visudo-checked first) and the systemd unit.
+install_release() {
+  local src=$1 f tmp
+  for f in bin/hostpanel deploy/scripts/lib.sh deploy/templates deploy/runtimes deploy/sudoers/hostpanel deploy/systemd/hostpanel.service; do
+    [[ -e $src/$f ]] || die "paket eksik: ${f}"
+  done
+  install -d -o root -g root -m 0755 "$HP_OPT" "$HP_OPT/bin"
+  install -o root -g root -m 0755 "$src/bin/hostpanel" "$HP_OPT/bin/.hostpanel.new"
+  mv -f -- "$HP_OPT/bin/.hostpanel.new" "$HP_OPT/bin/hostpanel"
+  replace_tree "$src/deploy/scripts" "$HP_OPT/scripts"
+  replace_tree "$src/deploy/templates" "$HP_OPT/templates"
+  ensure_etc_dir
+  install -d -o root -g root -m 0755 /etc/hostpanel/runtimes
+  for f in "$src"/deploy/runtimes/*.yaml; do
+    install -o root -g root -m 0644 "$f" /etc/hostpanel/runtimes/
+  done
+  # sudo ignores sudoers.d files whose name contains a dot: stage as .hostpanel.new.
+  tmp=/etc/sudoers.d/.hostpanel.new
+  install -o root -g root -m 0440 "$src/deploy/sudoers/hostpanel" "$tmp"
+  if ! visudo -cqf "$tmp"; then
+    rm -f -- "$tmp"
+    die "sudoers dosyası doğrulanamadı (visudo -c)"
+  fi
+  mv -f -- "$tmp" "$HP_SUDOERS"
+  install -o root -g root -m 0644 "$src/deploy/systemd/hostpanel.service" "$HP_UNIT"
+  for f in install.sh update.sh uninstall.sh; do
+    [[ -f $src/$f ]] && install -o root -g root -m 0755 "$src/$f" "$HP_OPT/$f"
+  done
+  systemctl daemon-reload
+}
+
+# server_ips — non-loopback addresses of this host, one per line.
+server_ips() {
+  hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9a-fA-F.:]+$' | grep -vE '^(127\.|::1$|fe80:)' || true
+}
+
+# panel_self_signed — create the IP-mode certificate once (ECDSA P-256, 10 years,
+# SAN = server IPs). Kept across re-runs so the browser exception stays valid.
+panel_self_signed() {
+  ensure_etc_dir
+  install -d -o root -g root -m 0700 "$PANEL_TLS_DIR"
+  [[ -s $PANEL_TLS_DIR/cert.pem && -s $PANEL_TLS_DIR/key.pem ]] && return 0
+  local san="DNS:localhost" ip
+  while read -r ip; do
+    [[ -n $ip ]] && san+=",IP:${ip}"
+  done < <(server_ips)
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+    -subj "/CN=HostPanel" -addext "subjectAltName=${san}" \
+    -keyout "$PANEL_TLS_DIR/key.pem" -out "$PANEL_TLS_DIR/cert.pem" 2>/dev/null || die "self-signed sertifika üretilemedi"
+  chmod 0600 "$PANEL_TLS_DIR/key.pem"
+  chmod 0644 "$PANEL_TLS_DIR/cert.pem"
+}
+
+# render_panel_vhost MODE DOMAIN PORT — print the panel's nginx config.
+#   ip:     PORT ssl default_server with the self-signed certificate
+#   acme:   port 80 for DOMAIN only (ACME challenge before the certificate exists)
+#   domain: port 80 (ACME + redirect) and PORT ssl with the Let's Encrypt certificate
+render_panel_vhost() {
+  local mode=$1 domain=$2 port=$3 cert key redirect
+  validate_oneof "$mode" ip acme domain
+  validate_panel_port "$port"
+  [[ $mode == ip ]] || validate_domain "$domain"
+  echo "# HostPanel panel vhost (${mode}) — written by install.sh / hp-update.sh; do not edit."
+  if [[ $mode != ip ]]; then
+    redirect="https://\$host:${port}\$request_uri"
+    [[ $port == 443 ]] && redirect="https://\$host\$request_uri"
+    cat <<CONF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type text/plain;
+    }
+    location / {
+        return 301 ${redirect};
+    }
+}
+CONF
+  fi
+  [[ $mode == acme ]] && return 0
+  if [[ $mode == ip ]]; then
+    cert=$PANEL_TLS_DIR/cert.pem key=$PANEL_TLS_DIR/key.pem
+  else
+    cert=/etc/letsencrypt/live/$PANEL_CERT_NAME/fullchain.pem key=/etc/letsencrypt/live/$PANEL_CERT_NAME/privkey.pem
+  fi
+  local listen_opts="ssl http2" name=$domain hsts=""
+  if [[ $mode == ip ]]; then
+    name=_
+    [[ $port != 443 ]] && listen_opts="ssl http2 default_server"
+  else
+    hsts='    add_header Strict-Transport-Security "max-age=31536000" always;'
+  fi
+  cat <<CONF
+server {
+    listen ${port} ${listen_opts};
+    listen [::]:${port} ${listen_opts};
+    server_name ${name};
+    ssl_certificate ${cert};
+    ssl_certificate_key ${key};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:hp_ssl:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+${hsts}
+    access_log /var/log/nginx/hostpanel-panel.access.log;
+    error_log /var/log/nginx/hostpanel-panel.error.log;
+    client_max_body_size 1100m;
+
+    location / {
+        proxy_pass http://${PANEL_UPSTREAM};
+        proxy_http_version 1.1;
+        # \$http_host keeps the port: the panel compares it with the Origin header (CSRF).
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+        # SSE (live job and log streams) and large uploads go straight through.
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+CONF
+}
+
+# write_panel_vhost MODE DOMAIN PORT — install the panel vhost; nginx -t must
+# pass, otherwise the previous file is restored.
+write_panel_vhost() {
+  local tmp backup=""
+  tmp=$(mktemp)
+  render_panel_vhost "$@" >"$tmp"
+  if [[ -f $HP_VHOST ]]; then
+    backup=$(mktemp)
+    cp -p -- "$HP_VHOST" "$backup"
+  fi
+  install -o root -g root -m 0644 "$tmp" "$HP_VHOST"
+  rm -f -- "$tmp"
+  ln -sfn -- "$HP_VHOST" "$HP_VHOST_LINK"
+  if ! nginx -t -q 2>/dev/null; then
+    nginx -t 2>&1 | tail -n 5 >&2 || true
+    if [[ -n $backup ]]; then
+      install -o root -g root -m 0644 "$backup" "$HP_VHOST"
+    else
+      rm -f -- "$HP_VHOST" "$HP_VHOST_LINK"
+    fi
+    rm -f -- "$backup"
+    die "panel nginx yapılandırması reddedildi; önceki hali geri yüklendi"
+  fi
+  rm -f -- "$backup"
+  systemctl reload nginx
 }

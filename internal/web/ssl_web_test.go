@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/ssl"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/ssl"
 )
 
 // signCSR plays the commercial CA: root → intermediate → leaf for the CSR.

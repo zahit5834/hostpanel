@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/exec"
 )
 
 type fakeRunner struct{ out string }

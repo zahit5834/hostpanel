@@ -20,22 +20,24 @@ import (
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 
-	"hostpanel/internal/auth"
-	"hostpanel/internal/backups"
-	"hostpanel/internal/config"
-	"hostpanel/internal/crons"
-	"hostpanel/internal/crypto"
-	"hostpanel/internal/customers"
-	"hostpanel/internal/databases"
-	"hostpanel/internal/exec"
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/monitor"
-	"hostpanel/internal/notify"
-	"hostpanel/internal/runtimes"
-	"hostpanel/internal/sites"
-	"hostpanel/internal/ssl"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/auth"
+	"github.com/zahit5834/hostpanel/internal/backups"
+	"github.com/zahit5834/hostpanel/internal/config"
+	"github.com/zahit5834/hostpanel/internal/crons"
+	"github.com/zahit5834/hostpanel/internal/crypto"
+	"github.com/zahit5834/hostpanel/internal/customers"
+	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/monitor"
+	"github.com/zahit5834/hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/panelcfg"
+	"github.com/zahit5834/hostpanel/internal/runtimes"
+	"github.com/zahit5834/hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/ssl"
+	"github.com/zahit5834/hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/update"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *Server) {
@@ -95,6 +97,18 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 		Crons: &crons.Service{Store: crons.NewStore(db), Sites: svc, Runner: runner, Activity: act, Log: log,
 			ScriptsDir: cfg.ScriptsDir, DryRun: true, Notify: notifySvc.Send}, BaseCtx: ctx}
 	bkSvc.Crons = s.Crons
+	// Releases come from a local stand-in for the GitHub API.
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"tag_name":"v0.2.0","name":"v0.2.0","body":"- yeni <script>x</script>","html_url":"https://github.com/zahit5834/hostpanel/releases/tag/v0.2.0","published_at":"2026-11-06T10:00:00Z"}`))
+	}))
+	t.Cleanup(gh.Close)
+	s.Update = &update.Service{DB: db, Runner: runner, ScriptsDir: cfg.ScriptsDir, Activity: act, Log: log,
+		Notify: notifySvc.Send, Version: "v0.1.0", Repo: config.DefaultRepo, API: gh.URL,
+		StatusPath: filepath.Join(dir, "update-status.json"), LogPath: filepath.Join(dir, "update.log"), Dev: true}
+	s.ExportConfig = func(ctx context.Context, pass string, w io.Writer) (panelcfg.Manifest, error) {
+		return panelcfg.Export(ctx, db, panelcfg.ExportOptions{DataDir: dir, MasterKey: key, RuntimesDir: cfg.RuntimesDir,
+			Version: "v0.1.0", Server: "srv1"}, pass, w)
+	}
 	s.RegisterJobs()
 	if err := s.Init(ctx); err != nil {
 		t.Fatal(err)

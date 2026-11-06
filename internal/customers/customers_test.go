@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 func TestCRUD(t *testing.T) {

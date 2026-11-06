@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
-	"hostpanel/internal/auth"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/auth"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 type securityData struct {

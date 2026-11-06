@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"hostpanel/internal/logs"
-	"hostpanel/internal/runtimes"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/runtimes"
 )
 
 // SettingsInput is the site settings form.
@@ -47,6 +47,9 @@ func (s *Service) UpdateSettings(ctx context.Context, site Site, in SettingsInpu
 	def := prov.Def()
 	next := site
 	if next.Aliases, err = ParseAliases(in.Aliases, site.Domain); err != nil {
+		return res, err
+	}
+	if err := s.notPanelDomain(next.Aliases); err != nil {
 		return res, err
 	}
 	switch in.WWWMode {

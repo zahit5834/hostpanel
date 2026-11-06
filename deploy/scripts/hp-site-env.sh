@@ -12,6 +12,7 @@ action=$1
 validate_oneof "$action" write delete
 validate_domain "$2"
 file="$ENV_DIR/$2.env"
+ensure_etc_dir
 install -d -o root -g root -m 0700 "$ENV_DIR"
 
 case $action in

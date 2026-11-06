@@ -1,6 +1,6 @@
 [Unit]
 Description=HostPanel hosting control panel
-Documentation=https://github.com/OWNER/hostpanel
+Documentation=https://github.com/zahit5834/hostpanel
 After=network-online.target
 Wants=network-online.target
 

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"hostpanel/internal/backups"
-	"hostpanel/internal/databases"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/backups"
+	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 // MaxBakBytes caps an uploaded .bak (Express databases are ≤ 10 GB).

@@ -11,17 +11,24 @@ import (
 	"sync"
 	"time"
 
-	"hostpanel/internal/auth"
+	"github.com/zahit5834/hostpanel/internal/auth"
 )
 
-// renderer parses layout + one page per template set. In dev mode it reparses
-// on every call so template edits show up without a rebuild.
+// renderer parses layout + partials + one page per template set. In dev mode
+// it reparses on every call so template edits show up without a rebuild. In
+// production only the most recently used pages stay parsed: every set carries
+// its own copy of the layout and partials (html/template escapes them per set),
+// so caching all ~30 pages cost ~5 MB of the idle RSS budget, while re-parsing
+// a page takes about a millisecond.
 type renderer struct {
 	fs    fs.FS
 	dev   bool
 	mu    sync.Mutex
 	cache map[string]*template.Template
+	order []string // least recently used first
 }
+
+const renderCacheSize = 6
 
 func newRenderer(fsys fs.FS, dev bool) (*renderer, error) {
 	r := &renderer{fs: fsys, dev: dev, cache: map[string]*template.Template{}}
@@ -32,7 +39,7 @@ func newRenderer(fsys fs.FS, dev bool) (*renderer, error) {
 		}
 		for _, p := range pages {
 			name := strings.TrimSuffix(strings.TrimPrefix(p, "templates/pages/"), ".html")
-			if _, err := r.get(name); err != nil {
+			if _, err := r.parse(name); err != nil {
 				return nil, err
 			}
 		}
@@ -40,18 +47,45 @@ func newRenderer(fsys fs.FS, dev bool) (*renderer, error) {
 	return r, nil
 }
 
-func (r *renderer) get(page string) (*template.Template, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if t, ok := r.cache[page]; ok && !r.dev {
-		return t, nil
-	}
+func (r *renderer) parse(page string) (*template.Template, error) {
 	t, err := template.New("").Funcs(funcs).ParseFS(r.fs, "templates/layout.html", "templates/partials/*.html", "templates/pages/"+page+".html")
 	if err != nil {
 		return nil, fmt.Errorf("template %s: %w", page, err)
 	}
-	r.cache[page] = t
 	return t, nil
+}
+
+func (r *renderer) get(page string) (*template.Template, error) {
+	if r.dev {
+		return r.parse(page)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if t, ok := r.cache[page]; ok {
+		r.touch(page)
+		return t, nil
+	}
+	t, err := r.parse(page)
+	if err != nil {
+		return nil, err
+	}
+	if len(r.order) >= renderCacheSize {
+		delete(r.cache, r.order[0])
+		r.order = r.order[1:]
+	}
+	r.cache[page] = t
+	r.order = append(r.order, page)
+	return t, nil
+}
+
+// touch moves page to the most recently used end of r.order.
+func (r *renderer) touch(page string) {
+	for i, p := range r.order {
+		if p == page {
+			r.order = append(append(r.order[:i:i], r.order[i+1:]...), page)
+			return
+		}
+	}
 }
 
 // Page is the data every page template receives.

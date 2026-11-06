@@ -1,0 +1,55 @@
+{{define "content"}}
+<h1>Ayarlar</h1>
+{{template "settings-tabs" "update"}}
+{{with .Data}}
+<section class="card">
+  <div class="card-head"><h2>Panel sürümü</h2>
+    <form method="post" action="/settings/update/check" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <button type="submit">Şimdi kontrol et</button></form></div>
+  <dl class="kv">
+    <dt>Çalışan sürüm</dt><dd><code>{{.Current}}</code></dd>
+    <dt>Son yayınlanan</dt><dd>{{if .Latest.Tag}}<code>{{.Latest.Tag}}</code>{{if not .Latest.Published.IsZero}} <span class="muted small">({{.Latest.Published.Local.Format "02.01.2006"}})</span>{{end}}{{if .Latest.URL}} · <a href="{{.Latest.URL}}" rel="noopener noreferrer" target="_blank">GitHub</a>{{end}}{{else}}<span class="muted">bilinmiyor</span>{{end}}</dd>
+    <dt>Son kontrol</dt><dd>{{if .CheckedAt.IsZero}}<span class="muted">hiç</span>{{else}}{{.CheckedAt.Local.Format "02.01.2006 15:04"}}{{end}} <span class="muted small">— günde bir kez otomatik; kaynak <code>github.com/{{.Repo}}</code></span></dd>
+  </dl>
+  {{if .CheckErr}}<p class="alert err small">Son kontrol hatası: {{.CheckErr}}</p>{{end}}
+  {{if .CanUpdate}}
+  <div class="alert info">Yeni sürüm mevcut: <strong>{{.Latest.Tag}}</strong></div>
+  {{if .Latest.Notes}}<details open><summary>Sürüm notları</summary><pre class="conf small">{{.Latest.Notes}}</pre></details>{{end}}
+  <form method="post" action="/settings/update/start" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="version" value="{{.Latest.Tag}}">
+    <p class="muted small">Sunucu sürümü GitHub'dan kendisi indirir ve SHA-256 ile doğrular. Ardından paneli durdurur, veritabanının kopyasını alır, yeni sürümü kurup başlatır. Health check başarısız olursa eski sürüme ve veritabanına otomatik olarak döner. Panel 10–60 saniye erişilemez; siteler etkilenmez.</p>
+    <div><button type="submit" class="primary" data-confirm="Panel {{.Latest.Tag}} sürümüne güncellenecek ve yeniden başlatılacak. Devam edilsin mi?">{{.Latest.Tag}} sürümüne güncelle</button></div>
+  </form>
+  {{else}}
+  <p class="muted">{{.Reason}}</p>
+  {{end}}
+</section>
+{{template "update-status" $}}
+<section class="card">
+  <h2>Komut satırından</h2>
+  <p class="muted small">Panel açılamıyorsa sunucuda: <code>sudo /opt/hostpanel/update.sh</code> (son sürüm) veya <code>sudo /opt/hostpanel/update.sh v1.2.3</code>. Aynı doğrulama ve geri dönüş mantığını kullanır; çıktı terminalde görünür.</p>
+</section>
+{{end}}
+{{end}}
+
+{{define "update-status"}}{{with .Data}}
+<section class="card" id="update-status"{{if or .Started (eq .Status.State "running")}} hx-get="/settings/update/status{{if .Started}}?started=1{{end}}" hx-trigger="every 2s" hx-swap="outerHTML"{{end}}>
+  <h2>Son güncelleme</h2>
+  {{if .Status.State}}
+  <dl class="kv">
+    <dt>Sürüm</dt><dd><code>{{.Status.From}}</code> → <code>{{.Status.To}}</code></dd>
+    <dt>Durum</dt><dd>{{if eq .Status.State "running"}}<span class="badge running">sürüyor</span> <span class="muted small">adım: {{.Status.Step}}</span>{{else if eq .Status.State "success"}}<span class="badge success">başarılı</span>{{else if eq .Status.State "rolled_back"}}<span class="badge failed">geri alındı</span>{{else}}<span class="badge failed">başarısız</span>{{end}}</dd>
+    {{if .Status.Reason}}<dt>Neden</dt><dd>{{.Status.Reason}}</dd>{{end}}
+    <dt>Zaman</dt><dd>{{.Status.StartedAt}}{{if .Status.FinishedAt}} – {{.Status.FinishedAt}}{{end}}</dd>
+  </dl>
+  {{if and .Status.Done (ne .Status.To .Current) (eq .Status.State "success")}}<p class="alert info small">Güncelleme tamamlandı; yeni sürümü görmek için sayfayı yenileyin.</p>{{end}}
+  {{else if .Started}}
+  <p class="muted">Güncelleme başlatılıyor…</p>
+  {{else}}
+  <p class="muted">Henüz güncelleme yapılmadı.</p>
+  {{end}}
+  <p class="muted small">Ayrıntılı çıktı: Log Merkezi → Sistem Logları → "Panel güncelleme"; sonuç İşlem Geçmişi'nde <code>panel.update</code>.</p>
+</section>
+{{end}}{{end}}

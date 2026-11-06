@@ -226,5 +226,76 @@ ok  ports_overlap 80,443 443
 bad ports_overlap 8080 80
 bad ports_overlap 1:21 22
 
+# --- install / update (Faz 6) ---
+ok  validate_version v0.1.0
+ok  validate_version v12.34.567
+bad validate_version 0.1.0
+bad validate_version v0.1
+bad validate_version "v0.1.0;id"
+bad validate_version latest
+ok  validate_repo zahit5834/hostpanel
+ok  validate_repo my-org/host.panel_2
+bad validate_repo zahit5834
+bad validate_repo "a/b/c"
+bad validate_repo "a/.."
+bad validate_repo "a/b c"
+ok  validate_panel_port 8443
+ok  validate_panel_port 443
+bad validate_panel_port 80
+bad validate_panel_port 8090
+bad validate_panel_port 1023
+bad validate_panel_port 70000
+
+tmp6=$(mktemp -d)
+trap 'rm -rf "$tmp6"' EXIT
+cat >"$tmp6/config.yaml" <<'CFG'
+listen: 127.0.0.1:8090
+panel_domain: "panel.ornek.com"   # comment
+panel_port: 8443
+update_repo: zahit5834/hostpanel
+empty: ""
+CFG
+cfgval() { ( source ./lib.sh; HP_CONFIG=$tmp6/config.yaml; config_value "$1" ); }
+for kv in "listen=127.0.0.1:8090" "panel_domain=panel.ornek.com" "panel_port=8443" "update_repo=zahit5834/hostpanel" "empty=" "missing="; do
+  k=${kv%%=*} want=${kv#*=}
+  got=$(cfgval "$k")
+  [[ $got == "$want" ]] || { echo "FAIL config_value $k: got '$got' want '$want'"; fail=1; }
+done
+bad config_value "a;b"
+
+vhost() { ( source ./lib.sh; render_panel_vhost "$@" ); }
+v=$(vhost ip "" 8443)
+for want in "listen 8443 ssl http2 default_server;" "ssl_certificate /etc/hostpanel/panel-tls/cert.pem;" \
+  "proxy_pass http://127.0.0.1:8090;" 'proxy_set_header Host $http_host;' "proxy_buffering off;" "client_max_body_size 1100m;"; do
+  [[ $v == *"$want"* ]] || { echo "FAIL ip vhost misses: $want"; fail=1; }
+done
+[[ $v != *"listen 80;"* && $v != *Strict-Transport* ]] || { echo "FAIL ip vhost has port 80/HSTS"; fail=1; }
+v=$(vhost domain panel.ornek.com 443)
+for want in "server_name panel.ornek.com;" "listen 443 ssl http2;" "return 301 https://\$host\$request_uri;" \
+  "/etc/letsencrypt/live/hostpanel-panel/fullchain.pem" "Strict-Transport-Security" "/.well-known/acme-challenge/"; do
+  [[ $v == *"$want"* ]] || { echo "FAIL domain vhost misses: $want"; fail=1; }
+done
+[[ $v != *default_server* ]] || { echo "FAIL domain vhost on 443 must not be default_server"; fail=1; }
+v=$(vhost domain panel.ornek.com 8443)
+[[ $v == *'return 301 https://$host:8443$request_uri;'* ]] || { echo "FAIL redirect keeps the port"; fail=1; }
+v=$(vhost acme panel.ornek.com 8443)
+[[ $v == *"listen 80;"* && $v != *ssl_certificate* ]] || { echo "FAIL acme vhost"; fail=1; }
+bad render_panel_vhost domain "x.com; include /etc/passwd" 8443
+bad render_panel_vhost ip "" 80
+bad render_panel_vhost other "" 8443
+
+# archive_ok: plain files/dirs under the top directory only.
+mkdir -p "$tmp6/a/pkg-v1/bin" "$tmp6/b/pkg-v1" "$tmp6/c/other"
+echo x >"$tmp6/a/pkg-v1/bin/f"
+ln -s /etc/passwd "$tmp6/b/pkg-v1/passwd"
+echo x >"$tmp6/c/other/f"
+tar -czf "$tmp6/good.tgz" -C "$tmp6/a" pkg-v1
+tar -czf "$tmp6/link.tgz" -C "$tmp6/b" pkg-v1
+tar -czf "$tmp6/outside.tgz" -C "$tmp6/c" other
+ok  archive_ok "$tmp6/good.tgz" pkg-v1
+bad archive_ok "$tmp6/link.tgz" pkg-v1
+bad archive_ok "$tmp6/outside.tgz" pkg-v1
+bad archive_ok "$tmp6/good.tgz" pkg-v2
+
 if [[ $fail -eq 0 ]]; then echo "lib.sh: tüm testler geçti"; fi
 exit $fail

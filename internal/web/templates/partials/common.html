@@ -31,6 +31,8 @@
   <a href="/settings/security" class="{{if eq . "security"}}active{{end}}">Güvenlik</a>
   <a href="/settings/general" class="{{if eq . "general"}}active{{end}}">Genel</a>
   <a href="/settings/notify" class="{{if eq . "notify"}}active{{end}}">Bildirimler</a>
+  <a href="/settings/update" class="{{if eq . "update"}}active{{end}}">Güncelleme</a>
+  <a href="/settings/transfer" class="{{if eq . "transfer"}}active{{end}}">Taşıma</a>
 </div>
 {{end}}
 {{define "health-badge"}}{{if not .SiteID}}<span class="muted small">bilinmiyor</span>{{else if not .Enabled}}<span class="muted small">kapalı</span>{{else if eq .State "up"}}<span class="badge success" title="{{.LastMS}} ms">ayakta</span>{{else if eq .State "down"}}<span class="badge failed" title="{{.LastError}}">yanıt yok</span>{{else}}<span class="muted small">bilinmiyor</span>{{end}}{{end}}

@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"hostpanel/internal/logs"
-	"hostpanel/internal/monitor"
-	"hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/monitor"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 type healthData struct {

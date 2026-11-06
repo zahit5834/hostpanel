@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"hostpanel/internal/logs"
-	"hostpanel/internal/monitor"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/monitor"
 )
 
 func TestMonitoringDryRun(t *testing.T) {

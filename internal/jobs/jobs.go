@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/logs"
 )
 
 // Job statuses.

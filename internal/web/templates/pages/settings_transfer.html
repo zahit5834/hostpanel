@@ -1,0 +1,30 @@
+{{define "content"}}
+<h1>Ayarlar</h1>
+{{template "settings-tabs" "transfer"}}
+{{with .Data}}
+<section class="card">
+  <h2>Panel yapılandırmasını dışa aktar</h2>
+  <p>Başka bir sunucuya taşımak veya felaket kurtarma için paneli tek dosyada saklar.</p>
+  <ul class="small">
+    <li><strong>Dosyada olanlar:</strong> admin hesabı ve 2FA, genel ayarlar, bildirim kanalları, IP allowlist, müşteriler, yedek planları, Google Drive ayarları ve crypt anahtarları, özel runtime tanımları ve <code>master.key</code>.</li>
+    <li><strong>Dosyada olmayanlar:</strong> siteler, veritabanları, sertifikalar ve geçmiş kayıtlar; siteler yedekleriyle taşınır. Drive token'ı ve git deploy key'leri de dosyaya girmez: yalnızca root'ta duruyorlar, panel bile okuyamaz. Yeni sunucuda yeniden girilir ya da üretilir.</li>
+  </ul>
+  <form method="post" action="/settings/transfer/export" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Parola (en az {{.Min}} karakter)
+      <input type="password" name="passphrase" minlength="{{.Min}}" required autocomplete="new-password"></label>
+    <label>Parola (tekrar)
+      <input type="password" name="passphrase2" minlength="{{.Min}}" required autocomplete="new-password"></label>
+    <p class="alert err small">Dosya <code>master.key</code>'i içerir ve yalnızca bu parolayla korunur. Parolayı parola yöneticinize kaydedin; kaybolursa dosya açılamaz.</p>
+    <div><button type="submit" class="primary">Dışa aktar (.hpcfg indir)</button></div>
+  </form>
+</section>
+<section class="card">
+  <h2>Yeni sunucuda içe aktarma</h2>
+  <p class="small">Dosyayı yeni sunucuya kopyalayın ve kurulumu şöyle çalıştırın:</p>
+  <pre class="conf small">curl -fsSL https://raw.githubusercontent.com/zahit5834/hostpanel/main/install.sh | sudo bash -s -- --import /root/hostpanel-config.hpcfg</pre>
+  <p class="small">Panel zaten kuruluysa: <code>sudo systemctl stop hostpanel && sudo /opt/hostpanel/bin/hostpanel admin import-config --file dosya.hpcfg && sudo systemctl start hostpanel</code></p>
+  <p class="muted small">Ardından: Drive token'ını yeniden girin → Yedekler → "Drive'ı tara" → siteleri aynı domain'lerle oluşturup yedekten geri yükleyin.</p>
+</section>
+{{end}}
+{{end}}

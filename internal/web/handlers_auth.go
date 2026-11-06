@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
-	"hostpanel/internal/auth"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/auth"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/notify"
 )
 
 func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {

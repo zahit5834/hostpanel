@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"hostpanel/internal/exec"
-	"hostpanel/internal/jobs"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/runtimes"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/jobs"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/runtimes"
 )
 
 // GitSettings is a site's git deploy configuration. The private deploy key

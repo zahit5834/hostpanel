@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"hostpanel/internal/crons"
-	"hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/crons"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 // Schedule presets offered in the cron form (datalist).

@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"hostpanel/internal/customers"
-	"hostpanel/internal/exec"
-	"hostpanel/internal/logs"
-	"hostpanel/internal/notify"
-	"hostpanel/internal/sites"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/customers"
+	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 // fakeRunner records helper calls; block (if set) holds a run until closed.

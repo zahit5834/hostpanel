@@ -1,10 +1,13 @@
-# /etc/hostpanel/config.yaml — HostPanel configuration.
-# Without a public domain the panel listens on loopback only; reach it with:
-#   ssh -L 8443:127.0.0.1:8443 user@server   → http://127.0.0.1:8443
-listen: 127.0.0.1:8443
+# /etc/hostpanel/config.yaml — HostPanel configuration (root:hostpanel 0640; written by install.sh).
+# The panel itself listens on loopback only; nginx serves it on panel_port with TLS
+# (Let's Encrypt for panel_domain, otherwise a self-signed certificate on the server IP).
+listen: 127.0.0.1:8090
+panel_domain: ""          # e.g. panel.example.com; empty = https://<server-ip>:<panel_port>
+panel_port: 8443
+update_repo: zahit5834/hostpanel
 data_dir: /var/lib/hostpanel
 log_dir: /var/log/hostpanel
-root_log_dir: /var/log/hostpanel-root   # root helper logları (ssl-renewals, rclone); root:hostpanel 0750
+root_log_dir: /var/log/hostpanel-root   # root helper logları (ssl-renewals, rclone, update); root:hostpanel 0750
 master_key: /etc/hostpanel/master.key
 scripts_dir: /opt/hostpanel/scripts
 templates_dir: /opt/hostpanel/templates

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 // SiteConfig is config.json inside a backup: everything the panel knows about

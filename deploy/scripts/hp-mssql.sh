@@ -32,7 +32,7 @@ UFW_TAG=hostpanel-mssql
 need_docker() { command -v docker >/dev/null || die "Docker kurulu değil"; }
 exists() { docker inspect --type container "$NAME" >/dev/null 2>&1; }
 
-ufw_active() { command -v ufw >/dev/null && ufw status | head -n1 | grep -q '^Status: active'; }
+ufw_active() { command -v ufw >/dev/null && [[ $(ufw status 2>/dev/null | head -n1) == "Status: active" ]]; }
 
 # Delete the panel's rules one at a time (rule numbers shift after each delete).
 ufw_clear() {
@@ -67,7 +67,7 @@ create)
   validate_mssql_pid "$pid"
   need_docker
   ! exists || die "container zaten var: $NAME"
-  if ss -Hltn "sport = :1433" | grep -q .; then die "1433 portu başka bir süreç tarafından kullanılıyor"; fi
+  if [[ -n $(ss -Hltn "sport = :1433") ]]; then die "1433 portu başka bir süreç tarafından kullanılıyor"; fi
 
   [[ -d /var/lib/hostpanel ]] || die "/var/lib/hostpanel yok (panel kurulu mu?)"
   install -d -m 0700 -o "$MSSQL_UID" "$DATA"

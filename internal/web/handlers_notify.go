@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"hostpanel/internal/logs"
-	"hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/notify"
 )
 
 type notifyData struct {

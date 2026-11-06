@@ -6,16 +6,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/goccy/go-yaml"
 )
+
+// DefaultRepo is the GitHub repository releases are published to.
+const DefaultRepo = "zahit5834/hostpanel"
 
 // DefaultPath is where the production config file lives.
 const DefaultPath = "/etc/hostpanel/config.yaml"
 
 // Config holds all runtime settings. Zero values are filled by Defaults/DevDefaults.
 type Config struct {
-	Listen        string `yaml:"listen"`         // e.g. 127.0.0.1:8443
+	Listen        string `yaml:"listen"`         // e.g. 127.0.0.1:8090
 	DataDir       string `yaml:"data_dir"`       // SQLite lives here
 	LogDir        string `yaml:"log_dir"`        // panel.log, auth.log, jobs/
 	RootLogDir    string `yaml:"root_log_dir"`   // logs written by root helpers (root:hostpanel 0750)
@@ -27,6 +31,9 @@ type Config struct {
 	TrustProxy    bool   `yaml:"trust_proxy"`    // trust X-Forwarded-For from 127.0.0.1 (nginx in front)
 	DryRun        bool   `yaml:"dry_run"`        // log commands instead of executing
 	Workers       int    `yaml:"workers"`        // background job workers
+	PanelDomain   string `yaml:"panel_domain"`   // public panel name (nginx vhost); empty = IP mode
+	PanelPort     int    `yaml:"panel_port"`     // public HTTPS port nginx serves the panel on
+	UpdateRepo    string `yaml:"update_repo"`    // GitHub owner/name for releases
 
 	// Dev is set by the --dev flag only, never from YAML.
 	Dev bool `yaml:"-"`
@@ -35,7 +42,7 @@ type Config struct {
 // Defaults returns production defaults matching the on-server layout.
 func Defaults() Config {
 	return Config{
-		Listen:        "127.0.0.1:8443",
+		Listen:        "127.0.0.1:8090",
 		DataDir:       "/var/lib/hostpanel",
 		LogDir:        "/var/log/hostpanel",
 		RootLogDir:    "/var/log/hostpanel-root",
@@ -45,6 +52,8 @@ func Defaults() Config {
 		RuntimesDir:   "/etc/hostpanel/runtimes",
 		SecureCookies: true,
 		Workers:       1,
+		PanelPort:     8443,
+		UpdateRepo:    DefaultRepo,
 	}
 }
 
@@ -62,6 +71,8 @@ func DevDefaults() Config {
 		SecureCookies: false,
 		DryRun:        true,
 		Workers:       1,
+		PanelPort:     8443,
+		UpdateRepo:    DefaultRepo,
 		Dev:           true,
 	}
 }
@@ -83,8 +94,28 @@ func Load(path string, base Config) (Config, error) {
 	if cfg.Workers < 1 {
 		cfg.Workers = 1
 	}
+	if cfg.UpdateRepo == "" {
+		cfg.UpdateRepo = DefaultRepo
+	}
+	if cfg.PanelPort == 0 {
+		cfg.PanelPort = 8443
+	}
+	if !repoRe.MatchString(cfg.UpdateRepo) {
+		return cfg, fmt.Errorf("config: geçersiz update_repo %q (owner/name)", cfg.UpdateRepo)
+	}
+	if cfg.PanelPort < 1 || cfg.PanelPort > 65535 {
+		return cfg, fmt.Errorf("config: geçersiz panel_port %d", cfg.PanelPort)
+	}
+	if cfg.PanelDomain != "" && !domainRe.MatchString(cfg.PanelDomain) {
+		return cfg, fmt.Errorf("config: geçersiz panel_domain %q", cfg.PanelDomain)
+	}
 	return cfg, nil
 }
+
+var (
+	repoRe   = regexp.MustCompile(`^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$`)
+	domainRe = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
+)
 
 // DBPath is the SQLite file location.
 func (c Config) DBPath() string { return filepath.Join(c.DataDir, "hostpanel.db") }
@@ -100,6 +131,9 @@ func (c Config) AuthLogPath() string { return filepath.Join(c.LogDir, "auth.log"
 
 // RenewLogPath gets one line per certbot renewal (deploy hook, root).
 func (c Config) RenewLogPath() string { return filepath.Join(c.RootLogDir, "ssl-renewals.log") }
+
+// UpdateLogPath is hp-update.sh's progress log (root).
+func (c Config) UpdateLogPath() string { return filepath.Join(c.RootLogDir, "update.log") }
 
 // RcloneLogPath mirrors rclone's log from hp-backup.sh (root).
 func (c Config) RcloneLogPath() string { return filepath.Join(c.RootLogDir, "rclone.log") }

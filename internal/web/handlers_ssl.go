@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
-	"hostpanel/internal/logs"
-	"hostpanel/internal/sites"
-	"hostpanel/internal/ssl"
-	"hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/sites"
+	"github.com/zahit5834/hostpanel/internal/ssl"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 func init() {
@@ -350,6 +350,7 @@ func (s *Server) renderGeneral(w http.ResponseWriter, r *http.Request, status in
 			"Email":    store.GetSetting(r.Context(), s.DB, ssl.SettingACMEEmail, ""),
 			"IPs":      store.GetSetting(r.Context(), s.DB, ssl.SettingServerIPs, ""),
 			"LocalIPs": strings.Join(local, ", "),
+			"Defaults": s.panelDefaults(r.Context()),
 		}})
 }
 
@@ -364,9 +365,19 @@ func (s *Server) saveGeneral(w http.ResponseWriter, r *http.Request) {
 		s.renderGeneral(w, r, http.StatusBadRequest, err.Error(), "")
 		return
 	}
+	cur := s.panelDefaults(r.Context())
+	def := panelDefaults{
+		ActivityDays: formInt(r, setRetentionActivity, cur.ActivityDays), JobDays: formInt(r, setRetentionJobs, cur.JobDays),
+		MemoryMB: formInt(r, setDefaultMemory, cur.MemoryMB), CPUPct: formInt(r, setDefaultCPU, cur.CPUPct)}
+	if err := def.validate(); err != nil {
+		s.renderGeneral(w, r, http.StatusBadRequest, err.Error(), "")
+		return
+	}
+	def.save(r.Context(), s.DB)
 	store.SetSetting(r.Context(), s.DB, ssl.SettingACMEEmail, email)
 	store.SetSetting(r.Context(), s.DB, ssl.SettingServerIPs, ips)
 	s.Activity.Record(r.Context(), logs.Entry{Action: "settings.update", Summary: "Genel ayarlar güncellendi"},
-		map[string]any{"acme_email": email, "server_ips": ips})
+		map[string]any{"acme_email": email, "server_ips": ips, "retention_activity_days": def.ActivityDays,
+			"retention_job_days": def.JobDays, "default_memory_mb": def.MemoryMB, "default_cpu_pct": def.CPUPct})
 	s.renderGeneral(w, r, http.StatusOK, "", "Kaydedildi.")
 }
