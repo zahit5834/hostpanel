@@ -23,6 +23,8 @@ import (
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
+	"hostpanel/internal/monitor"
+	"hostpanel/internal/notify"
 	"hostpanel/internal/runtimes"
 	"hostpanel/internal/sites"
 	"hostpanel/internal/ssl"
@@ -49,6 +51,11 @@ type Server struct {
 	SSL       *ssl.Service
 	DBs       *databases.Service
 	Backups   *backups.Service
+	Monitor   *monitor.Service
+	Notify    *notify.Service
+
+	metrics metricsState
+	srvInfo serverCache
 
 	tpl       *renderer
 	allowlist atomic.Pointer[[]netip.Prefix]

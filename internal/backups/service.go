@@ -24,6 +24,7 @@ import (
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
+	"hostpanel/internal/notify"
 	"hostpanel/internal/runtimes"
 	"hostpanel/internal/sites"
 	"hostpanel/internal/store"
@@ -66,6 +67,8 @@ type Service struct {
 
 	// Now is the clock (tests); nil = time.Now.
 	Now func() time.Time
+	// Notify receives backup.failed events (nil: none).
+	Notify func(ctx context.Context, e notify.Event)
 
 	wake    chan struct{}
 	mu      sync.Mutex
@@ -789,9 +792,12 @@ func (s *Service) jobPlan(ctx context.Context, l *jobs.Log, params map[string]an
 	s.Store.SetPlanRun(ctx, p.ID, s.now(), p.NextRunAt)
 	if len(failures) > 0 {
 		msg := fmt.Sprintf("%d/%d site yedeklenemedi: %s", len(failures), len(list), strings.Join(failures, ", "))
-		// backup.failed is the hook for Faz 5 notifications.
 		s.Activity.Record(ctx, logs.Entry{Action: "backup.failed", TargetType: "backup", TargetID: p.Name,
 			Summary: "Yedekleme planı başarısız: " + p.Name, Status: logs.StatusFailed, Error: msg}, map[string]any{"job_id": l.ID()})
+		if s.Notify != nil {
+			s.Notify(ctx, notify.Event{Kind: notify.KindBackup, Key: fmt.Sprintf("backup:%d", p.ID),
+				Title: "Yedekleme planı başarısız: " + p.Name, Text: msg})
+		}
 		return errors.New(msg)
 	}
 	return nil

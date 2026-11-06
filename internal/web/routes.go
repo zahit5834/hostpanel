@@ -120,6 +120,18 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /settings/2fa/disable", s.requireAuth(s.totpDisable))
 	mux.Handle("POST /settings/recovery", s.requireAuth(s.recoveryRegenerate))
 	mux.Handle("POST /settings/allowlist", s.requireAuth(s.saveAllowlist))
+	mux.Handle("GET /settings/notify", s.requireAuth(s.notifyPage))
+	mux.Handle("POST /settings/notify", s.requireAuth(s.notifySave))
+	mux.Handle("POST /settings/notify/test", s.requireAuth(s.notifyTest))
+
+	mux.Handle("GET /server", s.requireAuth(s.serverPage))
+	mux.Handle("GET /server/part/{part}", s.requireAuth(s.serverPart))
+	mux.Handle("POST /server/ufw", s.requireAuth(s.ufwAdd))
+	mux.Handle("POST /server/ufw/{no}/delete", s.requireAuth(s.ufwDelete))
+
+	mux.Handle("POST /sites/{id}/health", s.requireAuth(s.siteHealthSave))
+	mux.Handle("POST /sites/{id}/health/check", s.requireAuth(s.siteHealthCheck))
+	mux.Handle("GET /logs/system/stream", s.requireAuth(s.systemLogStream))
 }
 
 func cacheStatic(h http.Handler, dev bool) http.Handler {

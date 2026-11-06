@@ -267,6 +267,44 @@ func (st *Store) Backups(ctx context.Context, f Filter) ([]Backup, error) {
 	return out, rows.Err()
 }
 
+// LatestBySite returns each site's newest backup (any kind, any status).
+func (st *Store) LatestBySite(ctx context.Context) (map[int64]Backup, error) {
+	rows, err := st.db.QueryContext(ctx, `SELECT `+backupCols+backupFrom+
+		` WHERE b.id IN (SELECT MAX(id) FROM backups WHERE site_id IS NOT NULL GROUP BY site_id)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]Backup{}
+	for rows.Next() {
+		b, err := scanBackup(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[b.SiteID] = b
+	}
+	return out, rows.Err()
+}
+
+// FailedSince lists failed backups created after t, newest first.
+func (st *Store) FailedSince(ctx context.Context, t time.Time) ([]Backup, error) {
+	rows, err := st.db.QueryContext(ctx, `SELECT `+backupCols+backupFrom+
+		` WHERE b.status=? AND b.created_at>=? ORDER BY b.id DESC LIMIT 20`, StatusFailed, t.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Backup
+	for rows.Next() {
+		b, err := scanBackup(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 // Insert stores a new backup row.
 func (st *Store) Insert(ctx context.Context, b *Backup) error {
 	if b.CreatedAt.IsZero() {

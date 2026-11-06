@@ -6,6 +6,7 @@ import (
 
 	"hostpanel/internal/auth"
 	"hostpanel/internal/logs"
+	"hostpanel/internal/notify"
 )
 
 func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
@@ -21,6 +22,11 @@ func (s *Server) loginFail(w http.ResponseWriter, r *http.Request, page, reason,
 	s.Auth.RecordAttempt(r.Context(), ip, false)
 	s.writeAuthLog("login failed", ip, reason)
 	s.Activity.Record(r.Context(), logs.Entry{Action: "login.failed", Status: logs.StatusFailed, Summary: msg, Error: reason}, nil)
+	if s.Notify != nil {
+		// Key per IP: one message per IP and hour however many attempts follow.
+		s.Notify.Send(r.Context(), notify.Event{Kind: notify.KindLoginFailed, Key: "login.failed:" + ip,
+			Title: "Başarısız panel girişi: " + ip, Text: "Sebep: " + reason + " (15 dk'da 5 hatada IP engellenir)"})
+	}
 	s.render(w, r, http.StatusUnauthorized, page, "layout", Page{Title: "Giriş", Error: msg})
 }
 
@@ -75,6 +81,19 @@ func (s *Server) loginSuccess(r *http.Request, method string) {
 		summary += " — yeni IP adresi"
 	}
 	s.Activity.Record(r.Context(), logs.Entry{Action: "login.success", Summary: summary}, nil)
+	// notify keeps its own list of the last 20 IPs (login_attempts are purged).
+	if s.Notify != nil && s.Notify.NewIP(r.Context(), ip) {
+		s.Notify.Send(r.Context(), notify.Event{Kind: notify.KindLoginNewIP, Key: "login.newip:" + ip,
+			Title: "Panele yeni bir IP adresinden giriş yapıldı: " + ip,
+			Text:  "Yöntem: " + method + "\nTarayıcı: " + truncate(r.UserAgent(), 120) + "\nSiz değilseniz şifreyi değiştirin ve oturumları kapatın."})
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 func (s *Server) mfaPage(w http.ResponseWriter, r *http.Request) {

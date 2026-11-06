@@ -24,7 +24,7 @@ shift
 
 WEBROOT=/var/www/letsencrypt
 CUSTOM_ROOT=/etc/hostpanel/ssl
-RENEW_LOG=/var/log/hostpanel/ssl-renewals.log
+RENEW_LOG=${ROOT_LOG_DIR}/ssl-renewals.log
 HOOK=/etc/letsencrypt/renewal-hooks/deploy/hostpanel.sh
 
 need_certbot() { command -v certbot >/dev/null || die "certbot kurulu değil (apt install certbot)"; }
@@ -43,11 +43,7 @@ setup() {
   install -d -o root -g root -m 0755 "$WEBROOT"
   install -d -o root -g root -m 0700 "$CUSTOM_ROOT"
   install -d -o root -g root -m 0755 "$(dirname "$HOOK")"
-  if [[ ! -f $RENEW_LOG ]]; then
-    local grp=root
-    getent group hostpanel >/dev/null && grp=hostpanel
-    install -o root -g "$grp" -m 0640 /dev/null "$RENEW_LOG"
-  fi
+  root_log_file "$RENEW_LOG"
   local tmp
   tmp=$(mktemp)
   cat >"$tmp" <<'HOOK'
@@ -56,7 +52,8 @@ setup() {
 # successful renewal: reload nginx and leave a line for the panel's log center.
 set -e
 nginx -t -q && systemctl reload nginx
-printf '%s renewed %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(basename "$RENEWED_LINEAGE")" >>/var/log/hostpanel/ssl-renewals.log
+log=/var/log/hostpanel-root/ssl-renewals.log
+[ -L "$log" ] || printf '%s renewed %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(basename "$RENEWED_LINEAGE")" >>"$log"
 HOOK
   if ! cmp -s "$tmp" "$HOOK"; then
     atomic_write "$HOOK" 0755 root:root <"$tmp"

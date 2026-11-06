@@ -126,3 +126,11 @@
     });
   });
 })();
+
+// Live log consoles ([data-follow]) stay scrolled to the bottom while the
+// user is already at the bottom.
+document.addEventListener("htmx:sseMessage", function (ev) {
+  var c = document.querySelector("[data-follow]");
+  if (!c) return;
+  if (c.scrollHeight - c.scrollTop - c.clientHeight < 80) c.scrollTop = c.scrollHeight;
+});

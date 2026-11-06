@@ -45,8 +45,12 @@ LOW=(nice -n 10 ionice -c3)
 rclone_() {
   [[ -x $RCLONE_BIN ]] || die "rclone kurulu değil"
   [[ -f $RCLONE_CONF ]] || die "uzak hedef yapılandırılmamış"
-  "${LOW[@]}" "$RCLONE_BIN" --config "$RCLONE_CONF" "$@"
+  root_log_file "$RCLONE_LOG"
+  # stderr (rclone's log, "YYYY/MM/DD hh:mm:ss LEVEL : …") goes to the job log
+  # and is mirrored to rclone.log; the exit status stays rclone's.
+  "${LOW[@]}" "$RCLONE_BIN" --config "$RCLONE_CONF" "$@" 2> >(tee -a "$RCLONE_LOG" >&2)
 }
+
 
 backup_dir() {
   validate_domain "$1"

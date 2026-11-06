@@ -1,15 +1,16 @@
 {{define "content"}}
 <h1>Genel Bakış</h1>
-<div hx-get="/?part=metrics" hx-trigger="every 5s" hx-swap="innerHTML">
-{{template "metrics" .}}
-</div>
 
-{{with .Data.Expiring}}
+{{with .Data.Alerts}}
 <section class="card alert-card">
-  <h2>Süresi dolmak üzere olan SSL sertifikaları</h2>
-  <ul>{{range .}}<li><a href="/sites/{{.SiteID}}?tab=ssl">{{.Domain}}</a> — {{template "days-left" .DaysLeft}} ({{datetime .NotAfter}}){{if eq .Kind "letsencrypt"}} · otomatik yenileme başarısız olmuş olabilir{{end}}</li>{{end}}</ul>
+  <h2>Uyarılar</h2>
+  <ul>{{range .}}<li><a href="{{.Link}}">{{.Text}}</a>{{with .Detail}} <span class="muted small">— {{.}}</span>{{end}}</li>{{end}}</ul>
 </section>
 {{end}}
+
+<div hx-get="/?part=metrics" hx-trigger="every 5s" hx-swap="innerHTML">
+{{template "live" .}}
+</div>
 
 <section class="card">
   <div class="card-head"><h2>Son İşlemler</h2><a href="/logs/activity" class="small">Tümü →</a></div>
@@ -30,10 +31,14 @@
 </section>
 {{end}}
 
-{{define "metrics"}}{{with .Data.Sys}}
+{{define "live"}}{{template "metrics" .}}{{template "dashboard-sites" .}}{{end}}
+
+{{define "metrics"}}{{$cpu := .Data.CPU}}{{with .Data.Sys}}
 <div class="grid metrics">
   <div class="card stat"><div class="label">Sunucu</div><div class="value small-value">{{.Hostname}}</div><div class="muted small">Açık: {{uptime .Uptime}}</div></div>
-  <div class="card stat"><div class="label">Yük ortalaması</div><div class="value">{{printf "%.2f" .Load1}}</div><div class="muted small">5 dk {{printf "%.2f" .Load5}} · 15 dk {{printf "%.2f" .Load15}}</div></div>
+  <div class="card stat"><div class="label">CPU</div><div class="value">{{if ge $cpu 0}}%{{$cpu}}{{else}}—{{end}}</div>
+    {{if ge $cpu 0}}<meter class="{{meterClass $cpu}}" min="0" max="100" low="75" high="90" optimum="0" value="{{$cpu}}"></meter>{{end}}
+    <div class="muted small">yük {{printf "%.2f" .Load1}} · {{printf "%.2f" .Load5}} · {{printf "%.2f" .Load15}}</div></div>
   <div class="card stat"><div class="label">RAM</div><div class="value">%{{.MemUsedPct}}</div>
     <meter class="{{meterClass .MemUsedPct}}" min="0" max="100" low="75" high="90" optimum="0" value="{{.MemUsedPct}}"></meter>
     <div class="muted small">{{bytes .MemAvail}} boş / {{bytes .MemTotal}}</div></div>
@@ -43,3 +48,27 @@
   <div class="card stat"><div class="label">Panel</div><div class="value">{{bytes .PanelRSS}}</div><div class="muted small">RSS · {{.Goroutines}} goroutine</div></div>
 </div>
 {{end}}{{end}}
+
+{{define "dashboard-sites"}}
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Siteler</h2><a href="/sites" class="small">Tümü →</a></div>
+  {{with .Data.Sites}}
+  <table class="table compact">
+    <thead><tr><th>Site</th><th>Durum</th><th>Sağlık</th><th class="right">RAM</th><th class="right">CPU</th><th>SSL</th><th>Son yedek</th></tr></thead>
+    <tbody>
+    {{range .}}
+      <tr>
+        <td><a href="/sites/{{.Site.ID}}">{{.Site.Domain}}</a></td>
+        <td>{{template "site-badge" .Site.Status}}</td>
+        <td>{{template "health-badge" .Health}}</td>
+        <td class="right nowrap">{{if .Usage.OK}}{{bytes .Usage.Mem}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="right nowrap">{{if and .Usage.OK (ge .Usage.CPU 0)}}%{{.Usage.CPU}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td>{{with .Cert}}{{template "days-left" .DaysLeft}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="nowrap">{{with .Backup}}{{template "badge" .Status}} <span class="muted small">{{ago .CreatedAt}}</span>{{else}}<span class="muted">yok</span>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="muted pad">Henüz site yok. <a href="/sites/new">Site oluştur →</a></p>{{end}}
+</section>
+{{end}}

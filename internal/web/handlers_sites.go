@@ -219,6 +219,7 @@ type siteData struct {
 
 	DBs         []databases.Database
 	DBAvailable bool
+	Health      healthData
 
 	Backups    []backups.Backup
 	Remote     backups.RemoteSettings
@@ -264,6 +265,8 @@ func (s *Server) renderSite(w http.ResponseWriter, r *http.Request, status int, 
 	d.DBs, _ = s.DBs.Store.Databases(ctx, databases.DBFilter{SiteID: site.ID})
 	d.DBAvailable = s.DBs.Available(ctx)
 	switch tab {
+	case "overview":
+		d.Health = s.healthData(r, site)
 	case "ssl":
 		s.sslTabData(r, &d)
 	case "backups", "import":

@@ -1,0 +1,44 @@
+{{define "content"}}
+<h1>Ayarlar</h1>
+{{template "settings-tabs" "notify"}}
+{{with .Data}}
+<form method="post" action="/settings/notify" class="stack">
+  <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+  <section class="card stack">
+    <h2>Telegram</h2>
+    <label class="check"><input type="checkbox" name="telegram_on" value="1" {{if .C.TelegramOn}}checked{{end}}> <span>Telegram bildirimleri</span></label>
+    <div class="form-grid">
+      <label>Bot token'ı
+        <input type="password" name="telegram_token" autocomplete="off" spellcheck="false" placeholder="{{if .HasToken}}kayıtlı — değiştirmek için yazın{{else}}123456789:AA…{{end}}">
+        <span class="muted small">@BotFather → /newbot. Şifreli saklanır, sayfaya geri basılmaz.</span></label>
+      <label>Chat ID
+        <input name="telegram_chat" value="{{.C.TelegramChat}}" autocomplete="off" spellcheck="false" placeholder="123456789 veya -100…">
+        <span class="muted small">Bota bir mesaj yazın, sonra <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code> çıktısındaki <code>chat.id</code>.</span></label>
+    </div>
+  </section>
+  <section class="card stack">
+    <h2>E-posta (SMTP)</h2>
+    <label class="check"><input type="checkbox" name="smtp_on" value="1" {{if .C.SMTPOn}}checked{{end}}> <span>E-posta bildirimleri</span></label>
+    <div class="form-grid">
+      <label>SMTP sunucusu <input name="smtp_host" value="{{.C.SMTPHost}}" placeholder="smtp.ornek.com" spellcheck="false"></label>
+      <label>Port <input type="number" name="smtp_port" value="{{.C.SMTPPort}}" min="1" max="65535">
+        <span class="muted small">587 = STARTTLS (zorunlu), 465 = doğrudan TLS. Şifresiz bağlantı kullanılmaz.</span></label>
+      <label>Kullanıcı adı <input name="smtp_user" value="{{.C.SMTPUser}}" autocomplete="off" spellcheck="false"></label>
+      <label>Şifre <input type="password" name="smtp_pass" autocomplete="new-password" placeholder="{{if .HasPass}}kayıtlı — değiştirmek için yazın{{end}}"></label>
+      <label>Gönderen <input name="smtp_from" value="{{.C.SMTPFrom}}" placeholder="HostPanel &lt;panel@ornek.com&gt;"></label>
+      <label>Alıcı <input name="smtp_to" value="{{.C.SMTPTo}}" placeholder="admin@ornek.com"></label>
+    </div>
+  </section>
+  <section class="card stack">
+    <h2>Olaylar</h2>
+    <div class="checks">
+    {{range .Kinds}}<label class="check"><input type="checkbox" name="kind" value="{{.ID}}" {{if $.Data.C.Enabled .ID}}checked{{end}}> <span>{{.Label}}</span></label>{{end}}
+    </div>
+    <p class="muted small">Aynı olay (ör. aynı sitenin sertifikası) en fazla saatte bir gönderilir; site kapandı/açıldı bildirimleri her durum değişiminde gider. Her gönderim İşlem Geçmişi'ne <code>notify.sent</code> / <code>notify.failed</code> olarak düşer.</p>
+  </section>
+  <div class="ops"><button type="submit" class="primary">Kaydet</button>
+    <button type="submit" formaction="/settings/notify/test">Test bildirimi gönder</button></div>
+  <p class="muted small">Test, kayıtlı ayarlarla gönderilir; önce kaydedin.</p>
+</form>
+{{end}}
+{{end}}

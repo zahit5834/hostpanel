@@ -250,9 +250,26 @@ validate_ip_or_cidr() {
 
 BACKUP_ROOT=/var/backups/hostpanel
 MSSQL_HOST_BACKUP=/var/lib/hostpanel/mssql/backup
+# ROOT_LOG_DIR holds logs root writes and the panel reads. It must not live in
+# /var/log/hostpanel: that directory belongs to the panel user, who could plant
+# a symlink and make root append to (or chgrp) an arbitrary file.
+ROOT_LOG_DIR=/var/log/hostpanel-root
+
+# root_log_file PATH — make sure PATH (inside ROOT_LOG_DIR) exists as a regular
+# root:hostpanel 0640 file in a root-owned 0750 directory.
+root_log_file() {
+  local f=$1 grp=root
+  getent group hostpanel >/dev/null && grp=hostpanel
+  [[ ! -L $ROOT_LOG_DIR ]] || die "${ROOT_LOG_DIR} symlink olamaz"
+  install -d -o root -g "$grp" -m 0750 "$ROOT_LOG_DIR"
+  [[ ! -L $f ]] || die "${f} symlink olamaz"
+  [[ -f $f ]] || install -o root -g "$grp" -m 0640 /dev/null "$f"
+}
+
 RCLONE_CONF=/etc/hostpanel/rclone.conf
 RCLONE_SA=/etc/hostpanel/rclone-sa.json
 RCLONE_BIN=/usr/local/bin/rclone
+RCLONE_LOG=${ROOT_LOG_DIR}/rclone.log
 
 # validate_backup_name NAME — YYYYMMDD-HHMMSS-<4 hex> (mirrors backups.ValidName).
 validate_backup_name() {
@@ -297,4 +314,40 @@ validate_staged_bak() {
 # validate_backup_file NAME — files allowed inside a backup directory.
 validate_backup_file() {
   [[ ${1:-} =~ ^(files\.tar\.zst|ssl\.tar\.zst|config\.json|nginx\.conf|manifest\.json|SHA256SUMS|db-[a-z][a-z0-9_]{1,62}\.bak)$ ]] || die "yedekte beklenmeyen dosya: '${1:-}'"
+}
+
+# ---------------------------------------------------------------------------
+# Server page (Faz 5)
+# ---------------------------------------------------------------------------
+
+# validate_ufw_port V — single port or range a:b (1-65535). Mirrors system.ValidUFWPort.
+validate_ufw_port() {
+  local v=${1:-} a b
+  if [[ $v =~ ^([0-9]{1,5}):([0-9]{1,5})$ ]]; then
+    a=${BASH_REMATCH[1]} b=${BASH_REMATCH[2]}
+    ((a >= 1 && b <= 65535 && a < b)) || die "geçersiz port aralığı: ${v}"
+  elif [[ $v =~ ^[0-9]{1,5}$ ]]; then
+    ((v >= 1 && v <= 65535)) || die "geçersiz port: ${v}"
+  else
+    die "geçersiz port: '${v}'"
+  fi
+}
+
+# validate_ufw_rule_no N — rule number from "ufw status numbered".
+validate_ufw_rule_no() {
+  [[ ${1:-} =~ ^[1-9][0-9]{0,3}$ ]] || die "geçersiz kural numarası: '${1:-}'"
+}
+
+# ports_overlap SPEC PORT — SPEC is "22", "8000:9000" or "80,443"; true if PORT is covered.
+ports_overlap() {
+  local spec=$1 p=$2 part
+  IFS=, read -ra parts <<<"$spec"
+  for part in "${parts[@]}"; do
+    if [[ $part =~ ^([0-9]+):([0-9]+)$ ]]; then
+      ((p >= BASH_REMATCH[1] && p <= BASH_REMATCH[2])) && return 0
+    elif [[ $part =~ ^[0-9]+$ ]]; then
+      ((part == p)) && return 0
+    fi
+  done
+  return 1
 }

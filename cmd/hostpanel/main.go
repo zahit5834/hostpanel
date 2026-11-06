@@ -27,6 +27,8 @@ import (
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
+	"hostpanel/internal/monitor"
+	"hostpanel/internal/notify"
 	"hostpanel/internal/runtimes"
 	"hostpanel/internal/sites"
 	"hostpanel/internal/ssl"
@@ -186,7 +188,7 @@ func serve(args []string) error {
 	siteSvc.Register()
 	sslSvc := &ssl.Service{Store: ssl.NewStore(a.db), Sites: siteSvc, DB: a.db, Box: a.box, Runner: runner, Probe: probe,
 		Jobs: jm, Activity: activity, Log: log, ScriptsDir: cfg.ScriptsDir,
-		RenewLog: filepath.Join(cfg.LogDir, "ssl-renewals.log"), DryRun: cfg.DryRun}
+		RenewLog: cfg.RenewLogPath(), DryRun: cfg.DryRun}
 	sslSvc.Register()
 	dbSvc := &databases.Service{Store: databases.NewStore(a.db), DB: a.db, Box: a.box, Runner: runner, Jobs: jm,
 		Activity: activity, Log: log, Sites: siteSvc, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun,
@@ -201,8 +203,13 @@ func serve(args []string) error {
 		UploadDir: siteSvc.UploadDir, DryRun: cfg.DryRun}
 	bkSvc.Register()
 	bkSvc.Recover(ctx)
+	notifySvc := &notify.Service{DB: a.db, Box: a.box, Activity: activity, Log: log}
+	sslSvc.Notify, bkSvc.Notify = notifySvc.Send, notifySvc.Send
+	monSvc := &monitor.Service{Store: monitor.NewStore(a.db), Sites: siteSvc, Probe: probe, Activity: activity, Log: log,
+		Notify: notifySvc.Send, DryRun: cfg.DryRun}
 	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version,
-		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc}
+		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc,
+		Monitor: monSvc, Notify: notifySvc}
 	srv.RegisterJobs()
 	if err := srv.Init(ctx); err != nil {
 		return err
@@ -216,6 +223,8 @@ func serve(args []string) error {
 	}
 	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, log)
 	go bkSvc.RunScheduler(jobCtx)
+	go notifySvc.Run(jobCtx)
+	go monSvc.Run(jobCtx)
 
 	hs := srv.HTTPServer()
 	errc := make(chan error, 1)

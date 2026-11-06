@@ -18,6 +18,7 @@ type Config struct {
 	Listen        string `yaml:"listen"`         // e.g. 127.0.0.1:8443
 	DataDir       string `yaml:"data_dir"`       // SQLite lives here
 	LogDir        string `yaml:"log_dir"`        // panel.log, auth.log, jobs/
+	RootLogDir    string `yaml:"root_log_dir"`   // logs written by root helpers (root:hostpanel 0750)
 	MasterKeyPath string `yaml:"master_key"`     // AES-256 key file
 	ScriptsDir    string `yaml:"scripts_dir"`    // root helper scripts
 	TemplatesDir  string `yaml:"templates_dir"`  // nginx/systemd templates
@@ -37,6 +38,7 @@ func Defaults() Config {
 		Listen:        "127.0.0.1:8443",
 		DataDir:       "/var/lib/hostpanel",
 		LogDir:        "/var/log/hostpanel",
+		RootLogDir:    "/var/log/hostpanel-root",
 		MasterKeyPath: "/etc/hostpanel/master.key",
 		ScriptsDir:    "/opt/hostpanel/scripts",
 		TemplatesDir:  "/opt/hostpanel/templates",
@@ -52,6 +54,7 @@ func DevDefaults() Config {
 		Listen:        "127.0.0.1:8080",
 		DataDir:       "data",
 		LogDir:        "data/log",
+		RootLogDir:    "data/log",
 		MasterKeyPath: "data/master.key",
 		ScriptsDir:    "deploy/scripts",
 		TemplatesDir:  "deploy/templates",
@@ -94,3 +97,9 @@ func (c Config) PanelLogPath() string { return filepath.Join(c.LogDir, "panel.lo
 
 // AuthLogPath receives one line per failed login, in a fail2ban-friendly format.
 func (c Config) AuthLogPath() string { return filepath.Join(c.LogDir, "auth.log") }
+
+// RenewLogPath gets one line per certbot renewal (deploy hook, root).
+func (c Config) RenewLogPath() string { return filepath.Join(c.RootLogDir, "ssl-renewals.log") }
+
+// RcloneLogPath mirrors rclone's log from hp-backup.sh (root).
+func (c Config) RcloneLogPath() string { return filepath.Join(c.RootLogDir, "rclone.log") }

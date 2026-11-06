@@ -171,5 +171,20 @@ ok  validate_backup_file db-shop_db.bak
 bad validate_backup_file ../config.json
 bad validate_backup_file db-Shop.bak
 
+ok  validate_ufw_port 8080
+ok  validate_ufw_port 6000:6100
+bad validate_ufw_port 0
+bad validate_ufw_port 70000
+bad validate_ufw_port 6100:6000
+bad validate_ufw_port "22 --dry-run"
+ok  validate_ufw_rule_no 3
+bad validate_ufw_rule_no 0
+bad validate_ufw_rule_no "1;id"
+ok  ports_overlap 22 22
+ok  ports_overlap 20:30 22
+ok  ports_overlap 80,443 443
+bad ports_overlap 8080 80
+bad ports_overlap 1:21 22
+
 if [[ $fail -eq 0 ]]; then echo "lib.sh: tüm testler geçti"; fi
 exit $fail

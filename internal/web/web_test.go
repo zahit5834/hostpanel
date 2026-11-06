@@ -29,6 +29,8 @@ import (
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
+	"hostpanel/internal/monitor"
+	"hostpanel/internal/notify"
 	"hostpanel/internal/runtimes"
 	"hostpanel/internal/sites"
 	"hostpanel/internal/ssl"
@@ -39,7 +41,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	t.Helper()
 	dir := t.TempDir()
 	cfg := config.Defaults()
-	cfg.DataDir, cfg.LogDir, cfg.SecureCookies, cfg.DryRun = dir, dir, false, true
+	cfg.DataDir, cfg.LogDir, cfg.RootLogDir, cfg.SecureCookies, cfg.DryRun = dir, dir, dir, false, true
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	db, err := store.Open(cfg.DBPath())
@@ -82,8 +84,13 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	bkSvc := &backups.Service{Store: backups.NewStore(db), DB: db, Box: box, Runner: runner, Probe: probe, Jobs: jm,
 		Activity: act, Log: log, Sites: svc, DBs: dbSvc, ScriptsDir: cfg.ScriptsDir, UploadDir: svc.UploadDir, DryRun: true}
 	bkSvc.Register()
+	notifySvc := &notify.Service{DB: db, Box: box, Activity: act, Log: log, Client: &http.Client{Transport: noNetwork{}}}
+	sslSvc.Notify, bkSvc.Notify = notifySvc.Send, notifySvc.Send
+	monSvc := &monitor.Service{Store: monitor.NewStore(db), Sites: svc, Probe: probe, Activity: act, Log: log,
+		Notify: notifySvc.Send, DryRun: true, DiskFunc: func() int { return 10 }}
 	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
-		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc}
+		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc,
+		Monitor: monSvc, Notify: notifySvc}
 	s.RegisterJobs()
 	if err := s.Init(ctx); err != nil {
 		t.Fatal(err)

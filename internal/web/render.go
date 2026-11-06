@@ -118,6 +118,9 @@ var funcs = template.FuncMap{
 	},
 	"iso": func(t time.Time) string { return t.Format(time.RFC3339) },
 	"ago": func(t time.Time) string {
+		if t.IsZero() {
+			return "—"
+		}
 		d := time.Since(t)
 		switch {
 		case d < time.Minute:

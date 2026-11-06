@@ -1,0 +1,101 @@
+{{define "content"}}
+<h1>Sunucu <span class="muted small">{{.Data.Hostname}}</span></h1>
+{{with .Data}}
+<div class="grid two">
+<section class="card">
+  <h2>Servisler</h2>
+  <table class="table compact">
+    <tbody>
+    {{range .Units}}<tr><td>{{.Label}}</td><td><code class="small">{{.Unit}}</code></td><td class="right"><span class="badge {{unitClass .State}}">{{.State}}</span></td></tr>{{end}}
+    </tbody>
+  </table>
+  <p class="muted small">Durumlar <code>systemctl is-active</code> ile okunur; servis yönetimi ilgili sayfalardan yapılır.</p>
+</section>
+<section class="card" id="server-apt" hx-get="/server/part/apt" hx-trigger="load" hx-swap="outerHTML">
+  <h2>Güncellemeler</h2>
+  <p class="muted">Kontrol ediliyor…</p>
+</section>
+</div>
+
+<section class="card" id="server-disk" hx-get="/server/part/disk" hx-trigger="load" hx-swap="outerHTML">
+  <h2>Disk dağılımı</h2>
+  <p class="muted">Hesaplanıyor… (büyük dizinlerde bir dakika sürebilir)</p>
+</section>
+
+{{template "ufw" $}}
+{{end}}
+{{end}}
+
+{{define "server-apt"}}{{with .Data.Apt}}
+<section class="card" id="server-apt">
+  <div class="card-head"><h2>Güncellemeler</h2>
+    <button class="link-btn small" hx-get="/server/part/apt?refresh=1" hx-target="#server-apt" hx-swap="outerHTML">Yenile</button></div>
+  {{if .Err}}<p class="err-text">{{.Err}}</p>
+  {{else}}
+  <div class="grid two">
+    <div class="stat"><div class="label">Güvenlik güncellemesi</div><div class="value">{{if .Security}}<span class="err-text">{{.Security}}</span>{{else}}0{{end}}</div></div>
+    <div class="stat"><div class="label">Toplam bekleyen paket</div><div class="value">{{.Total}}</div></div>
+  </div>
+  {{if .Security}}<p class="small">Uygulamak için SSH ile: <code>sudo apt update &amp;&amp; sudo apt upgrade</code> (Ubuntu'nun <code>unattended-upgrades</code> servisi güvenlik güncellemelerini genelde kendisi kurar).</p>{{end}}
+  {{end}}
+  <p class="muted small">Son kontrol: {{datetime .At}} · apt önbelleğine göre (<code>apt update</code> zamanlanmış olarak çalışır). Panel paket kurmaz/güncellemez.</p>
+</section>
+{{end}}{{end}}
+
+{{define "server-disk"}}{{with .Data.Disk}}
+<section class="card" id="server-disk">
+  <div class="card-head"><h2>Disk dağılımı</h2>
+    <button class="link-btn small" hx-get="/server/part/disk?refresh=1" hx-target="#server-disk" hx-swap="outerHTML">Yeniden hesapla</button></div>
+  {{if .Err}}<p class="err-text">{{.Err}}</p>{{end}}
+  <table class="table compact">
+    <tbody>
+    {{range .Parts}}<tr><td>{{.Label}}</td><td class="right nowrap">{{bytes .Bytes}}</td><td class="right nowrap muted">%{{.Pct}}</td>
+      <td><meter min="0" max="100" value="{{.Pct}}"></meter></td></tr>{{end}}
+    </tbody>
+  </table>
+  <p class="muted small">Hesaplama: {{datetime .At}} (10 dk önbellek){{if $.Data.DryRun}} · dry-run: değerler 0{{end}}. Yüzdeler kök dosya sistemine göredir.</p>
+</section>
+{{end}}{{end}}
+
+{{define "ufw"}}{{$d := .Data}}{{with $d.UFW}}
+<section class="card table-wrap" id="ufw">
+  <div class="card-head pad"><h2>Güvenlik duvarı (UFW)</h2>
+    {{if .Installed}}{{if .Active}}<span class="badge success">etkin</span>{{else}}<span class="badge failed">etkin değil</span>{{end}}{{end}}</div>
+  {{if $.Error}}<div class="alert err">{{$.Error}}</div>{{end}}
+  {{if $.Notice}}<div class="alert ok">{{$.Notice}}</div>{{end}}
+  {{if $d.UFWErr}}<p class="err-text pad">{{$d.UFWErr}}</p>
+  {{else if not .Installed}}<p class="muted pad">UFW kurulu değil.</p>
+  {{else if not .Active}}
+  <div class="pad stack">
+    <p>UFW etkin değil. Panel güvenlik duvarını <strong>açmaz ve kapatmaz</strong> (SSH erişimini kesme riski). Açmak için SSH oturumunda, önce SSH kuralını ekleyerek:</p>
+    <pre>sudo ufw allow OpenSSH
+sudo ufw allow 80,443/tcp
+sudo ufw enable</pre>
+    <p class="muted small">Ardından bu sayfadan kural ekleyip silebilirsiniz.</p>
+  </div>
+  {{else}}
+  {{if $d.DryRun}}<p class="muted small pad">dry-run: örnek kurallar gösteriliyor; değişiklikler yalnızca loglanır.</p>{{end}}
+  <table class="table">
+    <thead><tr><th>#</th><th>Hedef</th><th>Kural</th><th>Kaynak</th><th>Açıklama</th><th></th></tr></thead>
+    <tbody>
+    {{range .Rules}}<tr>
+      <td class="muted">{{.No}}</td><td><code>{{.To}}</code></td><td>{{.Action}}</td><td>{{.From}}</td><td class="muted small">{{.Comment}}</td>
+      <td class="right">{{if .Locked}}<span class="muted small" title="{{.Locked}}">korumalı</span>{{else}}
+        <form hx-post="/server/ufw/{{.No}}/delete" hx-target="#ufw" hx-swap="outerHTML" hx-confirm="Kural silinsin mi? {{.To}} {{.Action}} {{.From}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="hash" value="{{ruleHash .Line}}">
+          <button class="link-btn danger" type="submit">Sil</button></form>{{end}}</td>
+    </tr>{{else}}<tr><td colspan="6" class="muted">Kural yok.</td></tr>{{end}}
+    </tbody>
+  </table>
+  <form class="inline-form pad" hx-post="/server/ufw" hx-target="#ufw" hx-swap="outerHTML">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <select name="action"><option value="allow">İzin ver</option><option value="deny">Engelle</option></select>
+    <input name="port" placeholder="port veya 6000:6100" required size="14" spellcheck="false">
+    <select name="proto"><option value="tcp">tcp</option><option value="udp">udp</option><option value="any">tcp+udp</option></select>
+    <input name="from" placeholder="kaynak: boş = her yer, IP veya CIDR" size="30" spellcheck="false">
+    <button type="submit" class="primary">Kural ekle</button>
+  </form>
+  <p class="muted small pad">Korumalı (silinemez, engellenemez): {{range $i, $p := .Protected}}{{if $i}}, {{end}}{{$p}}{{end}} (SSH, HTTP/HTTPS, panel) · uygulama profilleri (OpenSSH, Nginx…) · MSSQL kuralları (Veritabanları sayfasında). Eklenen kurallara <code>hostpanel</code> açıklaması yazılır.</p>
+  {{end}}
+</section>
+{{end}}{{end}}

@@ -27,6 +27,7 @@ import (
 	"hostpanel/internal/exec"
 	"hostpanel/internal/jobs"
 	"hostpanel/internal/logs"
+	"hostpanel/internal/notify"
 	"hostpanel/internal/sites"
 	"hostpanel/internal/store"
 )
@@ -52,11 +53,12 @@ type Service struct {
 	Activity   *logs.Activity
 	Log        *slog.Logger
 	ScriptsDir string
-	RenewLog   string // /var/log/hostpanel/ssl-renewals.log
+	RenewLog   string // /var/log/hostpanel-root/ssl-renewals.log
 	DryRun     bool
 
-	Roots   *x509.CertPool                     // nil: system pool (tests inject a test CA)
-	Checker func(ctx context.Context) *Checker // nil: real DNS + HTTP
+	Roots   *x509.CertPool                            // nil: system pool (tests inject a test CA)
+	Checker func(ctx context.Context) *Checker        // nil: real DNS + HTTP
+	Notify  func(ctx context.Context, e notify.Event) // nil: no notifications
 }
 
 // Register binds job kinds and hooks certificate lookup into nginx rendering.
@@ -684,5 +686,9 @@ func (s *Service) checkExpiry(ctx context.Context, c Certificate) {
 		summary = "SSL sertifikasının süresi doldu: " + c.Domain
 	}
 	s.Activity.Record(ctx, logs.Entry{Action: "ssl.expiring", TargetType: "site", TargetID: c.Domain, Summary: summary}, nil)
+	if s.Notify != nil {
+		s.Notify(ctx, notify.Event{Kind: notify.KindSSLExpiring, Key: fmt.Sprintf("ssl:%s:%d", c.Domain, crossed),
+			Title: summary, Text: "Bitiş: " + c.NotAfter.Format("2006-01-02 15:04 MST")})
+	}
 	s.Store.SetNotified(ctx, c.ID, crossed)
 }

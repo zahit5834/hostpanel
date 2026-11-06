@@ -75,6 +75,8 @@
 </section>
 </div>
 
+{{template "site-health" (page $ $d.Health)}}
+
 <section class="card table-wrap">
   <div class="card-head pad"><h2>Veritabanları</h2>{{if $d.DBAvailable}}<a class="small" href="/databases?customer={{$s.CustomerID}}&site={{$s.ID}}#new-db">Veritabanı oluştur →</a>{{end}}</div>
   {{if $d.DBs}}
@@ -390,5 +392,32 @@ DNS henüz bu sunucuyu göstermiyorsa siteyi kendi bilgisayarınızda denemek i�
   <pre>{{range $i, $ip := $d.ServerIPs}}{{if eq $i 0}}{{$ip}} {{$s.Domain}}{{if ne $s.WWWMode "none"}} {{$s.WWWName}}{{end}}{{range $s.Aliases}} {{.}}{{end}}{{end}}{{else}}&lt;sunucu IP&gt; {{$s.Domain}}{{end}}</pre>
   {{if gt (len $d.ServerIPs) 1}}<p class="muted small">Sunucu IP'leri: {{range $i, $ip := $d.ServerIPs}}{{if $i}}, {{end}}<code>{{$ip}}</code>{{end}}</p>{{end}}
   <p class="small">Her şey hazır olunca DNS'te A kaydını bu sunucuya yönlendirin ve <a href="/sites/{{$s.ID}}?tab=ssl">SSL</a> sekmesindeki ön kontrolün “hazır” demesini bekleyin.</p>
+</section>
+{{end}}
+
+{{define "site-health"}}{{$h := .Data}}{{$c := $h.Check}}
+<section class="card stack" id="site-health">
+  <div class="card-head"><h2>Sağlık kontrolü</h2>{{template "health-badge" $c}}</div>
+  {{with $h.Error}}<div class="alert err">{{.}}</div>{{end}}
+  {{with $h.Notice}}<div class="alert ok">{{.}}</div>{{end}}
+  <dl class="kv">
+    <dt>Son kontrol</dt><dd>{{if $c.LastChecked.IsZero}}<span class="muted">henüz yok</span>{{else}}{{datetime $c.LastChecked}} · {{if $c.LastCode}}HTTP {{$c.LastCode}} · {{end}}{{$c.LastMS}} ms{{end}}</dd>
+    {{with $c.LastError}}<dt>Hata</dt><dd class="err-text">{{.}}</dd>{{end}}
+    {{if not $c.ChangedAt.IsZero}}<dt>Durum değişimi</dt><dd>{{datetime $c.ChangedAt}}</dd>{{end}}
+    {{if $h.Restarts}}<dt>Yeniden başlama</dt><dd>son 15 dk'da {{$h.Restarts}} kez</dd>{{end}}
+  </dl>
+  {{if ne $h.Site.Status "running"}}<p class="muted small">Site çalışmıyorken kontrol yapılmaz (bildirim de gönderilmez).</p>{{end}}
+  <form class="stack" hx-post="/sites/{{$h.Site.ID}}/health" hx-target="#site-health" hx-swap="outerHTML">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <label class="check"><input type="checkbox" name="enabled" value="1" {{if $c.Enabled}}checked{{end}}> <span>Düzenli kontrol et (2 ardışık hata → "yanıt yok" bildirimi)</span></label>
+    <div class="form-grid">
+      <label>Yol <input name="path" value="{{$c.Path}}" spellcheck="false"></label>
+      <label>Beklenen kod <input type="number" name="expect" value="{{$c.Expect}}" min="0" max="599">
+        <span class="muted small">0 = 500'den küçük her kod</span></label>
+      <label>Aralık <select name="interval">{{range $h.Intervals}}<option value="{{.}}" {{if eq . $c.Interval}}selected{{end}}>{{if lt . 120}}{{.}} sn{{else}}{{div . 60}} dk{{end}}</option>{{end}}</select></label>
+    </div>
+    <div class="ops"><button type="submit">Kaydet</button>
+      {{if eq $h.Site.Status "running"}}<button type="submit" hx-post="/sites/{{$h.Site.ID}}/health/check" hx-target="#site-health" hx-swap="outerHTML">Şimdi kontrol et</button>{{end}}</div>
+  </form>
 </section>
 {{end}}
