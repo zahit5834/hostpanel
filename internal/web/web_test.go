@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -27,6 +28,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/crypto"
 	"github.com/zahit5834/hostpanel/internal/customers"
 	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
@@ -91,9 +93,19 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	sslSvc.Notify, bkSvc.Notify = notifySvc.Send, notifySvc.Send
 	monSvc := &monitor.Service{Store: monitor.NewStore(db), Sites: svc, Probe: probe, Activity: act, Log: log,
 		Notify: notifySvc.Send, DryRun: true, DiskFunc: func() int { return 10 }}
+	dnsSvc := &dns.Service{Store: dns.NewStore(db), DB: db, Runner: runner, Jobs: jm, Activity: act, Log: log,
+		Sites: svc, ScriptsDir: cfg.ScriptsDir, DryRun: true,
+		DefaultIPs: func(context.Context) []netip.Addr { return []netip.Addr{netip.MustParseAddr("185.48.180.32")} },
+		LookupNS: func(_ context.Context, zone string) ([]*net.NS, error) {
+			if zone == "ornek.com" {
+				return []*net.NS{{Host: "ns1.ornek.com."}, {Host: "ns2.ornek.com."}}, nil
+			}
+			return nil, &net.DNSError{Err: "no such host", Name: zone, IsNotFound: true}
+		}}
+	dnsSvc.Register()
 	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
 		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc,
-		Monitor: monSvc, Notify: notifySvc,
+		Monitor: monSvc, Notify: notifySvc, DNS: dnsSvc,
 		Crons: &crons.Service{Store: crons.NewStore(db), Sites: svc, Runner: runner, Activity: act, Log: log,
 			ScriptsDir: cfg.ScriptsDir, DryRun: true, Notify: notifySvc.Send}, BaseCtx: ctx}
 	bkSvc.Crons = s.Crons

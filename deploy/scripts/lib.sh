@@ -209,6 +209,61 @@ env_line() {
 }
 
 # validate_email ADDR — mirrors ssl.ValidEmail.
+# validate_zone_file FILE ZONE — the zone file the panel rendered for ZONE.
+# Same rules as Go dns.ValidateZoneFile (tests: testdata_zone_bad.txt):
+# first line "$TTL n", then one record per line "owner. ttl IN TYPE rdata"
+# with an absolute owner inside ZONE and type-specific rdata. No other $
+# directive ($INCLUDE would make named read arbitrary files), no comments,
+# no parentheses, printable ASCII only. Exactly one SOA, on line 2.
+validate_zone_file() {
+  local f=$1 zone=$2
+  local size line n=0 soa=0 owner typ data
+  [[ -f $f && ! -L $f ]] || die "zone dosyası yok"
+  size=$(stat -c %s -- "$f")
+  ((size > 0 && size <= 1048576)) || die "zone dosyası boyutu geçersiz"
+  [[ $(tail -c1 -- "$f" | od -An -tx1 | tr -d ' ') == 0a ]] || die "zone dosyası satır sonuyla bitmeli"
+  local host='[a-z0-9_-]+(\.[a-z0-9_-]+)*\.'
+  local txtc='([] !#-[^-~]|\\["\\])*'
+  local octet='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+  local re_rr='^([a-z0-9_*.-]+)\. ([0-9]{1,6}) IN (SOA|NS|A|AAAA|CNAME|MX|TXT|SRV|CAA) (.+)$'
+  local re_owner='^(\*\.)?([a-z0-9_-]+\.)*[a-z0-9_-]+$'
+  local re_soa="^${host} ${host} [0-9]{1,10}( [0-9]{1,10}){4}\$"
+  local re_host="^${host}\$"
+  local re_a="^(${octet}\\.){3}${octet}\$"
+  local re_aaaa='^[0-9a-f:.]{2,45}$'
+  local re_mx="^[0-9]{1,5} ${host}\$"
+  local re_srv="^[0-9]{1,5} [0-9]{1,5} [0-9]{1,5} ${host}\$"
+  local re_txt="^\"${txtc}\"( \"${txtc}\")*\$"
+  local re_caa='^(0|128) (issue|issuewild|iodef) "[] !#-[^-~]{1,255}"$'
+  while IFS= read -r line || [[ -n $line ]]; do
+    n=$((n + 1))
+    [[ $line != *[^[:print:]]* ]] || die "zone satır ${n}: geçersiz karakter"
+    if ((n == 1)); then
+      [[ $line =~ ^\$TTL\ [0-9]{2,6}$ ]] || die "zone: ilk satır \$TTL olmalı"
+      continue
+    fi
+    [[ $line =~ $re_rr ]] || die "zone satır ${n}: geçersiz kayıt"
+    owner=${BASH_REMATCH[1]} typ=${BASH_REMATCH[3]} data=${BASH_REMATCH[4]}
+    [[ $owner == "$zone" || $owner == *".$zone" ]] || die "zone satır ${n}: ad zone dışında: ${owner}"
+    [[ $owner =~ $re_owner ]] || die "zone satır ${n}: geçersiz ad: ${owner}"
+    case $typ in
+      SOA)
+        ((n == 2)) && [[ $owner == "$zone" ]] || die "zone satır ${n}: SOA yalnızca 2. satırda ve kökte"
+        [[ $data =~ $re_soa ]] || die "zone satır ${n}: geçersiz SOA"
+        soa=$((soa + 1))
+        ;;
+      NS | CNAME) [[ $data =~ $re_host ]] || die "zone satır ${n}: geçersiz ${typ}" ;;
+      A) [[ $data =~ $re_a ]] || die "zone satır ${n}: geçersiz A" ;;
+      AAAA) [[ $data =~ $re_aaaa ]] || die "zone satır ${n}: geçersiz AAAA" ;;
+      MX) [[ $data =~ $re_mx ]] || die "zone satır ${n}: geçersiz MX" ;;
+      SRV) [[ $data =~ $re_srv ]] || die "zone satır ${n}: geçersiz SRV" ;;
+      TXT) [[ $data =~ $re_txt ]] || die "zone satır ${n}: geçersiz TXT" ;;
+      CAA) [[ $data =~ $re_caa ]] || die "zone satır ${n}: geçersiz CAA" ;;
+    esac
+  done <"$f"
+  ((soa == 1)) || die "zone: tam bir SOA kaydı olmalı"
+}
+
 validate_email() {
   [[ $1 =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}$ ]] || die "geçersiz e-posta: $1"
 }

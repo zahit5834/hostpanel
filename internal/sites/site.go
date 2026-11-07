@@ -67,6 +67,16 @@ func (s Site) Unit() string { return "hp-site-" + s.ShortName }
 // Dir is the site's root directory.
 func (s Site) Dir() string { return path.Join(SitesRoot, s.Domain) }
 
+// HostNames returns every name the site answers to: domain, www (unless the
+// www mode is "none") and aliases.
+func (s Site) HostNames() []string {
+	names := []string{s.Domain}
+	if s.WWWMode != WWWNone {
+		names = append(names, s.WWWName())
+	}
+	return append(names, s.Aliases...)
+}
+
 // WWWName returns the www. variant of the domain.
 func (s Site) WWWName() string { return "www." + s.Domain }
 

@@ -54,6 +54,9 @@ type Service struct {
 	// removed (databases inject "drop the site's databases"). The site lock is
 	// held: the hook must not call SaveEnv/Operate.
 	DeleteHook func(ctx context.Context, l *jobs.Log, site Site, params map[string]any) error
+	// Changed is told the host names of a site that was created, deleted or
+	// renamed (aliases/www), so DNS can re-render its zones. Must not block.
+	Changed func(ctx context.Context, names []string)
 
 	locks sync.Map // site id → *sync.Mutex: one mutating operation per site at a time
 }
@@ -222,6 +225,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Site, int64, erro
 	return site, jobID, nil
 }
 
+// changed notifies the Changed hook (if any).
+func (s *Service) changed(ctx context.Context, names []string) {
+	if s.Changed != nil {
+		s.Changed(context.WithoutCancel(ctx), names)
+	}
+}
+
 func paramID(p map[string]any, key string) int64 {
 	switch v := p[key].(type) {
 	case float64:
@@ -301,6 +311,7 @@ func (s *Service) jobCreate(ctx context.Context, l *jobs.Log, p map[string]any) 
 		return fail(err)
 	}
 	s.Store.SetStatus(ctx, site.ID, StatusAwaitingDeploy)
+	s.changed(ctx, site.HostNames())
 	l.Printf("Site hazır. İlk deploy'a kadar \"yakında\" sayfası gösterilir.")
 	if def.Type == runtimes.TypeProxy {
 		l.Printf("Uygulama portu: 127.0.0.1:%d", site.Port)
@@ -942,6 +953,7 @@ func (s *Service) jobDelete(ctx context.Context, l *jobs.Log, p map[string]any) 
 	if err := s.Store.Delete(dctx, site.ID); err != nil {
 		return err
 	}
+	s.changed(dctx, site.HostNames())
 	l.Progress(100)
 	if len(errs) > 0 {
 		return fmt.Errorf("site kaydı silindi ama şu adımlar başarısız oldu (elle kontrol edin): %s", strings.Join(errs, ", "))

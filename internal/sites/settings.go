@@ -137,5 +137,11 @@ func (s *Service) UpdateSettings(ctx context.Context, site Site, in SettingsInpu
 	if !slices.Equal(next.PersistentDirs, site.PersistentDirs) {
 		res.RestartAdvised = res.RestartAdvised || next.Status == StatusRunning
 	}
-	return res, s.Store.UpdateSettings(ctx, next)
+	if err := s.Store.UpdateSettings(ctx, next); err != nil {
+		return res, err
+	}
+	if oldNames, newNames := site.HostNames(), next.HostNames(); !slices.Equal(oldNames, newNames) {
+		s.changed(ctx, append(oldNames, newNames...))
+	}
+	return res, nil
 }

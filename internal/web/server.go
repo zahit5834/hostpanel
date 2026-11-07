@@ -22,6 +22,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/crons"
 	"github.com/zahit5834/hostpanel/internal/customers"
 	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
@@ -59,6 +60,7 @@ type Server struct {
 	Notify    *notify.Service
 	Crons     *crons.Service
 	Update    *update.Service
+	DNS       *dns.Service
 	// ExportConfig writes the encrypted panel configuration (main wires it:
 	// it needs the master key, which the web layer never holds otherwise).
 	ExportConfig func(ctx context.Context, passphrase string, w io.Writer) (panelcfg.Manifest, error)

@@ -86,6 +86,7 @@ case $action in
     got=$(printf '%s' "$line" | sha256sum | cut -c1-16)
     [[ $got == "$want" ]] || die "kural listesi değişti; sayfayı yenileyip tekrar deneyin"
     [[ $line != *hostpanel-mssql* ]] || die "MSSQL kuralları Veritabanları sayfasından yönetilir"
+    [[ $line != *hostpanel-dns* ]] || die "DNS sunucusunun 53 kuralları panelden silinemez"
     to=$(sed -E 's/^\[ *[0-9]+\] +//' <<<"$line" | awk '{print $1}')
     spec=${to%%/*}
     [[ $spec =~ ^[0-9,:]+$ ]] || die "profil / tüm portlar kuralı (${to}) panelden silinemez"

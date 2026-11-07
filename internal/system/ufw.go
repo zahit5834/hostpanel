@@ -73,6 +73,9 @@ func lockReason(r UFWRule, protected []int) string {
 	if strings.Contains(r.Comment, "hostpanel-mssql") {
 		return "MSSQL kuralı (Veritabanları sayfası)"
 	}
+	if strings.Contains(r.Comment, "hostpanel-dns") {
+		return "DNS kuralı (DNS sunucusu)"
+	}
 	spec, _, _ := strings.Cut(strings.TrimSuffix(r.To, " (v6)"), "/")
 	if !portSpecRe.MatchString(spec) {
 		return "profil / tüm portlar"

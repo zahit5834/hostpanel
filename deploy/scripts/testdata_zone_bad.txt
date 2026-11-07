@@ -1,0 +1,32 @@
+$INCLUDE /etc/shadow
+$GENERATE 1-10 host$ A 10.0.0.$
+$ORIGIN evil.com.
+ornek.com. 3600 IN A 1.2.3.4 ; comment
+baska.com. 3600 IN A 1.2.3.4
+ornek.com.evil.com. 3600 IN A 1.2.3.4
+xornek.com. 3600 IN A 1.2.3.4
+www.ornek.com 3600 IN A 1.2.3.4
+www.ornek.com. 3600 IN A 1.2.3.256
+www.ornek.com. 3600 IN A 1.2.3.4 5.6.7.8
+www.ornek.com. 3600 IN PTR x.ornek.com.
+www.ornek.com. 3600 IN HINFO "a" "b"
+www.ornek.com. 3600 IN TYPE65534 \# 0
+www.ornek.com. 3600 CH TXT "x"
+www.ornek.com. 3600 IN CNAME x.ornek.com
+www.ornek.com. 3600 IN CNAME ( x.ornek.com. )
+www.ornek.com. 3600 IN MX mail.ornek.com.
+www.ornek.com. 3600 IN TXT unquoted
+www.ornek.com. 3600 IN TXT "a"b"
+www.ornek.com. 3600 IN TXT "a\065"
+www.ornek.com. 3600 IN TXT "a\"
+www.ornek.com. 3600 IN CAA 0 issue letsencrypt.org
+www.ornek.com. 3600 IN CAA 1 issue "letsencrypt.org"
+www.ornek.com. 3600 IN CAA 0 tbs "x"
+www.ornek.com. 3600 IN SRV 1 1 x.ornek.com.
+a*.ornek.com. 3600 IN A 1.2.3.4
+x.*.ornek.com. 3600 IN A 1.2.3.4
+@ 3600 IN A 1.2.3.4
+ ornek.com. 3600 IN A 1.2.3.4
+ornek.com.  3600 IN A 1.2.3.4
+ornek.com. 3600 IN SOA ns1.ornek.com. hostmaster.ornek.com. 1 2 3 4 5
+ornek.com. 99999999 IN A 1.2.3.4

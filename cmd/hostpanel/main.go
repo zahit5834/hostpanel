@@ -28,6 +28,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/crypto"
 	"github.com/zahit5834/hostpanel/internal/customers"
 	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
@@ -209,6 +210,9 @@ func serve(args []string) error {
 		dbSvc.Fake = databases.NewFakeServer("")
 	}
 	dbSvc.Register()
+	dnsSvc := &dns.Service{Store: dns.NewStore(a.db), DB: a.db, Runner: runner, Jobs: jm, Activity: activity, Log: log,
+		Sites: siteSvc, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun, DefaultIPs: sslSvc.ServerIPs}
+	dnsSvc.Register()
 	bkSvc := &backups.Service{Store: backups.NewStore(a.db), DB: a.db, Box: a.box, Runner: runner, Probe: probe, Jobs: jm,
 		Activity: activity, Log: log, Sites: siteSvc, DBs: dbSvc, ScriptsDir: cfg.ScriptsDir,
 		UploadDir: siteSvc.UploadDir, DryRun: cfg.DryRun}
@@ -231,7 +235,7 @@ func serve(args []string) error {
 	updSvc.RecordFinished(ctx)
 	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version,
 		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc,
-		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc, Update: updSvc}
+		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc, Update: updSvc, DNS: dnsSvc}
 	srv.ExportConfig = func(ctx context.Context, pass string, w io.Writer) (panelcfg.Manifest, error) {
 		server := store.GetSetting(ctx, a.db, "backup_server_name", "")
 		if server == "" {

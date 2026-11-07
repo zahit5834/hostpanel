@@ -123,6 +123,20 @@ ok  validate_nginx_conf "$tmpc" ornek.com
 bad validate_nginx_conf "$tmpc" other.com
 rm -f "$tmpc"
 
+# zone file validation: each line of testdata_zone_bad.txt after a valid head must be rejected.
+tmpz=$(mktemp)
+while IFS= read -r line; do
+  printf '%s\n%s\n%s\n' '$TTL 3600' 'ornek.com. 3600 IN SOA ns1.ornek.com. hostmaster.ornek.com. 1 2 3 4 5' "$line" >"$tmpz"
+  bad validate_zone_file "$tmpz" ornek.com
+done <testdata_zone_bad.txt
+ok validate_zone_file testdata_zone_good.txt ornek.com
+bad validate_zone_file testdata_zone_good.txt baska.com
+printf '%s\n%s' '$TTL 3600' 'ornek.com. 3600 IN SOA ns1.ornek.com. h.ornek.com. 1 2 3 4 5' >"$tmpz" # no final newline
+bad validate_zone_file "$tmpz" ornek.com
+printf '%s\r\n%s\n' '$TTL 3600' 'ornek.com. 3600 IN SOA ns1.ornek.com. h.ornek.com. 1 2 3 4 5' >"$tmpz"
+bad validate_zone_file "$tmpz" ornek.com
+rm -f "$tmpz"
+
 # env_line keeps values literal.
 check_env() {
   local got

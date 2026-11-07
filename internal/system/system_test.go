@@ -64,18 +64,19 @@ protected=22,80,443,2222,8443
 [ 7] 9000/udp                   DENY IN     192.0.2.1
 [ 8] Anywhere                   ALLOW IN    10.0.0.5
 [ 9] 8080/tcp (v6)              ALLOW IN    Anywhere (v6)              # hostpanel
+[10] 53/udp                     ALLOW IN    Anywhere                   # hostpanel-dns
 `
 
 func TestParseUFW(t *testing.T) {
 	st := ParseUFW(ufwOut)
-	if !st.Installed || !st.Active || len(st.Protected) != 5 || len(st.Rules) != 9 {
+	if !st.Installed || !st.Active || len(st.Protected) != 5 || len(st.Rules) != 10 {
 		t.Fatalf("%+v", st)
 	}
 	r := st.Rules[4]
 	if r.No != 5 || r.To != "8080/tcp" || r.Action != "ALLOW IN" || r.From != "198.51.100.0/24" || r.Comment != "hostpanel" {
 		t.Fatalf("%+v", r)
 	}
-	locked := map[int]bool{1: true, 2: true, 3: true, 4: true, 5: false, 6: true, 7: false, 8: true, 9: false}
+	locked := map[int]bool{1: true, 2: true, 3: true, 4: true, 5: false, 6: true, 7: false, 8: true, 9: false, 10: true}
 	for _, r := range st.Rules {
 		if (r.Locked != "") != locked[r.No] {
 			t.Errorf("rule %d (%s) locked=%q", r.No, r.To, r.Locked)

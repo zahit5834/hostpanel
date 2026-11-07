@@ -1,0 +1,14 @@
+$TTL 3600
+ornek.com. 3600 IN SOA ns1.ornek.com. hostmaster.ornek.com. 2026110701 3600 900 1209600 300
+ornek.com. 3600 IN NS ns1.ornek.com.
+ornek.com. 3600 IN NS ns2.ornek.com.
+ornek.com. 3600 IN A 185.48.180.32
+ornek.com. 3600 IN AAAA 2a01:4f8::1
+ornek.com. 3600 IN MX 10 mail.ornek.com.
+ornek.com. 3600 IN CAA 0 issue "letsencrypt.org"
+ornek.com. 3600 IN TXT "v=spf1 a mx -all"
+blog.ornek.com. 3600 IN CNAME ornek.com.
+dkim._domainkey.ornek.com. 300 IN TXT "v=DKIM1; k=rsa; p=abc[]^~{}" "x\"y\\"
+_sip._tcp.ornek.com. 3600 IN SRV 10 5 5060 sip.ornek.com.
+*.app.ornek.com. 3600 IN A 1.2.3.4
+sub.ornek.com. 3600 IN NS ns.baska.com.
