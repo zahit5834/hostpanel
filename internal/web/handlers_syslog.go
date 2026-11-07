@@ -289,7 +289,11 @@ func (s *Server) systemLogStream(w http.ResponseWriter, r *http.Request) {
 	if sq.Unit != "" {
 		go s.followJournal(ctx, sq, lines)
 	} else {
-		go followFile(ctx, sq.Path, lines)
+		// Wait until the start offset is taken, so nothing written after
+		// ": connected" is skipped.
+		ready := make(chan struct{})
+		go followFile(ctx, sq.Path, lines, ready)
+		<-ready
 	}
 	fmt.Fprint(w, ": connected\n\n")
 	flusher.Flush()
@@ -366,7 +370,8 @@ func (s *Server) followJournal(ctx context.Context, sq sysQuery, out chan<- stri
 
 // followFile polls the file once a second for appended bytes; a smaller size
 // (copytruncate) or another inode (rotation) restarts from the beginning.
-func followFile(ctx context.Context, path string, out chan<- string) {
+// ready is closed once the starting offset (end of file) is recorded.
+func followFile(ctx context.Context, path string, out chan<- string, ready chan<- struct{}) {
 	defer close(out)
 	lw := &lineWriter{ch: out}
 	var f *os.File
@@ -391,6 +396,7 @@ func followFile(ctx context.Context, path string, out chan<- string) {
 		}
 	}
 	open(true)
+	close(ready)
 	defer func() {
 		if f != nil {
 			f.Close()
