@@ -49,6 +49,18 @@
   {{end}}
 </section>
 
+{{if .Zones}}
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>DNS zone'ları</h2><a class="small" href="/dns">DNS →</a></div>
+  <table class="table">
+    <thead><tr><th>Zone</th><th class="right">Kayıt</th><th>DNSSEC</th></tr></thead>
+    <tbody>
+    {{range .Zones}}<tr><td><a href="/dns/zones/{{.ID}}">{{.Name}}</a></td><td class="right">{{.RecordCount}}</td><td>{{if .DNSSEC}}açık{{else}}<span class="muted">kapalı</span>{{end}}</td></tr>{{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
+
 <section class="card table-wrap">
   <div class="card-head pad"><h2>Son işlemler</h2><a class="small" href="/logs/activity">Tüm işlem geçmişi →</a></div>
   <table class="table">

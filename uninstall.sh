@@ -134,6 +134,7 @@ echo
 say "HostPanel kaldırıldı."
 ((SITES)) || echo "    Siteler çalışmaya devam ediyor (hp-site-* servisleri, /var/www/sites)."
 ((DBS)) || echo "    MSSQL container'ı ve veritabanları duruyor."
+[[ ! -f /etc/bind/.hostpanel ]] || echo "    DNS sunucusu (BIND) çalışmaya devam ediyor; zone'lar /var/lib/bind/hostpanel (apt purge bind9 ile kaldırılır)."
 ((BACKUPS)) || echo "    Yerel yedekler: /var/backups/hostpanel"
 ((PURGE)) || echo "    Panel ayarları: /etc/hostpanel, /var/lib/hostpanel (install.sh ile geri kurulur)."
 echo "    UFW kurallarına dokunulmadı; paketler (nginx, certbot, fail2ban…) kaldırılmadı."

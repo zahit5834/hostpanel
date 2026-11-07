@@ -430,8 +430,8 @@ func importConfig(ctx context.Context, cfg config.Config, file string, force boo
 	m := arc.Manifest
 	logs.NewActivity(a.db).Record(ctx, logs.Entry{Action: "panel.import", Source: logs.SourceSystem,
 		Summary: fmt.Sprintf("Panel yapılandırması içe aktarıldı (%s, %s, %s)", m.Server, m.Version, m.Created.Format("2006-01-02"))},
-		map[string]any{"server": m.Server, "version": m.Version, "customers": m.Customers, "plans": m.Plans, "runtimes": m.Runtimes})
-	fmt.Printf(`Yapılandırma içe aktarıldı: %s (%s, %s) — %d müşteri, %d yedek planı.
+		map[string]any{"server": m.Server, "version": m.Version, "customers": m.Customers, "plans": m.Plans, "zones": m.Zones, "runtimes": m.Runtimes})
+	fmt.Printf(`Yapılandırma içe aktarıldı: %s (%s, %s) — %d müşteri, %d yedek planı, %d DNS zone'u.
 
 Sıradaki adımlar:
   1. Yedekler → Ayarlar: Google Drive token'ını (ya da service account'u) yeniden girin;
@@ -441,6 +441,9 @@ Sıradaki adımlar:
   4. MSSQL kullanılıyorsa: sunucuyu kurun, müşteri login'lerini yeniden oluşturun.
   5. Git deploy kullanan siteler için yeni deploy key üretip repo'ya ekleyin.
   6. Site kapsamlı yedek planları devre dışı geldi; siteleri seçip yeniden açın.
-`, m.Server, m.Version, m.Created.Format("2006-01-02 15:04"), m.Customers, m.Plans)
+  7. DNS zone'ları geldiyse: DNS → IP'leri kontrol edip kaydedin → "DNS sunucusunu kur";
+     registrar'da glue IP'lerini değiştirin. DNSSEC'li zone'lar yeni anahtarla imzalanır:
+     yeni DS kaydını registrar'a girin (eskisini kaldırın).
+`, m.Server, m.Version, m.Created.Format("2006-01-02 15:04"), m.Customers, m.Plans, m.Zones)
 	return nil
 }

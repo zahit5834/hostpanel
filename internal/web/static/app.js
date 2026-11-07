@@ -111,6 +111,29 @@
       };
     });
 
+    // DNS record form: show the fields the selected type uses.
+    window.Alpine.data("dnsRecord", function () {
+      var hints = {
+        A: ["185.48.180.32", "IPv4 adresi"],
+        AAAA: ["2001:db8::1", "IPv6 adresi"],
+        CNAME: ["hedef.ornek.com", "Tam ad; @ = zone kökü. Aynı adda başka kayıt olamaz."],
+        MX: ["mail.ornek.com", "Posta sunucusunun tam adı (öncelik: küçük olan önce)"],
+        TXT: ["v=spf1 a mx -all", "Tırnaksız yazın; 255 karakterden uzunsa otomatik bölünür"],
+        SRV: ["sip.ornek.com", "Hedef sunucunun tam adı; ad _servis._tcp biçiminde olmalı"],
+        CAA: ["letsencrypt.org", "Sertifika vermesine izin verilen CA (issue) veya iodef adresi"],
+        NS: ["ns1.baska.com", "Alt alan adını başka nameserver'a devretmek için (kökte değil)"]
+      };
+      return {
+        type: "A",
+        init: function () { this.type = this.$el.dataset.type || "A"; },
+        get hasPrio() { return this.type === "MX" || this.type === "SRV" || this.type === "CAA"; },
+        get isSRV() { return this.type === "SRV"; },
+        get isCAA() { return this.type === "CAA"; },
+        get placeholder() { return (hints[this.type] || ["", ""])[0]; },
+        get hint() { return (hints[this.type] || ["", ""])[1]; }
+      };
+    });
+
     window.Alpine.data("copy", function () {
       return {
         label: "Kopyala",

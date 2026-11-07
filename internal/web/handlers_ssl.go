@@ -331,6 +331,13 @@ func (s *Server) sslTabData(r *http.Request, d *siteData) {
 		s.Log.Warn("ssl active", "err", err)
 	}
 	d.CertHistory, _ = s.SSL.Store.ForSite(r.Context(), d.Site.ID)
+	if s.DNS != nil {
+		if zn := s.DNS.ZoneCovering(r.Context(), d.Site.Domain); zn != "" {
+			if z, err := s.DNS.Store.ZoneByName(r.Context(), zn); err == nil {
+				d.DNSZone = &z
+			}
+		}
+	}
 	d.ACMEEmail = store.GetSetting(r.Context(), s.DB, ssl.SettingACMEEmail, "")
 }
 

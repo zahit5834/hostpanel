@@ -59,6 +59,13 @@
   </section>
   {{end}}
 
+  {{if .DNSAvailable}}
+  <section class="card stack">
+    <h2>DNS</h2>
+    <label class="check"><input type="checkbox" name="create_zone" value="1" {{if .CreateZone}}checked{{end}}> <span>Bu domain için DNS zone'u oluştur <span class="muted small">— domain'i kapsayan bir zone yoksa domain adıyla açılır; domain, www ve alias'ların A/AAAA kayıtları otomatik eklenir. Registrar'da nameserver'ları bu sunucuya yönlendirmeniz gerekir.</span></span></label>
+  </section>
+  {{end}}
+
   <div class="actions"><button type="submit" class="primary">Siteyi oluştur</button></div>
 </form>
 {{end}}

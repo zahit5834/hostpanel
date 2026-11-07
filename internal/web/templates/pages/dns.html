@@ -1,0 +1,89 @@
+{{define "content"}}
+{{with .Data}}
+<div class="card-head">
+  <h1>DNS</h1>
+  {{if .Installed}}<span class="muted small">BIND {{or (index .Status "version") ""}} · <span class="badge {{if eq (index .Status "active") "active"}}success{{else}}failed{{end}}">{{or (index .Status "active") "bilinmiyor"}}</span></span>{{end}}
+</div>
+
+{{if .JobID}}{{template "job-console" .JobID}}{{end}}
+
+<div class="grid two">
+<section class="card stack">
+  <h2>Nameserver ayarları</h2>
+  <form method="post" action="/dns/settings" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <div class="form-grid">
+      <label>ns1 <input name="ns1" value="{{.Settings.NS1}}" placeholder="ns1.alanadiniz.com" required spellcheck="false"></label>
+      <label>ns2 <input name="ns2" value="{{.Settings.NS2}}" placeholder="ns2.alanadiniz.com" required spellcheck="false"></label>
+      <label>Yönetici e-postası (SOA) <input name="hostmaster" value="{{.Settings.Hostmaster}}" placeholder="hostmaster@alanadiniz.com" required spellcheck="false">
+        <span class="muted small">Yerel kısımda nokta olamaz (SOA biçimi).</span></label>
+      <label>Zone'lara yazılacak IP'ler <input name="ips" value="{{.IPsText}}" placeholder="185.48.180.32" required spellcheck="false">
+        <span class="muted small">Sunucunun genel IPv4/IPv6 adresleri (virgülle). Sitelerin ve ns1/ns2'nin A/AAAA kayıtları bunlardan üretilir.</span></label>
+    </div>
+    <div><button type="submit" class="primary">Kaydet</button></div>
+  </form>
+</section>
+
+<section class="card stack">
+  <h2>Registrar'da yapılacaklar</h2>
+  {{if and .Settings.NS1 .Settings.NS2}}
+  <ol class="stack small">
+    <li>ns1/ns2'nin bağlı olduğu domain'in registrar panelinde <strong>glue (child nameserver / host) kayıtları</strong> oluşturun:
+      <pre>{{.Settings.NS1}}  →  {{range $i, $ip := .Settings.IPs}}{{if $i}}, {{end}}{{$ip}}{{end}}
+{{.Settings.NS2}}  →  {{range $i, $ip := .Settings.IPs}}{{if $i}}, {{end}}{{$ip}}{{end}}</pre></li>
+    <li>Yönetmek istediğiniz her domain için nameserver'ları <code>{{.Settings.NS1}}</code> ve <code>{{.Settings.NS2}}</code> yapın.</li>
+    <li>Değişikliklerin yayılması birkaç saat (bazen 24–48 saat) sürebilir; zone listesindeki "Yetki devri" sütunu durumu gösterir.</li>
+  </ol>
+  {{if .SameIP}}<div class="alert info small">ns1 ve ns2 aynı IP'yi gösteriyor (tek sunucu). Çoğu uzantıda kabul edilir; bazı registry'ler iki farklı IP isteyebilir — registrar'ınızın kurallarına bakın. Sunucu kapalıyken bu domain'ler çözülmez.</div>{{end}}
+  {{else}}<p class="muted">Önce soldaki ns1/ns2 ayarlarını kaydedin.</p>{{end}}
+</section>
+</div>
+
+{{if not .Installed}}
+<section class="card stack">
+  <h2>DNS sunucusu (BIND 9)</h2>
+  <p>Zone'lar panelde saklanır ama yayınlanmaları için sunucuda BIND kurulu olmalı.</p>
+  <ul class="small muted">
+    <li>Ubuntu deposundaki <code>bind9</code> kurulur (Canonical güvenlik güncellemeleri).</li>
+    <li>Yalnızca yetkili sunucu: recursion kapalı (açık resolver olmaz), zone transferi kapalı, yanıt hız sınırı (RRL) açık.</li>
+    <li>UFW etkinse <strong>53/udp ve 53/tcp</strong> açılır (<code># hostpanel-dns</code>). UFW kapalıysa panel UFW'yi açmaz. SSH kurallarına dokunulmaz.</li>
+    <li>Panel dışında yapılandırılmış bir BIND varsa kurulum reddedilir (mevcut DNS yapılandırmanıza dokunulmaz).</li>
+  </ul>
+  <form method="post" action="/dns/install">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <button type="submit" class="primary" {{if not .Settings.Ready}}disabled{{end}} data-confirm="BIND 9 kurulacak ve UFW etkinse 53/udp + 53/tcp açılacak. Devam edilsin mi?">DNS sunucusunu kur</button>
+    {{if not .Settings.Ready}}<span class="muted small">Önce nameserver ayarlarını kaydedin.</span>{{end}}
+  </form>
+</section>
+{{end}}
+
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Zone'lar</h2></div>
+  {{if .Zones}}
+  <table class="table">
+    <thead><tr><th>Zone</th><th>Müşteri</th><th class="right">Kayıt</th><th>DNSSEC</th><th>Yetki devri</th></tr></thead>
+    <tbody>
+    {{range .Zones}}<tr>
+      <td><a href="/dns/zones/{{.ID}}">{{.Name}}</a></td>
+      <td>{{if .CustomerID}}<a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a>{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="right">{{.RecordCount}}</td>
+      <td>{{if .DNSSEC}}<span class="badge success">açık</span>{{else}}<span class="muted small">kapalı</span>{{end}}</td>
+      <td><span hx-get="/dns/zones/{{.ID}}/delegation" hx-trigger="load" hx-swap="outerHTML"><span class="muted small">kontrol ediliyor…</span></span></td>
+    </tr>{{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="muted pad">Henüz zone yok.</p>{{end}}
+  <form method="post" action="/dns/zones" class="ops pad">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <input name="name" placeholder="ornek.com" required spellcheck="false" aria-label="Zone adı">
+    <select name="customer_id" aria-label="Müşteri">
+      <option value="0">Müşteri yok</option>
+      {{range .Customers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+    </select>
+    <label class="check"><input type="checkbox" name="dnssec" value="1"> <span>DNSSEC</span></label>
+    <button type="submit">Zone ekle</button>
+  </form>
+  <p class="muted small pad">Zone'a düşen sitelerin (domain, www, alias) A/AAAA kayıtları otomatik üretilir; aynı ada elle kayıt girerseniz sizinki geçerli olur.</p>
+</section>
+{{end}}
+{{end}}

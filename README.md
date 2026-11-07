@@ -8,6 +8,7 @@ Ubuntu 24.04 için tek yöneticili, ultra hafif hosting kontrol paneli: Go, tek 
 - **SSL:** Let's Encrypt (DNS + HTTP ön kontrolü, otomatik yenileme), CSR üretimi, ücretli sertifika doğrulama ve kurulumu, bitiş takibi.
 - **MSSQL 2025 (Docker):** müşteri başına login, izole veritabanları, dış erişim için IP allowlist + UFW.
 - **Yedekleme:** yerel + Google Drive (rclone, isteğe bağlı şifreleme). Planlar, saklama kuralları, geri yükleme/klon ve taşıma sihirbazı.
+- **DNS (kendi nameserver'larınız):** BIND 9 (yalnızca yetkili sunucu), zone ve kayıt yönetimi (A, AAAA, CNAME, MX, TXT, SRV, CAA, NS), sitelerin A/AAAA kayıtları otomatik, yetki devri kontrolü, isteğe bağlı DNSSEC.
 - **İzleme:** CPU/RAM/disk, site başına RAM/CPU, health check, çökme döngüsü tespiti, Telegram/e-posta bildirimleri.
 - **Log Merkezi:** işlem geçmişi, iş logları (canlı), sistem logları (nginx, journal, certbot, fail2ban, auth.log…).
 - **Site cron'ları,** Sunucu sayfası (servisler, güvenlik güncellemeleri, disk dağılımı, UFW).
@@ -67,6 +68,19 @@ ssh -L 8443:127.0.0.1:8443 kullanici@sunucu
 ```
 Ardından `https://127.0.0.1:8443` adresini açın.
 
+## Kendi nameserver'larınız (DNS)
+1. **DNS** sayfasında nameserver adlarını (ör. `ns1.alanadiniz.com`, `ns2.alanadiniz.com`), yönetici e-postasını ve sunucunun genel IP'lerini kaydedin.
+2. "DNS sunucusunu kur": Ubuntu deposundan BIND 9 kurulur.
+   - Yalnızca yetkili sunucu olarak çalışır: recursion ve zone transferi kapalı, yanıt hız sınırı (RRL) açık.
+   - UFW etkinse 53/udp + 53/tcp açılır. SSH kurallarına dokunulmaz.
+3. **Registrar'da glue kayıtları:** `alanadiniz.com`'un registrar'ında `ns1`/`ns2` için glue (child nameserver) kaydı açıp sunucu IP'sini girin. Tek sunucuda ikisi de aynı IP'yi gösterir. Bazı uzantıların registry'leri iki farklı IP isteyebilir; registrar'ınıza danışın.
+4. **Zone'lar:** zone ekleyin ya da site sihirbazında "DNS zone'u oluştur"u işaretleyin.
+   - Sitenin domain, www ve alias'ları için A/AAAA kayıtları otomatik üretilir; aynı ada elle kayıt girerseniz sizinki geçerli olur.
+   - Domain'in nameserver'larını registrar'da `ns1`/`ns2` yapın. Zone sayfasındaki "Yetki devri" alanı yayıldığında yeşile döner (birkaç saat sürebilir).
+5. **DNSSEC (isteğe bağlı):** zone ayarlarından açın; "DS kaydı"nı registrar'a girin. Kapatmadan önce DS'i registrar'dan kaldırın.
+
+Sunucu kapalıyken bu domain'ler çözülmez. E-posta gibi kritik hizmetler için bunu göz önünde bulundurun.
+
 ## Güncelleme
 - **Panelden:** Ayarlar → Güncelleme → "vX.Y.Z sürümüne güncelle".
   - Panel her gün yeni sürümü kontrol eder ve bildirim gönderir.
@@ -94,7 +108,7 @@ Varsayılan olarak yalnızca panel kaldırılır. Siteler çalışmaya devam ede
 
 ## Sunucu taşıma
 1. **Eski sunucu:** Ayarlar → Taşıma → parola (en az 12 karakter) ile `.hpcfg` dosyasını indirin.
-   - Dosyada admin hesabı + 2FA, ayarlar, bildirimler, müşteriler, yedek planları, Drive ayarları ve crypt anahtarları, özel runtime tanımları ve `master.key` bulunur.
+   - Dosyada admin hesabı + 2FA, ayarlar, bildirimler, müşteriler, yedek planları, DNS zone'ları ve kayıtları, Drive ayarları ve crypt anahtarları, özel runtime tanımları ve `master.key` bulunur.
    - Dosya argon2id + AES-256-GCM ile şifrelenir.
    - Siteler, veritabanları, sertifikalar ve geçmiş dosyada yer almaz.
    - Drive token'ı ve git deploy key'leri yalnızca root'ta durduğu için dışa aktarılmaz.
@@ -111,8 +125,9 @@ Varsayılan olarak yalnızca panel kaldırılır. Siteler çalışmaya devam ede
 3. **Yedekler → Ayarlar:**
    - rclone'u kurun ve Drive token'ını yeniden girin (crypt anahtarları dosyadan gelir).
    - "Drive'ı tara" ile yedekleri listeye alın.
-4. MSSQL kullanılıyorsa sunucuyu kurun ve müşteri login'lerini yeniden oluşturun (müşteri detayı).
-5. Siteleri oluşturup yedekten geri yükleyin. DNS'i yeni sunucuya çevirip SSL alın.
+4. DNS kullanılıyorsa: DNS → IP'leri kontrol edip kaydedin → "DNS sunucusunu kur"; registrar'da glue IP'lerini değiştirin. DNSSEC'li zone'lar yeni anahtarla imzalanır, yeni DS kaydını registrar'a girin.
+5. MSSQL kullanılıyorsa sunucuyu kurun ve müşteri login'lerini yeniden oluşturun (müşteri detayı).
+6. Siteleri oluşturup yedekten geri yükleyin. DNS'i yeni sunucuya çevirip SSL alın.
 
 ## Güvenlik özeti
 - **Yetki sınırı:**

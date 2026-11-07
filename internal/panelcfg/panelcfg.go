@@ -66,6 +66,7 @@ type Manifest struct {
 	Migrations []string  `json:"migrations"`
 	Customers  int       `json:"customers"`
 	Plans      int       `json:"plans"`
+	Zones      int       `json:"zones"`
 	Runtimes   []string  `json:"runtimes"`
 }
 
@@ -75,7 +76,7 @@ var ErrDecrypt = errors.New("dosya açılamadı: parola yanlış ya da dosya boz
 var runtimeName = regexp.MustCompile(`^[a-z0-9_-]{1,40}\.yaml$`)
 
 // Server-specific settings dropped from an export.
-var droppedSettings = []string{"server_id", "server_ips", "backup_rclone_installed"}
+var droppedSettings = []string{"server_id", "server_ips", "backup_rclone_installed", "dns_installed", "dns_ips"}
 
 // scrub turns a copy of the live database into an export: everything tied to
 // this server goes, history goes, plans lose their (now meaningless) site ids.
@@ -214,6 +215,7 @@ func scrubbedCopy(ctx context.Context, db *sql.DB, dir string) ([]byte, Manifest
 		}
 		cp.QueryRowContext(ctx, `SELECT COUNT(*) FROM customers`).Scan(&man.Customers)
 		cp.QueryRowContext(ctx, `SELECT COUNT(*) FROM backup_plans`).Scan(&man.Plans)
+		cp.QueryRowContext(ctx, `SELECT COUNT(*) FROM dns_zones`).Scan(&man.Zones)
 		if _, err := cp.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 			return err
 		}

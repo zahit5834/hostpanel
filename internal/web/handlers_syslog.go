@@ -42,6 +42,7 @@ var systemSources = []sysSource{
 	{ID: "update", Label: "Panel güncelleme"},
 	{ID: "docker", Label: "Docker servisi", Unit: "docker.service"},
 	{ID: "mssql", Label: "MSSQL container"},
+	{ID: "dns", Label: "DNS (BIND)", Unit: "named.service"},
 	{ID: "fail2ban", Label: "fail2ban"},
 	{ID: "sshauth", Label: "SSH / sistem girişleri (auth.log)"},
 }

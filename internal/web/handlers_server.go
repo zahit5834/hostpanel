@@ -54,6 +54,7 @@ const (
 var serverUnits = []struct{ Unit, Label string }{
 	{"nginx.service", "nginx"},
 	{"docker.service", "Docker"},
+	{"named.service", "BIND (DNS)"},
 	{"fail2ban.service", "fail2ban"},
 	{"hostpanel.service", "HostPanel"},
 	{"certbot.timer", "certbot (yenileme zamanlayıcısı)"},

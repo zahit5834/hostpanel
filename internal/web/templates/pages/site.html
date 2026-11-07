@@ -244,6 +244,7 @@
 {{end}}
 
 {{define "site-ssl"}}{{$d := .Data}}{{$s := $d.Site}}
+{{with $d.DNSZone}}<div class="alert info small">Bu domain'in DNS'i bu panelde yönetiliyor: <a href="/dns/zones/{{.ID}}">{{.Name}}</a>{{if .AutoSites}} (A/AAAA kayıtları otomatik){{end}}. Ön kontrolün geçmesi için registrar'da nameserver'ların bu sunucuyu göstermesi gerekir.</div>{{end}}
 {{with $d.Cert}}
 <section class="card">
   <div class="card-head">

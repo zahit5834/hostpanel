@@ -46,6 +46,9 @@ func TestExportImportRoundTrip(t *testing.T) {
 	for _, q := range []string{
 		`INSERT INTO settings(key, value) VALUES('acme_email','a@ornek.com'),('server_id','abc'),('server_ips','1.2.3.4'),('update_recorded_id','x'),('notify_kinds','["site.status"]')`,
 		`INSERT INTO customers(id, name, created_at, updated_at) VALUES(1, 'Acme', 0, 0)`,
+		`INSERT INTO dns_zones(id, name, customer_id, dnssec, created_at, updated_at) VALUES(1, 'ornek.com', 1, 1, 0, 0)`,
+		`INSERT INTO dns_records(zone_id, name, type, value, created_at) VALUES(1, '@', 'MX', 'mail.ornek.com', 0)`,
+		`INSERT INTO settings(key, value) VALUES('dns_ns1','ns1.ornek.com'),('dns_installed','1'),('dns_ips','1.2.3.4')`,
 		`INSERT INTO sites(id, customer_id, domain, short_name, runtime_id, status, created_at, updated_at) VALUES(1, 1, 'ornek.com', 'ornek', 'static', 'running', 0, 0)`,
 		`INSERT INTO backup_plans(name, scope, site_ids, components, schedule, destination, enabled, last_run_at, next_run_at, created_at, updated_at)
 		 VALUES('Hepsi','all','[]','["files"]','0 3 * * *','both',1,5,6,0,0),('Tek','sites','[1]','["files"]','0 4 * * *','local',1,5,6,0,0)`,
@@ -129,6 +132,10 @@ func TestExportImportRoundTrip(t *testing.T) {
 		`SELECT COUNT(*) FROM settings WHERE key='acme_email'`:                                  1,
 		`SELECT COUNT(*) FROM settings WHERE key IN ('server_id','server_ips')`:                 0,
 		`SELECT COUNT(*) FROM settings WHERE key LIKE 'update%'`:                                0,
+		`SELECT COUNT(*) FROM dns_zones WHERE name='ornek.com' AND customer_id=1 AND dnssec=1`:  1,
+		`SELECT COUNT(*) FROM dns_records`:                                                      1,
+		`SELECT COUNT(*) FROM settings WHERE key='dns_ns1'`:                                     1,
+		`SELECT COUNT(*) FROM settings WHERE key IN ('dns_installed','dns_ips')`:                0,
 		`SELECT COUNT(*) FROM backup_plans WHERE next_run_at=0`:                                 2,
 		`SELECT COUNT(*) FROM backup_plans WHERE scope='sites' AND enabled=0 AND site_ids='[]'`: 1,
 		`SELECT COUNT(*) FROM backup_plans WHERE scope='all' AND enabled=1`:                     1,

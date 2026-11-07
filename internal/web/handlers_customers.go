@@ -101,6 +101,9 @@ func (s *Server) customerDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	recent, _ := s.Activity.Query(r.Context(), logs.Filter{TargetIDs: targets, Limit: 20})
 	data := map[string]any{"C": c, "Sites": siteList, "Recent": recent, "DBs": dbs, "DBAvailable": s.DBs.Available(r.Context())}
+	if s.DNS != nil {
+		data["Zones"], _ = s.DNS.Store.Zones(r.Context(), c.ID)
+	}
 	if l, err := s.DBs.Store.LoginForCustomer(r.Context(), c.ID); err == nil {
 		data["Login"] = &l
 	}

@@ -1,0 +1,131 @@
+{{define "content"}}
+{{with .Data}}{{$z := .Zone}}
+<p><a href="/dns" class="small">← DNS</a></p>
+<div class="card-head">
+  <h1>{{$z.Name}}</h1>
+  <span class="muted small">serial {{$z.Serial}}{{if $z.CustomerID}} · <a href="/customers/{{$z.CustomerID}}">{{$z.CustomerName}}</a>{{end}}</span>
+</div>
+
+{{if .JobID}}{{template "job-console" .JobID}}{{end}}
+{{if not .Installed}}<div class="alert info">DNS sunucusu henüz kurulu değil: kayıtlar saklanır, <a href="/dns">BIND kurulunca</a> yayınlanır.</div>{{end}}
+{{if not .Settings.Ready}}<div class="alert err">Nameserver ayarları eksik; <a href="/dns">DNS sayfasından</a> ns1/ns2, yönetici e-postası ve IP'leri kaydedin.</div>{{end}}
+
+<div class="grid two">
+<section class="card stack">
+  <h2>Yetki devri</h2>
+  <div hx-get="/dns/zones/{{$z.ID}}/delegation?full=1" hx-trigger="load" hx-swap="innerHTML"><p class="muted small">kontrol ediliyor…</p></div>
+  <div class="stack">
+    <button type="button" hx-get="/dns/zones/{{$z.ID}}/check" hx-target="#dns-check" hx-swap="innerHTML">Yerel yanıtı kontrol et{{if $z.DNSSEC}} + DS kaydı{{end}}</button>
+    <div id="dns-check"></div>
+  </div>
+</section>
+
+<section class="card stack">
+  <h2>Zone ayarları</h2>
+  <form method="post" action="/dns/zones/{{$z.ID}}/settings" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <div class="form-grid">
+      <label>Müşteri
+        <select name="customer_id">
+          <option value="0">Müşteri yok</option>
+          {{range .Customers}}<option value="{{.ID}}" {{if eq .ID $z.CustomerID}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select></label>
+      <label>Varsayılan TTL (sn) <input type="number" name="default_ttl" min="60" max="604800" value="{{$z.DefaultTTL}}"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="auto_sites" value="1" {{if $z.AutoSites}}checked{{end}}> <span>Sitelerin A/AAAA kayıtlarını otomatik üret</span></label>
+    <label class="check"><input type="checkbox" name="dnssec" value="1" {{if $z.DNSSEC}}checked{{end}}> <span>DNSSEC (BIND anahtarları üretir ve otomatik imzalar)</span></label>
+    <p class="muted small">DNSSEC açıldıktan sonra "DS kaydı"nı registrar'a girin. <strong>Kapatmadan önce</strong> DS kaydını registrar'dan kaldırın ve TTL kadar bekleyin; yoksa zone çözülemez hale gelir.</p>
+    <div><button type="submit">Kaydet</button></div>
+  </form>
+</section>
+</div>
+
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Kayıtlar</h2></div>
+  <table class="table">
+    <thead><tr><th>Ad</th><th>Tip</th><th>Değer</th><th class="right">TTL</th><th></th></tr></thead>
+    <tbody>
+    <tr><td><code>@</code></td><td>NS</td><td>{{.Settings.NS1}}, {{.Settings.NS2}}</td><td class="right">{{$z.DefaultTTL}}</td><td class="muted small">otomatik</td></tr>
+    {{range .Records}}<tr>
+      <td><code>{{.Name}}</code></td><td>{{.Type}}</td><td>{{.Display}}</td>
+      <td class="right">{{if .TTL}}{{.TTL}}{{else}}<span class="muted">{{$z.DefaultTTL}}</span>{{end}}</td>
+      <td class="nowrap">
+        <a class="small" href="/dns/zones/{{$z.ID}}?edit={{.ID}}#record-form">Düzenle</a>
+        <form method="post" action="/dns/zones/{{$z.ID}}/records/{{.ID}}/delete" class="inline-form">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+          <button type="submit" class="link-btn small" data-confirm="{{fqdn . $z.Name}} {{.Type}} kaydı silinsin mi?">Sil</button>
+        </form>
+      </td>
+    </tr>{{end}}
+    {{range .Auto}}<tr class="muted">
+      <td><code>{{.Name}}</code></td><td>{{.Type}}</td><td>{{.Value}}</td><td class="right">{{$z.DefaultTTL}}</td>
+      <td class="small">otomatik · {{if eq .Source "nameserver"}}nameserver{{else}}<a href="/sites?q={{.Source}}">{{.Source}}</a>{{end}}</td>
+    </tr>{{end}}
+    </tbody>
+  </table>
+</section>
+
+<section class="card stack" id="record-form">
+  <h2>{{if .Edit.ID}}Kaydı düzenle{{else}}Kayıt ekle{{end}}</h2>
+  <form method="post" action="/dns/zones/{{$z.ID}}/records{{if .Edit.ID}}/{{.Edit.ID}}{{end}}" class="stack" x-data="dnsRecord" data-type="{{.Edit.Type}}">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <div class="form-grid">
+      <label>Ad <input name="name" value="{{.Edit.Name}}" placeholder="@, www, _dmarc, *.app" spellcheck="false">
+        <span class="muted small">Zone'a göreli; boş ya da <code>@</code> = {{$z.Name}}</span></label>
+      <label>Tip
+        <select name="type" x-model="type">
+          {{$t := .Edit.Type}}{{range dnsTypes}}<option value="{{.}}" {{if eq . $t}}selected{{end}}>{{.}}</option>{{end}}
+        </select></label>
+      <label x-show="hasPrio">Öncelik / CAA bayrağı <input type="number" name="prio" min="0" max="65535" value="{{.Edit.Prio}}"></label>
+      <label x-show="isSRV">Ağırlık <input type="number" name="weight" min="0" max="65535" value="{{.Edit.Weight}}"></label>
+      <label x-show="isSRV">Port <input type="number" name="port" min="0" max="65535" value="{{.Edit.Port}}"></label>
+      <label x-show="isCAA">CAA etiketi
+        <select name="tag">{{$tag := .Edit.Tag}}{{range caaTags}}<option value="{{.}}" {{if eq . $tag}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+      <label>Değer <input name="value" value="{{.Edit.Value}}" required spellcheck="false" x-bind:placeholder="placeholder">
+        <span class="muted small" x-text="hint"></span></label>
+      <label>TTL (sn) <input type="number" name="ttl" min="0" max="604800" value="{{if .Edit.TTL}}{{.Edit.TTL}}{{end}}" placeholder="{{$z.DefaultTTL}}">
+        <span class="muted small">Boş = zone varsayılanı</span></label>
+    </div>
+    <div><button type="submit" class="primary">{{if .Edit.ID}}Kaydet{{else}}Ekle{{end}}</button>{{if .Edit.ID}} <a class="button" href="/dns/zones/{{$z.ID}}">Vazgeç</a>{{end}}</div>
+  </form>
+</section>
+
+{{if .Preview}}
+<section class="card stack">
+  <details><summary>Zone dosyası önizlemesi</summary><pre>{{.Preview}}</pre>
+  <p class="muted small">Serial bir sonraki uygulamada artar.</p></details>
+</section>
+{{end}}
+
+<section class="card danger-zone">
+  <h2>Zone'u sil</h2>
+  <p class="muted small">Zone BIND'den kaldırılır; dosyası ve DNSSEC anahtarları <code>/var/backups/hostpanel/dns/</code> altına arşivlenir. Domain'ler bu sunucudan çözülmez hale gelir.</p>
+  <form method="post" action="/dns/zones/{{$z.ID}}/delete" class="ops">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <input name="confirm" placeholder="{{$z.Name}}" required spellcheck="false" aria-label="Onay için zone adı">
+    <button type="submit" class="danger">Sil</button>
+  </form>
+</section>
+{{end}}
+{{end}}
+
+{{define "dns-delegation"}}{{with .Data}}
+{{if .Full}}
+  {{if .D.OK}}<div class="alert ok small">Registrar bu sunucuyu gösteriyor: {{range $i, $n := .D.Found}}{{if $i}}, {{end}}{{$n}}{{end}}</div>
+  {{else}}<div class="alert err small">{{if .D.Err}}{{.D.Err}}{{else}}NS kayıtları farklı: {{range $i, $n := .D.Found}}{{if $i}}, {{end}}{{$n}}{{end}} — beklenen {{.Settings.NS1}}, {{.Settings.NS2}}{{end}}</div>{{end}}
+  <p class="muted small">Son kontrol: {{datetime .D.Checked}} · <a href="#" hx-get="/dns/zones/{{.Zone.ID}}/delegation?full=1&refresh=1" hx-target="closest div" hx-swap="innerHTML">yenile</a></p>
+{{else}}
+  {{if .D.OK}}<span class="badge success">yönlendirilmiş</span>{{else}}<span class="badge failed" title="{{if .D.Err}}{{.D.Err}}{{else}}{{range $i, $n := .D.Found}}{{if $i}}, {{end}}{{$n}}{{end}}{{end}}">yönlendirilmemiş</span>{{end}}
+{{end}}
+{{end}}{{end}}
+
+{{define "dns-check"}}{{with .Data}}
+{{if .DryRun}}<div class="alert info small">Dry-run: yerel BIND sorgulanmadı.</div>
+{{else if .LocalErr}}<div class="alert err small">{{.LocalErr}}</div>
+{{else}}<div class="alert ok small">Yerel BIND {{.Zone.Name}} için yanıt veriyor.</div>{{end}}
+{{if .Zone.DNSSEC}}
+  {{if .DSErr}}<div class="alert err small">{{.DSErr}}</div>
+  {{else if .DS}}<p class="small">Registrar'a girilecek DS kaydı:</p><pre>{{.DS}}</pre>
+  {{else}}<p class="muted small">DS kaydı henüz yok (BIND anahtarları zone uygulandıktan kısa süre sonra üretir).</p>{{end}}
+{{end}}
+{{end}}{{end}}

@@ -17,6 +17,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/crons"
 	"github.com/zahit5834/hostpanel/internal/customers"
 	"github.com/zahit5834/hostpanel/internal/databases"
+	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/logs"
 	"github.com/zahit5834/hostpanel/internal/runtimes"
@@ -58,6 +59,9 @@ type wizardData struct {
 	DBAvailable bool // MSSQL running: offer "create a database"
 	CreateDB    bool
 	Import      bool // "Mevcut siteyi taşı": continue on the Taşıma tab
+
+	DNSAvailable bool // panel DNS (BIND) installed: offer "create a zone"
+	CreateZone   bool
 }
 
 func (s *Server) siteNew(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +75,9 @@ func (s *Server) renderWizard(w http.ResponseWriter, r *http.Request, status int
 	cs, _ := s.Customers.List(r.Context(), "")
 	d := wizardData{Customers: cs, Runtimes: s.runtimeOptions(), In: in,
 		DBAvailable: s.DBs.Available(r.Context()), CreateDB: r.PostFormValue("create_db") == "1",
-		Import: r.FormValue("import") == "1"}
+		Import:       r.FormValue("import") == "1",
+		DNSAvailable: s.DNS != nil && s.DNS.Installed(r.Context()),
+		CreateZone:   r.Method == http.MethodGet || r.PostFormValue("create_zone") == "1"}
 	if p, ok := s.Runtimes.Get(in.RuntimeID); ok {
 		f := s.runtimeFieldsData(r, p, in.RuntimeVersion, in.Fields)
 		d.Fields = &f
@@ -152,6 +158,12 @@ func (s *Server) siteCreate(w http.ResponseWriter, r *http.Request) {
 	if r.PostFormValue("create_db") == "1" {
 		s.wizardDatabase(r, site)
 	}
+	if r.PostFormValue("create_zone") == "1" && s.DNS != nil && s.DNS.Installed(r.Context()) && s.DNS.ZoneCovering(r.Context(), site.Domain) == "" {
+		if _, _, err := s.DNS.CreateZone(r.Context(), site.Domain, site.CustomerID, false); err != nil {
+			s.Activity.Record(r.Context(), logs.Entry{Action: "dns.zone.create", TargetType: "dns_zone", TargetID: site.Domain,
+				Status: logs.StatusFailed, Error: err.Error(), Summary: "DNS zone'u oluşturulamadı: " + site.Domain}, nil)
+		}
+	}
 	tab := ""
 	if r.PostFormValue("import") == "1" {
 		tab = "&tab=import"
@@ -198,6 +210,7 @@ func (s *Server) loadSite(w http.ResponseWriter, r *http.Request) (sites.Site, b
 
 type siteData struct {
 	Site       sites.Site
+	DNSZone    *dns.Zone // panel zone serving the site's domain (SSL tab)
 	Def        *runtimes.Definition
 	Tab        string
 	Unit       string // systemctl is-active result
