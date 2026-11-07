@@ -203,7 +203,7 @@ apply() {
   write_status running health ""
   if healthy "$TO"; then
     log "health check başarılı: ${TO} çalışıyor"
-    write_status success done ""
+    write_status success "done" ""
     rm -rf -- "$stage"
     echo "=== güncelleme tamamlandı: ${FROM} → ${TO}"
     return 0

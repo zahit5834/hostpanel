@@ -312,8 +312,8 @@ FILTER
     warn "fail2ban filtresi örnek satırı eşleştirmedi; hostpanel jail'i kapalı yazıldı"
     on=false
   fi
-  local ports="443"
-  [[ $PORT == 443 ]] || ports="${PORT},443"
+  local f2b_ports="443"
+  [[ $PORT == 443 ]] || f2b_ports="${PORT},443"
   cat >/etc/fail2ban/jail.d/hostpanel.conf <<JAIL
 # HostPanel (written by install.sh). ignoreip keeps the installing admin's
 # address from being locked out; edit if that address changes.
@@ -322,7 +322,7 @@ enabled  = ${on}
 filter   = hostpanel
 logpath  = /var/log/hostpanel/auth.log
 backend  = auto
-port     = ${ports}
+port     = ${f2b_ports}
 maxretry = 5
 findtime = 15m
 bantime  = 1h

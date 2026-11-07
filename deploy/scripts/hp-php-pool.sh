@@ -26,10 +26,8 @@ case $action in
 
     # The socket lives in the setgid (www-data) site tree: it gets group
     # www-data, so nginx can connect and other sites cannot.
-    for d in "$dir/run"; do
-      [[ ! -L $d ]] || die "${d} symlink olamaz"
-      install -d -o "$user" -g www-data -m 2750 "$d"
-    done
+    [[ ! -L $dir/run ]] || die "${dir}/run symlink olamaz"
+    install -d -o "$user" -g www-data -m 2750 "$dir/run"
     [[ ! -L $dir/.sessions ]] || die "${dir}/.sessions symlink olamaz"
     install -d -o "$user" -g "$user" -m 0700 "$dir/.sessions"
     ensure_etc_dir

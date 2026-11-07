@@ -289,7 +289,6 @@ Faz 6 (sudo şifreli, temiz VM yok → script'ler birim testli + `bash -n`; dry-
 - [ ] Taşıma: VM1'de müşteri + plan + bildirim + 2FA → dışa aktar → VM2'de `install.sh --import f.hpcfg` → aynı şifre + 2FA ile giriş, müşteriler/planlar/bildirim ayarları geldi, siteler yok; yanlış parola anlaşılır hata
 - [ ] `sudo /opt/hostpanel/uninstall.sh` → siteler çalışmaya devam ediyor, `/etc/hostpanel` duruyor; ardından install.sh ile panel aynı ayarlarla geri geliyor; bayraklı silmeler yalnızca yazılı onayla
 - [ ] logrotate: `sudo logrotate -d /etc/logrotate.d/hostpanel`
-- [ ] shellcheck (yerelde hiç koşulmadı): `sudo apt install shellcheck && make lint`
 
 Faz 7 (sunucuda bind9 yok, sudo şifreli → dry-run + script birim testleri; `named-checkzone` hiç koşulmadı):
 - [ ] `sudo visudo -cf deploy/sudoers/hostpanel` (19 script); `hp-dns.sh` + güncel `lib.sh`, `hp-server.sh` → `/opt/hostpanel/scripts/` (ya da yeni sürümle güncelleme)
@@ -306,8 +305,8 @@ Faz 7 (sunucuda bind9 yok, sudo şifreli → dry-run + script birim testleri; `n
 - [ ] Önceden kurulu (panel dışı, zone'lu) BIND olan bir VM'de kurulum reddediliyor mu
 
 ## Açık konular
-- GitHub repo'su (`zahit5834/hostpanel`) henüz yok: oluşturulup push edilmeli, ilk tag `v0.1.0`; install.sh'ın `curl … raw.githubusercontent…` yolu ve panel güncellemesi ancak o zaman çalışır.
-- Sunucuda `make` ve `shellcheck` yok (`sudo apt install make shellcheck`). shellcheck binary'sini indirmek bu oturumda izinle engellendi → script'ler shellcheck'ten **geçirilmedi**; CI'da `-S error` ile koşar (ubuntu runner'da kurulu), yerelde de bir kez `shellcheck -S warning install.sh update.sh uninstall.sh deploy/*.sh deploy/scripts/*.sh deploy/scripts/runtimes/*.sh` önerilir.
+- GitHub repo'su `zahit5834/hostpanel` (SSH deploy key `~/.ssh/github_hostpanel`, `~/.ssh/config`). Tag'ler: v0.1.0 (Faz 6), v0.2.0 (Faz 7) — ikisinin release'i CI shellcheck hatası (SC2066) yüzünden düştü; ilk çalışan release v0.2.1.
+- shellcheck 0.9.0 + make sunucuda kurulu (2026-11-07): `make lint` (`-S error`) temiz; `-S warning`'de yalnızca `lib.sh` sabitleri için SC2034 (source eden script'ler kullanır) ve `test_lib.sh` kalır.
 - Dry-run'da kurulu runtime yoksa resmi listedeki sürümler "kurulu" sayılır (geliştirme kolaylığı); bu yüzden dev'de Altyapılar sayfasında "Kur" düğmesi görünmez.
 - Mevcut sitelerin nginx config'leri yeni şablon değişikliklerini ancak yeniden render edildiğinde alır (Gelişmiş → "nginx yapılandırmasını yeniden uygula"); güncelleme bunu otomatik yapmaz (bir şablon değişikliği gelirse güncelleme notunda belirtilmeli / ileride açılışta toplu uygulama).
 - Panel güncellemesinde sürüm düşürme yok (yalnızca bilinen son tag); CLI `update.sh vX.Y.Z` ile eski sürüme dönülebilir ama yeni migration'lı DB eski binary'de açılmaz (geri dönüş kopyası yalnızca başarısız güncellemede kullanılır).
