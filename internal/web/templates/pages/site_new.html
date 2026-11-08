@@ -52,10 +52,11 @@
     </div>
   </section>
 
-  {{if .DBAvailable}}
+  {{if or .DBAvailable .PGAvailable}}
   <section class="card stack">
     <h2>4 · Veritabanı</h2>
-    <label class="check"><input type="checkbox" name="create_db" value="1" {{if .CreateDB}}checked{{end}}> <span>MSSQL veritabanı oluştur <span class="muted small">— adı sitenin kısa adından türetilir, sahibi müşterinin login'i olur; .NET/Node sitelerinde connection string ortam değişkenine yazılır (.NET: <code>ConnectionStrings__DefaultConnection</code>, Node: <code>DATABASE_URL</code>).</span></span></label>
+    {{if .DBAvailable}}<label class="check"><input type="checkbox" name="create_db" value="1" {{if .CreateDB}}checked{{end}}> <span>MSSQL veritabanı oluştur <span class="muted small">— adı sitenin kısa adından türetilir, sahibi müşterinin login'i olur; .NET/Node sitelerinde connection string ortam değişkenine yazılır (.NET: <code>ConnectionStrings__DefaultConnection</code>, Node: <code>DATABASE_URL</code>).</span></span></label>{{end}}
+    {{if .PGAvailable}}<label class="check"><input type="checkbox" name="create_pgdb" value="1" {{if .CreatePGDB}}checked{{end}}> <span>PostgreSQL veritabanı oluştur <span class="muted small">— adı sitenin kısa adından türetilir, sahibi müşterinin rolü olur; bağlantı dizesi ortam değişkenine yazılır (.NET: Npgsql biçiminde <code>ConnectionStrings__DefaultConnection</code>, diğerleri: <code>DATABASE_URL=postgresql://…</code>).</span></span></label>{{end}}
   </section>
   {{end}}
 

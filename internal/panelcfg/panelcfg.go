@@ -82,7 +82,8 @@ var droppedSettings = []string{"server_id", "server_ips", "backup_rclone_install
 // this server goes, history goes, plans lose their (now meaningless) site ids.
 var scrub = []string{
 	`DELETE FROM cron_runs`, `DELETE FROM site_crons`, `DELETE FROM site_git`, `DELETE FROM health_checks`,
-	`DELETE FROM backups`, `DELETE FROM databases`, `DELETE FROM db_logins`, `DELETE FROM db_servers`,
+	`DELETE FROM backups`, `DELETE FROM pg_databases`, `DELETE FROM pg_roles`, `DELETE FROM pg_servers`,
+	`DELETE FROM databases`, `DELETE FROM db_logins`, `DELETE FROM db_servers`,
 	`DELETE FROM csrs`, `DELETE FROM certificates`, `DELETE FROM releases`, `DELETE FROM site_env`, `DELETE FROM sites`,
 	`DELETE FROM sessions`, `DELETE FROM login_attempts`, `DELETE FROM activity_log`, `DELETE FROM jobs`,
 	`UPDATE backup_plans SET last_run_at=0, next_run_at=0`,

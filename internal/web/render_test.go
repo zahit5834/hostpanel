@@ -31,7 +31,7 @@ func TestRendererCacheBounded(t *testing.T) {
 	if _, ok := r.cache["server"]; !ok {
 		t.Fatalf("recently used page evicted: %v", r.order)
 	}
-	if got := fmt.Sprint(r.order); got != "[settings_general settings_update settings_transfer login server dashboard]" {
+	if got := fmt.Sprint(r.order); got != "[settings_transfer login server dashboard]" {
 		t.Fatal(got)
 	}
 }

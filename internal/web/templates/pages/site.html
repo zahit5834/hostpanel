@@ -80,12 +80,13 @@
 {{template "site-health" (page $ $d.Health)}}
 
 <section class="card table-wrap">
-  <div class="card-head pad"><h2>Veritabanları</h2>{{if $d.DBAvailable}}<a class="small" href="/databases?customer={{$s.CustomerID}}&site={{$s.ID}}#new-db">Veritabanı oluştur →</a>{{end}}</div>
-  {{if $d.DBs}}
+  <div class="card-head pad"><h2>Veritabanları</h2><span class="ops">{{if $d.DBAvailable}}<a class="small" href="/databases?customer={{$s.CustomerID}}&site={{$s.ID}}#new-db">MSSQL veritabanı oluştur →</a>{{end}}{{if $d.PGAvailable}} <a class="small" href="/postgres?customer={{$s.CustomerID}}&site={{$s.ID}}#new-db">PostgreSQL veritabanı oluştur →</a>{{end}}</span></div>
+  {{if or $d.DBs $d.PGDBs}}
   <table class="table">
-    <thead><tr><th>Ad</th><th>Login</th><th>Ortam değişkeni</th><th class="right">Boyut</th><th>Durum</th></tr></thead>
+    <thead><tr><th>Ad</th><th>Motor</th><th>Login / rol</th><th>Ortam değişkeni</th><th class="right">Boyut</th><th>Durum</th></tr></thead>
     <tbody>
-    {{range $d.DBs}}<tr><td><a href="/databases"><code>{{.Name}}</code></a></td><td><code>{{.LoginName}}</code></td><td>{{if .EnvKey}}<code>{{.EnvKey}}</code>{{else}}<span class="muted">—</span>{{end}}</td><td class="right">{{if .SizeBytes}}{{size .SizeBytes}}{{else}}—{{end}}</td><td>{{template "site-badge" .Status}}</td></tr>{{end}}
+    {{range $d.DBs}}<tr><td><a href="/databases"><code>{{.Name}}</code></a></td><td>MSSQL</td><td><code>{{.LoginName}}</code></td><td>{{if .EnvKey}}<code>{{.EnvKey}}</code>{{else}}<span class="muted">—</span>{{end}}</td><td class="right">{{if .SizeBytes}}{{size .SizeBytes}}{{else}}—{{end}}</td><td>{{template "site-badge" .Status}}</td></tr>{{end}}
+    {{range $d.PGDBs}}<tr><td><a href="/postgres"><code>{{.Name}}</code></a></td><td>PostgreSQL</td><td><code>{{.RoleName}}</code></td><td>{{if .EnvKey}}<code>{{.EnvKey}}</code>{{else}}<span class="muted">—</span>{{end}}</td><td class="right">{{if .SizeBytes}}{{size .SizeBytes}}{{else}}—{{end}}</td><td>{{template "site-badge" .Status}}</td></tr>{{end}}
     </tbody>
   </table>
   {{else}}<p class="muted pad">Bu siteye bağlı veritabanı yok.</p>{{end}}
@@ -98,7 +99,7 @@
     <input type="hidden" name="_csrf" value="{{$.CSRF}}">
     <label>Onaylamak için domaini yazın: <strong>{{$s.Domain}}</strong>
       <input name="confirm" autocomplete="off" spellcheck="false" required></label>
-    {{if $d.DBs}}<label class="check"><input type="checkbox" name="drop_dbs" value="1"> <span>Veritabanlarını da sil ({{range $i, $db := $d.DBs}}{{if $i}}, {{end}}<code>{{$db.Name}}</code>{{end}}) <span class="muted small">— her biri silinmeden önce yedeklenir; işaretlenmezse veritabanları korunur ve siteden ayrılır.</span></span></label>{{end}}
+    {{if or $d.DBs $d.PGDBs}}<label class="check"><input type="checkbox" name="drop_dbs" value="1"> <span>Veritabanlarını da sil ({{range $i, $db := $d.DBs}}{{if $i}}, {{end}}<code>{{$db.Name}}</code>{{end}}{{if and $d.DBs $d.PGDBs}}, {{end}}{{range $i, $db := $d.PGDBs}}{{if $i}}, {{end}}<code>{{$db.Name}}</code>{{end}}) <span class="muted small">— her biri silinmeden önce yedeklenir; işaretlenmezse veritabanları korunur ve siteden ayrılır.</span></span></label>{{end}}
     <div><button type="submit" class="danger">Siteyi kalıcı olarak sil</button></div>
   </form>
 </section>
@@ -360,9 +361,28 @@ DNS henüz bu sunucuyu göstermiyorsa siteyi kendi bilgisayarınızda denemek i�
   <h2>1 · Dosyalar</h2>
   <p>Uygulamanın yayınlanmış halini zip olarak <a href="/sites/{{$s.ID}}?tab=deploy">Deploy</a> sekmesinden yükleyin{{if eq $d.Def.ID "dotnet"}} (<code>dotnet publish -c Release</code> çıktısı){{end}}. Kalıcı dizinlerdeki kullanıcı dosyaları (ör. yüklemeler) zip'te varsa ilk deploy'da <code>shared/</code>'a taşınmaz; bunları ayrı bir zip ile, kalıcı dizin ayarını sonradan ekleyerek aktarın.</p>
 </section>
+{{if $d.PGAvailable}}
 <section class="card stack">
-  <h2>2 · Veritabanı (.bak)</h2>
-  {{if not $d.DBAvailable}}<p class="muted">MSSQL sunucusu çalışmıyor. <a href="/databases">Veritabanları</a> sayfasından kurun.</p>{{else}}
+  <h2>2 · Veritabanı (PostgreSQL)</h2>
+  <p class="small">Eski sunucuda <strong>custom formatta</strong> döküm alın ve yükleyin:</p>
+  <pre>pg_dump -Fc -d &lt;veritabanı&gt; -f &lt;veritabanı&gt;.dump</pre>
+  <p class="muted small">Düz <code>.sql</code> dökümü kabul edilmez (psql meta komutları sunucuda komut çalıştırabilir). Döküm <strong>{{$s.CustomerName}}</strong> müşterisinin rolüyle (süper kullanıcı olmadan), tek işlem içinde geçici bir veritabanına yüklenir; başarılı olursa aynı adlı (bu müşteriye ait) veritabanının yerine geçer, başarısız olursa hiçbir şey değişmez. Sahiplik ve yetkiler yeni role göre kurulur; <code>pgcrypto</code>, <code>uuid-ossp</code>, <code>citext</code> gibi güvenilir uzantılar desteklenir.</p>
+  <form hx-post="/sites/{{$s.ID}}/import/pg" hx-encoding="multipart/form-data" hx-disabled-elt="find button" x-data="upload" class="stack">
+    <div class="form-grid">
+      <label>Veritabanı adı <input name="name" value="{{$d.DBNameHint}}" pattern="[a-z][a-z0-9_]{1,62}" required spellcheck="false"></label>
+      {{if $proxy}}<label>Ortam değişkeni <input name="env_key" placeholder="{{$d.EnvKeyHint}}" spellcheck="false"></label>{{end}}
+    </div>
+    {{if $proxy}}<label class="check"><input type="checkbox" name="write_env" value="1" checked> <span>Bağlantı dizesini ortam değişkenine yaz</span></label>{{end}}
+    <input type="file" name="dump" accept=".dump,.backup" required>
+    <progress class="upload-progress" max="100" value="0" x-show="active" x-bind:value="pct"></progress>
+    <div><button type="submit" class="primary">Yükle ve geri yükle</button> <span class="muted small" x-text="label"></span> <span class="muted small">En fazla {{$d.MaxBakMB}} MB.</span></div>
+  </form>
+</section>
+{{end}}
+{{if or $d.DBAvailable (not $d.PGAvailable)}}
+<section class="card stack">
+  <h2>2 · Veritabanı (MSSQL .bak)</h2>
+  {{if not $d.DBAvailable}}<p class="muted">Veritabanı sunucusu çalışmıyor. <a href="/databases">Veritabanları</a> sayfasından MSSQL ya da PostgreSQL kurun.</p>{{else}}
   <p class="small">Eski sunucuda SSMS ya da <code>BACKUP DATABASE [ad] TO DISK = N'…\ad.bak' WITH COPY_ONLY, INIT</code> ile alınmış tam yedeği yükleyin. Veritabanı <strong>{{$s.CustomerName}}</strong> müşterisinin login'ine ait olur; aynı adlı (bu müşteriye ait) bir veritabanı varsa üzerine yazılır.</p>
   <form hx-post="/sites/{{$s.ID}}/import/db" hx-encoding="multipart/form-data" hx-disabled-elt="find button" x-data="upload" class="stack">
     <div class="form-grid">
@@ -376,6 +396,7 @@ DNS henüz bu sunucuyu göstermiyorsa siteyi kendi bilgisayarınızda denemek i�
   </form>
   {{end}}
 </section>
+{{end}}
 {{if $proxy}}
 <section class="card stack">
   <h2>3 · Ortam değişkenleri</h2>

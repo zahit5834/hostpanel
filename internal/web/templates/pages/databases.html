@@ -4,6 +4,7 @@
   <h1>Veritabanları</h1>
   {{if and .Server (eq .Server.Status "running")}}<div class="actions"><a class="button primary" href="#new-db">Yeni veritabanı</a></div>{{end}}
 </div>
+{{template "db-tabs" "mssql"}}
 
 {{if .JobID}}{{template "job-console" .JobID}}{{end}}
 

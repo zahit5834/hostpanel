@@ -308,6 +308,21 @@ validate_mssql_pid() {
   [[ $1 =~ ^(Express|Developer|[A-Z0-9]{5}(-[A-Z0-9]{5}){4})$ ]] || die "geçersiz MSSQL_PID"
 }
 
+# validate_pg_image REF — only the official postgres image, pinned major.minor tag.
+validate_pg_image() {
+  [[ $1 =~ ^postgres:1[6-9]\.[0-9]{1,2}-(trixie|bookworm)$ ]] || die "izin verilmeyen imaj: $1"
+}
+
+# validate_pg_name NAME — PostgreSQL role/database names the panel manages.
+# Mirrors pgsql.ValidName: never a system name, a pg_ prefix or the isolation
+# test's hpiso_ prefix.
+validate_pg_name() {
+  [[ ${1:-} =~ ^[a-z][a-z0-9_]{1,62}$ ]] || die "geçersiz ad: '${1:-}'"
+  case $1 in
+    postgres | template0 | template1 | public | pg_* | hpiso_* | hprs_*) die "sistem adı kullanılamaz: $1" ;;
+  esac
+}
+
 # validate_ip_or_cidr V — charset/length check; ufw parses the value itself
 # (passed as one argv element, never through a shell).
 validate_ip_or_cidr() {
@@ -321,6 +336,20 @@ validate_ip_or_cidr() {
 
 BACKUP_ROOT=/var/backups/hostpanel
 MSSQL_HOST_BACKUP=/var/lib/hostpanel/mssql/backup
+# PostgreSQL dumps written by root on the host (pre-drop + backup staging);
+# kept outside the container's volume.
+PG_HOST_BACKUP=/var/lib/hostpanel/postgres-backup
+
+# check_db_dirs — the database directories sit in /var/lib/hostpanel, which the
+# panel user owns: it could replace one with a symlink (e.g. to /etc) before
+# root runs "install -d -m 0700 -o <uid>" on it or bind-mounts it into a
+# container. Every helper touching them refuses symlinks first.
+check_db_dirs() {
+  local d
+  for d in /var/lib/hostpanel/mssql /var/lib/hostpanel/postgres "$PG_HOST_BACKUP"; do
+    [[ ! -L $d ]] || die "${d} symlink olamaz"
+  done
+}
 # ROOT_LOG_DIR holds logs root writes and the panel reads. It must not live in
 # /var/log/hostpanel: that directory belongs to the panel user, who could plant
 # a symlink and make root append to (or chgrp) an arbitrary file.
@@ -384,7 +413,7 @@ validate_staged_bak() {
 
 # validate_backup_file NAME — files allowed inside a backup directory.
 validate_backup_file() {
-  [[ ${1:-} =~ ^(files\.tar\.zst|ssl\.tar\.zst|config\.json|nginx\.conf|manifest\.json|SHA256SUMS|db-[a-z][a-z0-9_]{1,62}\.bak)$ ]] || die "yedekte beklenmeyen dosya: '${1:-}'"
+  [[ ${1:-} =~ ^(files\.tar\.zst|ssl\.tar\.zst|config\.json|nginx\.conf|manifest\.json|SHA256SUMS|db-[a-z][a-z0-9_]{1,62}\.bak|db-pg-[a-z][a-z0-9_]{1,62}\.dump)$ ]] || die "yedekte beklenmeyen dosya: '${1:-}'"
 }
 
 # ---------------------------------------------------------------------------

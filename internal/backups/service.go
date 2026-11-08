@@ -26,6 +26,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
 	"github.com/zahit5834/hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/pgsql"
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/store"
 )
@@ -62,6 +63,7 @@ type Service struct {
 	Log        *slog.Logger
 	Sites      *sites.Service
 	DBs        *databases.Service
+	PG         *pgsql.Service
 	ScriptsDir string
 	UploadDir  string
 	DryRun     bool
@@ -453,16 +455,24 @@ func (s *Service) jobRun(ctx context.Context, l *jobs.Log, p map[string]any) err
 	return nil
 }
 
-// siteDBs lists the site's databases that can be backed up.
-func (s *Service) siteDBs(ctx context.Context, siteID int64) []databases.Database {
-	if s.DBs == nil {
-		return nil
+// siteDBs lists the site's databases that can be backed up (MSSQL first,
+// then PostgreSQL).
+func (s *Service) siteDBs(ctx context.Context, siteID int64) []ConfigDB {
+	var out []ConfigDB
+	if s.DBs != nil {
+		list, _ := s.DBs.Store.Databases(ctx, databases.DBFilter{SiteID: siteID})
+		for _, d := range list {
+			if d.Status == databases.DBReady {
+				out = append(out, ConfigDB{Name: d.Name, EnvKey: d.EnvKey})
+			}
+		}
 	}
-	list, _ := s.DBs.Store.Databases(ctx, databases.DBFilter{SiteID: siteID})
-	var out []databases.Database
-	for _, d := range list {
-		if d.Status == databases.DBReady {
-			out = append(out, d)
+	if s.PG != nil {
+		list, _ := s.PG.Store.Databases(ctx, pgsql.DBFilter{SiteID: siteID})
+		for _, d := range list {
+			if d.Status == pgsql.DBReady {
+				out = append(out, ConfigDB{Name: d.Name, EnvKey: d.EnvKey, Engine: EnginePostgres})
+			}
 		}
 	}
 	return out
@@ -479,7 +489,7 @@ func (s *Service) runBackup(ctx context.Context, l *jobs.Log, site sites.Site, k
 		l.Printf("%s: henüz deploy edilmiş sürüm yok, dosyalar atlandı", site.Domain)
 		comps = slices.DeleteFunc(comps, func(c string) bool { return c == CompFiles })
 	}
-	var dbs []databases.Database
+	var dbs []ConfigDB
 	if slices.Contains(comps, CompDB) {
 		if dbs = s.siteDBs(ctx, site.ID); len(dbs) == 0 {
 			l.Printf("%s: siteye bağlı veritabanı yok, DB bileşeni atlandı", site.Domain)
@@ -512,17 +522,25 @@ func (s *Service) runBackup(ctx context.Context, l *jobs.Log, site sites.Site, k
 	return b, nil
 }
 
-func (s *Service) create(ctx context.Context, l *jobs.Log, site sites.Site, b Backup, active string, dbs []databases.Database) (int64, error) {
+func (s *Service) create(ctx context.Context, l *jobs.Log, site sites.Site, b Backup, active string, dbs []ConfigDB) (int64, error) {
 	var cfgDBs []ConfigDB
 	var dbNames []string
 	for _, d := range dbs {
-		path := mssqlBackupDir + "/hpbk-" + b.Name + "-" + d.Name + ".bak"
-		l.Printf("Veritabanı yedekleniyor: %s", d.Name)
-		if err := s.DBs.BackupTo(ctx, l, d.Name, path); err != nil {
-			return 0, fmt.Errorf("veritabanı %s: %w", d.Name, err)
+		if d.IsPG() {
+			l.Printf("PostgreSQL veritabanı yedekleniyor (pg_dump): %s", d.Name)
+			if err := s.PG.DumpTo(ctx, l, d.Name, "hpbk-"+b.Name+"-"+d.Name); err != nil {
+				return 0, fmt.Errorf("veritabanı %s: %w", d.Name, err)
+			}
+			dbNames = append(dbNames, "pg:"+d.Name)
+		} else {
+			path := mssqlBackupDir + "/hpbk-" + b.Name + "-" + d.Name + ".bak"
+			l.Printf("Veritabanı yedekleniyor: %s", d.Name)
+			if err := s.DBs.BackupTo(ctx, l, d.Name, path); err != nil {
+				return 0, fmt.Errorf("veritabanı %s: %w", d.Name, err)
+			}
+			dbNames = append(dbNames, d.Name)
 		}
-		cfgDBs = append(cfgDBs, ConfigDB{Name: d.Name, EnvKey: d.EnvKey})
-		dbNames = append(dbNames, d.Name)
+		cfgDBs = append(cfgDBs, d)
 	}
 	var env map[string]string
 	if b.Has(CompConfig) {
@@ -1110,10 +1128,7 @@ func (s *Service) readConfig(ctx context.Context, l *jobs.Log, b Backup) (SiteCo
 			return SiteConfig{}, errors.New("[DRY-RUN] kaynak site yok, config.json okunamadı")
 		}
 		env, _ := s.Sites.Store.EnvSealed(ctx, src.ID)
-		var dbs []ConfigDB
-		for _, d := range s.siteDBs(ctx, src.ID) {
-			dbs = append(dbs, ConfigDB{Name: d.Name, EnvKey: d.EnvKey})
-		}
+		dbs := s.siteDBs(ctx, src.ID)
 		l.Printf("[DRY-RUN] config.json yerine kaynak sitenin güncel ayarları kullanılıyor")
 		cfg := ConfigFor(src, s.Sites.Store.ActiveRelease(ctx, src.ID), env, dbs)
 		cfg.Crons, cfg.Git = s.configExtras(ctx, src.ID)
@@ -1307,28 +1322,58 @@ func (s *Service) restoreConfig(ctx context.Context, l *jobs.Log, cfg SiteConfig
 }
 
 // restoreDBs restores each backed-up database. Same site: under its own
-// name. Clone: onto the target site's databases in order, extra ones as new
-// databases named after the target; connection strings are rewritten for
-// the target.
+// name. Clone: onto the target site's databases of the same engine in order,
+// extra ones as new databases named after the target; connection strings are
+// rewritten for the target.
 func (s *Service) restoreDBs(ctx context.Context, l *jobs.Log, b Backup, cfg SiteConfig, target sites.Site, clone bool) error {
-	if s.DBs == nil || !s.DBs.Available(ctx) {
-		return errors.New("MSSQL sunucusu çalışmıyor, veritabanları geri yüklenemedi")
+	var existMS, existPG []ConfigDB
+	for _, d := range s.siteDBs(ctx, target.ID) {
+		if d.IsPG() {
+			existPG = append(existPG, d)
+		} else {
+			existMS = append(existMS, d)
+		}
 	}
-	existing := s.siteDBs(ctx, target.ID)
-	for i, src := range cfg.Databases {
+	nMS, nPG := 0, 0
+	for _, src := range cfg.Databases {
+		pg := src.IsPG()
+		if pg && (s.PG == nil || !s.PG.Available(ctx)) {
+			return errors.New("PostgreSQL sunucusu çalışmıyor, veritabanları geri yüklenemedi")
+		}
+		if !pg && (s.DBs == nil || !s.DBs.Available(ctx)) {
+			return errors.New("MSSQL sunucusu çalışmıyor, veritabanları geri yüklenemedi")
+		}
 		name := src.Name
 		if clone {
-			if i < len(existing) {
-				name = existing[i].Name
+			if pg {
+				if nPG < len(existPG) {
+					name = existPG[nPG].Name
+				} else {
+					name = s.freePGName(ctx, pgsql.DBBase(target.ShortName))
+				}
+				nPG++
 			} else {
-				name = s.freeDBName(ctx, databases.DBBase(target.ShortName))
+				if nMS < len(existMS) {
+					name = existMS[nMS].Name
+				} else {
+					name = s.freeDBName(ctx, databases.DBBase(target.ShortName))
+				}
+				nMS++
 			}
+		}
+		l.Printf("Veritabanı geri yükleniyor: %s → %s", src.Name, name)
+		if pg {
+			_, err := s.PG.RestoreFrom(ctx, l, pgsql.Source{Domain: b.Domain, Backup: b.Name, DB: src.Name},
+				pgsql.CreateInput{CustomerID: target.CustomerID, Name: name, SiteID: target.ID, WriteEnv: true, EnvKey: src.EnvKey})
+			if err != nil {
+				return fmt.Errorf("veritabanı %s: %w", name, err)
+			}
+			continue
 		}
 		staged := "hprs-" + b.Name + "-" + src.Name + ".bak"
 		if _, err := s.helper(ctx, l, nil, nil, 30*time.Minute, "stage-db", b.Domain, b.Name, src.Name, staged); err != nil {
 			return err
 		}
-		l.Printf("Veritabanı geri yükleniyor: %s → %s", src.Name, name)
 		_, err := s.DBs.RestoreFrom(ctx, l, mssqlBackupDir+"/"+staged, databases.CreateInput{CustomerID: target.CustomerID,
 			Name: name, SiteID: target.ID, WriteEnv: true, EnvKey: src.EnvKey})
 		s.helper(context.WithoutCancel(ctx), l, nil, nil, time.Minute, "unstage", staged)
@@ -1337,6 +1382,14 @@ func (s *Service) restoreDBs(ctx context.Context, l *jobs.Log, b Backup, cfg Sit
 		}
 	}
 	return nil
+}
+
+func (s *Service) freePGName(ctx context.Context, base string) string {
+	name := base
+	for i := 2; s.PG.Store.DBNameTaken(ctx, name); i++ {
+		name = fmt.Sprintf("%s_%d", base, i)
+	}
+	return name
 }
 
 func (s *Service) freeDBName(ctx context.Context, base string) string {

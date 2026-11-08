@@ -22,7 +22,8 @@ import (
 // Log Center → Sistem Logları. Every source is read without root: panel files,
 // files in /var/log readable by the adm group (nginx, auth.log, fail2ban),
 // root-helper logs in RootLogDir (group hostpanel), the systemd journal
-// (systemd-journal group). Only the MSSQL container log goes through a helper.
+// (systemd-journal group). Only the container logs (MSSQL, PostgreSQL) go
+// through a helper.
 
 type sysSource struct {
 	ID, Label string
@@ -42,6 +43,7 @@ var systemSources = []sysSource{
 	{ID: "update", Label: "Panel güncelleme"},
 	{ID: "docker", Label: "Docker servisi", Unit: "docker.service"},
 	{ID: "mssql", Label: "MSSQL container"},
+	{ID: "postgres", Label: "PostgreSQL container"},
 	{ID: "dns", Label: "DNS (BIND)", Unit: "named.service"},
 	{ID: "fail2ban", Label: "fail2ban"},
 	{ID: "sshauth", Label: "SSH / sistem girişleri (auth.log)"},
@@ -178,6 +180,8 @@ func (s *Server) readSysLines(ctx context.Context, sq sysQuery) []string {
 	case sq.Src.ID == "mssql":
 		// docker logs needs the docker socket (root): read through hp-mssql.sh.
 		return s.filterLines(sq, s.DBs.ContainerLogs(ctx, sq.N))
+	case sq.Src.ID == "postgres":
+		return s.filterLines(sq, s.PG.ContainerLogs(ctx, sq.N))
 	case sq.Src.Site && sq.Site == nil && sq.Src.ID == "site":
 		return []string{"(bir site seçin)"}
 	case sq.Unit != "":

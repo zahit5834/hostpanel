@@ -20,6 +20,7 @@
 # and UFW rules apply as for any other service.
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
+check_db_dirs
 [[ $# -ge 1 ]] || die "kullanım: $(basename "$0") install-docker|create|remove-container|purge|start|stop|restart|status|logs|firewall|firewall-clear …"
 action=$1
 shift

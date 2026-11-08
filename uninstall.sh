@@ -3,7 +3,7 @@
 #
 # By default only the panel goes: service, unit, sudoers, /opt/hostpanel, the
 # panel's nginx vhost, fail2ban jail and logrotate rule. Sites keep running,
-# MSSQL keeps running, backups stay, UFW rules are not touched, and the panel's
+# MSSQL/PostgreSQL keep running, backups stay, UFW rules are not touched, and the panel's
 # config/database stay in /etc/hostpanel and /var/lib/hostpanel (re-running
 # install.sh brings the panel back as it was).
 #
@@ -11,7 +11,8 @@
 #   --purge-config      panel database, config, master.key, logs, hostpanel user
 #                       (site env/PHP files are kept while sites remain)
 #   --delete-sites      all hp-* sites: services, nginx configs, site users, /var/www/sites
-#   --delete-databases  the hostpanel-mssql container and its data (all databases!)
+#   --delete-databases  the hostpanel-mssql and hostpanel-postgres containers and
+#                       their data (all databases!)
 #   --delete-backups    /var/backups/hostpanel (local backups; Drive copies are not touched)
 set -euo pipefail
 
@@ -53,7 +54,7 @@ if ((SITES)); then
   typed SITELERI-SIL "TÜM siteler (servisler, nginx config'leri, site kullanıcıları, /var/www/sites) silinecek." || fail "iptal edildi"
 fi
 if ((DBS)); then
-  typed VERITABANLARINI-SIL "MSSQL container'ı ve TÜM veritabanları (/var/lib/hostpanel/mssql) silinecek." || fail "iptal edildi"
+  typed VERITABANLARINI-SIL "MSSQL ve PostgreSQL container'ları ve TÜM veritabanları (/var/lib/hostpanel/{mssql,postgres,postgres-backup}) silinecek." || fail "iptal edildi"
 fi
 if ((BACKUPS)); then
   typed YEDEKLERI-SIL "Yerel yedekler (/var/backups/hostpanel) silinecek; Drive'dakiler kalır." || fail "iptal edildi"
@@ -104,11 +105,11 @@ if ((SITES)); then
 fi
 
 if ((DBS)); then
-  say "MSSQL siliniyor"
+  say "MSSQL ve PostgreSQL siliniyor"
   if command -v docker >/dev/null; then
-    docker rm -f hostpanel-mssql >/dev/null 2>&1 || true
+    docker rm -f hostpanel-mssql hostpanel-postgres >/dev/null 2>&1 || true
   fi
-  rm -rf /var/lib/hostpanel/mssql
+  rm -rf /var/lib/hostpanel/mssql /var/lib/hostpanel/postgres /var/lib/hostpanel/postgres-backup
 fi
 
 if ((BACKUPS)); then
@@ -120,9 +121,9 @@ if ((PURGE)); then
   say "Panel verileri siliniyor"
   rm -f /etc/hostpanel/config.yaml /etc/hostpanel/master.key /etc/hostpanel/rclone.conf /etc/hostpanel/rclone-sa.json
   rm -rf /etc/hostpanel/runtimes /etc/hostpanel/panel-tls /var/log/hostpanel /var/log/hostpanel-root
-  # /var/lib/hostpanel: keep the MSSQL data unless it was deleted above.
+  # /var/lib/hostpanel: keep the database data unless it was deleted above.
   if [[ -d /var/lib/hostpanel ]]; then
-    find /var/lib/hostpanel -mindepth 1 -maxdepth 1 ! -name mssql -exec rm -rf {} +
+    find /var/lib/hostpanel -mindepth 1 -maxdepth 1 ! -name mssql ! -name postgres ! -name postgres-backup -exec rm -rf {} +
     rmdir /var/lib/hostpanel 2>/dev/null || true
   fi
   rmdir /etc/hostpanel/ssl 2>/dev/null || true
@@ -133,7 +134,7 @@ fi
 echo
 say "HostPanel kaldırıldı."
 ((SITES)) || echo "    Siteler çalışmaya devam ediyor (hp-site-* servisleri, /var/www/sites)."
-((DBS)) || echo "    MSSQL container'ı ve veritabanları duruyor."
+((DBS)) || echo "    MSSQL/PostgreSQL container'ları ve veritabanları duruyor."
 [[ ! -f /etc/bind/.hostpanel ]] || echo "    DNS sunucusu (BIND) çalışmaya devam ediyor; zone'lar /var/lib/bind/hostpanel (apt purge bind9 ile kaldırılır)."
 ((BACKUPS)) || echo "    Yerel yedekler: /var/backups/hostpanel"
 ((PURGE)) || echo "    Panel ayarları: /etc/hostpanel, /var/lib/hostpanel (install.sh ile geri kurulur)."

@@ -20,6 +20,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/pgsql"
 	"github.com/zahit5834/hostpanel/internal/runtimes"
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
@@ -58,6 +59,8 @@ type wizardData struct {
 
 	DBAvailable bool // MSSQL running: offer "create a database"
 	CreateDB    bool
+	PGAvailable bool // PostgreSQL running
+	CreatePGDB  bool
 	Import      bool // "Mevcut siteyi taşı": continue on the Taşıma tab
 
 	DNSAvailable bool // panel DNS (BIND) installed: offer "create a zone"
@@ -75,6 +78,7 @@ func (s *Server) renderWizard(w http.ResponseWriter, r *http.Request, status int
 	cs, _ := s.Customers.List(r.Context(), "")
 	d := wizardData{Customers: cs, Runtimes: s.runtimeOptions(), In: in,
 		DBAvailable: s.DBs.Available(r.Context()), CreateDB: r.PostFormValue("create_db") == "1",
+		PGAvailable: s.PG.Available(r.Context()), CreatePGDB: r.PostFormValue("create_pgdb") == "1",
 		Import:       r.FormValue("import") == "1",
 		DNSAvailable: s.DNS != nil && s.DNS.Installed(r.Context()),
 		CreateZone:   r.Method == http.MethodGet || r.PostFormValue("create_zone") == "1"}
@@ -158,6 +162,9 @@ func (s *Server) siteCreate(w http.ResponseWriter, r *http.Request) {
 	if r.PostFormValue("create_db") == "1" {
 		s.wizardDatabase(r, site)
 	}
+	if r.PostFormValue("create_pgdb") == "1" {
+		s.wizardPGDatabase(r, site)
+	}
 	if r.PostFormValue("create_zone") == "1" && s.DNS != nil && s.DNS.Installed(r.Context()) && s.DNS.ZoneCovering(r.Context(), site.Domain) == "" {
 		if _, _, err := s.DNS.CreateZone(r.Context(), site.Domain, site.CustomerID, false); err != nil {
 			s.Activity.Record(r.Context(), logs.Entry{Action: "dns.zone.create", TargetType: "dns_zone", TargetID: site.Domain,
@@ -187,6 +194,21 @@ func (s *Server) wizardDatabase(r *http.Request, site sites.Site) {
 	if _, _, err := s.DBs.StartCreate(r.Context(), in); err != nil {
 		s.Activity.Record(r.Context(), logs.Entry{Action: "db.create", TargetType: "database", TargetID: name,
 			Status: logs.StatusFailed, Error: err.Error(), Summary: "Site için veritabanı oluşturulamadı: " + site.Domain}, nil)
+	}
+}
+
+// wizardPGDatabase is wizardDatabase for PostgreSQL.
+func (s *Server) wizardPGDatabase(r *http.Request, site sites.Site) {
+	base := pgsql.DBBase(site.ShortName)
+	name := base
+	for i := 2; s.PG.Store.DBNameTaken(r.Context(), name); i++ {
+		name = base + "_" + strconv.Itoa(i)
+	}
+	p, ok := s.Runtimes.Get(site.RuntimeID)
+	in := pgsql.CreateInput{CustomerID: site.CustomerID, Name: name, SiteID: site.ID, WriteEnv: ok && p.Def().HasUnit()}
+	if _, _, err := s.PG.StartCreate(r.Context(), in); err != nil {
+		s.Activity.Record(r.Context(), logs.Entry{Action: "pg.db.create", TargetType: "database", TargetID: name,
+			Status: logs.StatusFailed, Error: err.Error(), Summary: "Site için PostgreSQL veritabanı oluşturulamadı: " + site.Domain}, nil)
 	}
 }
 
@@ -232,6 +254,8 @@ type siteData struct {
 
 	DBs         []databases.Database
 	DBAvailable bool
+	PGDBs       []pgsql.Database
+	PGAvailable bool
 	Health      healthData
 
 	Backups    []backups.Backup
@@ -299,6 +323,8 @@ func (s *Server) renderSiteWith(w http.ResponseWriter, r *http.Request, status i
 	d.Active = s.Sites.Store.ActiveRelease(ctx, site.ID)
 	d.DBs, _ = s.DBs.Store.Databases(ctx, databases.DBFilter{SiteID: site.ID})
 	d.DBAvailable = s.DBs.Available(ctx)
+	d.PGDBs, _ = s.PG.Store.Databases(ctx, pgsql.DBFilter{SiteID: site.ID})
+	d.PGAvailable = s.PG.Available(ctx)
 	if pre != nil {
 		pre(&d)
 	}

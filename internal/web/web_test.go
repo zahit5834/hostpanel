@@ -35,6 +35,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
+	"github.com/zahit5834/hostpanel/internal/pgsql"
 	"github.com/zahit5834/hostpanel/internal/runtimes"
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
@@ -86,8 +87,11 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	dbSvc := &databases.Service{Store: databases.NewStore(db), DB: db, Box: box, Runner: runner, Jobs: jm, Activity: act,
 		Log: log, Sites: svc, ScriptsDir: cfg.ScriptsDir, DryRun: true, Fake: databases.NewFakeServer("")}
 	dbSvc.Register()
+	pgSvc := &pgsql.Service{Store: pgsql.NewStore(db), DB: db, Box: box, Runner: runner, Jobs: jm, Activity: act,
+		Log: log, Sites: svc, ScriptsDir: cfg.ScriptsDir, UploadDir: svc.UploadDir, DryRun: true}
+	pgSvc.Register()
 	bkSvc := &backups.Service{Store: backups.NewStore(db), DB: db, Box: box, Runner: runner, Probe: probe, Jobs: jm,
-		Activity: act, Log: log, Sites: svc, DBs: dbSvc, ScriptsDir: cfg.ScriptsDir, UploadDir: svc.UploadDir, DryRun: true}
+		Activity: act, Log: log, Sites: svc, DBs: dbSvc, PG: pgSvc, ScriptsDir: cfg.ScriptsDir, UploadDir: svc.UploadDir, DryRun: true}
 	bkSvc.Register()
 	notifySvc := &notify.Service{DB: db, Box: box, Activity: act, Log: log, Client: &http.Client{Transport: noNetwork{}}}
 	sslSvc.Notify, bkSvc.Notify = notifySvc.Send, notifySvc.Send
@@ -104,7 +108,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 		}}
 	dnsSvc.Register()
 	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
-		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc,
+		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, PG: pgSvc, Backups: bkSvc,
 		Monitor: monSvc, Notify: notifySvc, DNS: dnsSvc,
 		Crons: &crons.Service{Store: crons.NewStore(db), Sites: svc, Runner: runner, Activity: act, Log: log,
 			ScriptsDir: cfg.ScriptsDir, DryRun: true, Notify: notifySvc.Send}, BaseCtx: ctx}

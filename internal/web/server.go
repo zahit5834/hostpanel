@@ -29,6 +29,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
+	"github.com/zahit5834/hostpanel/internal/pgsql"
 	"github.com/zahit5834/hostpanel/internal/runtimes"
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
@@ -55,6 +56,7 @@ type Server struct {
 	Runtimes  *runtimes.Registry
 	SSL       *ssl.Service
 	DBs       *databases.Service
+	PG        *pgsql.Service
 	Backups   *backups.Service
 	Monitor   *monitor.Service
 	Notify    *notify.Service

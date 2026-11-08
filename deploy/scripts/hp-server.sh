@@ -7,7 +7,7 @@
 #   hp-server.sh ufw-delete <rule-number> <hash>
 #       hash = first 16 hex of sha256 of the rule's "ufw status numbered" line
 #       as the panel saw it: if the list changed meanwhile, nothing is deleted.
-#   hp-server.sh disk-usage           key=bytes lines (sites, backups, mssql, docker, panel, logs)
+#   hp-server.sh disk-usage           key=bytes lines (sites, backups, mssql, postgres, docker, panel, logs)
 #
 # The panel never enables or disables UFW (SSH lock-out risk); rules are only
 # added/removed while UFW is already active. Rules for SSH (22 and sshd's real
@@ -86,6 +86,7 @@ case $action in
     got=$(printf '%s' "$line" | sha256sum | cut -c1-16)
     [[ $got == "$want" ]] || die "kural listesi değişti; sayfayı yenileyip tekrar deneyin"
     [[ $line != *hostpanel-mssql* ]] || die "MSSQL kuralları Veritabanları sayfasından yönetilir"
+    [[ $line != *hostpanel-pg* ]] || die "PostgreSQL kuralları Veritabanları → PostgreSQL sayfasından yönetilir"
     [[ $line != *hostpanel-dns* ]] || die "DNS sunucusunun 53 kuralları panelden silinemez"
     to=$(sed -E 's/^\[ *[0-9]+\] +//' <<<"$line" | awk '{print $1}')
     spec=${to%%/*}
@@ -104,8 +105,10 @@ case $action in
     echo "sites=$(du_b /var/www/sites)"
     echo "backups=$(du_b /var/backups/hostpanel)"
     echo "mssql=$(du_b /var/lib/hostpanel/mssql)"
+    pg=$(($(du_b /var/lib/hostpanel/postgres) + $(du_b /var/lib/hostpanel/postgres-backup)))
+    echo "postgres=$pg"
     echo "docker=$(du_b /var/lib/docker)"
-    echo "panel=$(du_b /var/lib/hostpanel --exclude=/var/lib/hostpanel/mssql)"
+    echo "panel=$(du_b /var/lib/hostpanel --exclude=/var/lib/hostpanel/mssql --exclude=/var/lib/hostpanel/postgres --exclude=/var/lib/hostpanel/postgres-backup)"
     echo "logs=$(du_b /var/log)"
     ;;
 

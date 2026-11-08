@@ -30,7 +30,7 @@
     <a href="/sites" class="{{if eq .Nav "sites"}}active{{end}}">Siteler</a>
     <a href="/runtimes" class="{{if eq .Nav "runtimes"}}active{{end}}">Altyapılar</a>
     <a href="/ssl" class="{{if eq .Nav "ssl"}}active{{end}}">SSL</a>
-    <a href="/databases" class="{{if eq .Nav "databases"}}active{{end}}">Veritabanları</a>
+    <a href="/databases" class="{{if or (eq .Nav "databases") (eq .Nav "postgres")}}active{{end}}">Veritabanları</a>
     <a href="/dns" class="{{if eq .Nav "dns"}}active{{end}}">DNS</a>
     <a href="/backups" class="{{if eq .Nav "backups"}}active{{end}}">Yedekler</a>
     <a href="/server" class="{{if eq .Nav "server"}}active{{end}}">Sunucu</a>

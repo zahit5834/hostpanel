@@ -58,6 +58,9 @@ func TestExportImportRoundTrip(t *testing.T) {
 		}
 	}
 	db.Exec(`INSERT INTO activity_log(ts, source, action, status, summary) VALUES(?, 'user', 'x', 'success', 'y')`, now)
+	mustExec(t, db, `INSERT INTO pg_servers(image, memory_mb, status, created_at, updated_at) VALUES('postgres:18.6-trixie', 2048, 'running', ?, ?)`, now, now)
+	mustExec(t, db, `INSERT INTO pg_roles(customer_id, name, password_sealed, created_at, updated_at) VALUES(1, 'c_x', 'sealed', ?, ?)`, now, now)
+	mustExec(t, db, `INSERT INTO pg_databases(customer_id, role_id, name, status, created_at) VALUES(1, 1, 'x_db', 'ready', ?)`, now)
 	rt := filepath.Join(src, "runtimes")
 	os.MkdirAll(rt, 0o755)
 	os.WriteFile(filepath.Join(rt, "static.yaml"), []byte("id: static # old shipped\n"), 0o644)
@@ -133,6 +136,9 @@ func TestExportImportRoundTrip(t *testing.T) {
 		`SELECT COUNT(*) FROM settings WHERE key IN ('server_id','server_ips')`:                 0,
 		`SELECT COUNT(*) FROM settings WHERE key LIKE 'update%'`:                                0,
 		`SELECT COUNT(*) FROM dns_zones WHERE name='ornek.com' AND customer_id=1 AND dnssec=1`:  1,
+		`SELECT COUNT(*) FROM pg_servers`:                                                       0,
+		`SELECT COUNT(*) FROM pg_roles`:                                                         0,
+		`SELECT COUNT(*) FROM pg_databases`:                                                     0,
 		`SELECT COUNT(*) FROM dns_records`:                                                      1,
 		`SELECT COUNT(*) FROM settings WHERE key='dns_ns1'`:                                     1,
 		`SELECT COUNT(*) FROM settings WHERE key IN ('dns_installed','dns_ips')`:                0,
@@ -181,5 +187,12 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 	future.Format = 2
 	if err := future.check(); err == nil {
 		t.Fatal("format 2 accepted")
+	}
+}
+
+func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
+	t.Helper()
+	if _, err := db.Exec(q, args...); err != nil {
+		t.Fatalf("%s: %v", q, err)
 	}
 }

@@ -28,7 +28,7 @@ type renderer struct {
 	order []string // least recently used first
 }
 
-const renderCacheSize = 6
+const renderCacheSize = 4
 
 func newRenderer(fsys fs.FS, dev bool) (*renderer, error) {
 	r := &renderer{fs: fsys, dev: dev, cache: map[string]*template.Template{}}

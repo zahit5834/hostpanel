@@ -49,6 +49,26 @@
   {{end}}
 </section>
 
+{{if or .PGDBs .PGRole .PGAvailable}}
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>PostgreSQL</h2>{{if .PGRole}}<span class="muted small">rol: <code>{{.PGRole.Name}}</code> {{if .PGRole.Disabled}}<span class="badge">devre dışı</span>{{else}}<span class="badge success">etkin</span>{{end}}</span>{{end}}</div>
+  {{if .PGDBs}}
+  <table class="table">
+    <thead><tr><th>Veritabanı</th><th>Site</th><th class="right">Boyut</th><th>Durum</th></tr></thead>
+    <tbody>
+    {{range .PGDBs}}<tr><td><a href="/postgres"><code>{{.Name}}</code></a></td><td>{{if .SiteID}}<a href="/sites/{{.SiteID}}">{{.SiteDomain}}</a>{{else}}<span class="muted">—</span>{{end}}</td><td class="right">{{if .SizeBytes}}{{size .SizeBytes}}{{else}}—{{end}}</td><td>{{template "site-badge" .Status}}</td></tr>{{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="muted pad">Veritabanı yok.</p>{{end}}
+  {{if .PGAvailable}}
+  <div class="ops pad">
+    {{if not .PGRole}}<form method="post" action="/postgres/roles"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="customer_id" value="{{$c.ID}}"><input type="hidden" name="back" value="customer"><button type="submit">PostgreSQL rolü oluştur</button></form>{{end}}
+    <a class="button" href="/postgres?customer={{$c.ID}}#new-db">Veritabanı oluştur</a>
+  </div>
+  {{end}}
+</section>
+{{end}}
+
 {{if .Zones}}
 <section class="card table-wrap">
   <div class="card-head pad"><h2>DNS zone'ları</h2><a class="small" href="/dns">DNS →</a></div>
@@ -75,8 +95,8 @@
 <section class="card danger-zone">
   <h2>Müşteriyi sil</h2>
   {{if .Sites}}<p class="muted">Siteleri olan müşteri silinemez; önce sitelerini silin.</p>
-  {{else if .DBs}}<p class="muted">Veritabanları olan müşteri silinemez; önce veritabanlarını silin.</p>
-  {{else}}<button type="button" class="danger" hx-post="/customers/{{$c.ID}}/delete" hx-confirm="{{$c.Name}} silinsin mi?{{if .Login}} MSSQL login'i de silinir.{{end}}">Sil</button>{{end}}
+  {{else if or .DBs .PGDBs}}<p class="muted">Veritabanları olan müşteri silinemez; önce veritabanlarını silin.</p>
+  {{else}}<button type="button" class="danger" hx-post="/customers/{{$c.ID}}/delete" hx-confirm="{{$c.Name}} silinsin mi?{{if .Login}} MSSQL login'i de silinir.{{end}}{{if .PGRole}} PostgreSQL rolü de silinir.{{end}}">Sil</button>{{end}}
 </section>
 {{end}}
 {{end}}

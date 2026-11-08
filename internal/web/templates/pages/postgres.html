@@ -1,0 +1,226 @@
+{{define "content"}}
+{{with .Data}}
+<div class="card-head">
+  <h1>Veritabanları</h1>
+  {{if and .Server (eq .Server.Status "running")}}<div class="actions"><a class="button primary" href="#new-db">Yeni veritabanı</a></div>{{end}}
+</div>
+{{template "db-tabs" "postgres"}}
+
+{{if .JobID}}{{template "job-console" .JobID}}{{end}}
+
+{{if not .Server}}
+  {{if not .DockerReady}}
+  <section class="card stack">
+    <h2>1 · Docker</h2>
+    <p>PostgreSQL, Docker container'ı olarak çalışır. Docker sunucuda kurulu değil.</p>
+    <p class="muted small">Ubuntu deposundaki <code>docker.io</code> paketi kurulur ve servis etkinleştirilir. Panel kullanıcısı <code>docker</code> grubuna <strong>eklenmez</strong> (o grup root'a eşdeğerdir); Docker yalnızca root helper script'leri üzerinden yönetilir.</p>
+    <form method="post" action="/databases/docker">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="back" value="postgres">
+      <button type="submit" class="primary">Docker'ı kur</button>
+    </form>
+  </section>
+  {{else}}
+  <section class="card stack">
+    <h2>PostgreSQL kurulumu</h2>
+    <form method="post" action="/postgres/server" class="stack">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <div class="form-grid">
+        <label>İmaj <input value="{{.DefaultImage}}" readonly>
+          <span class="muted small">Resmi <code>postgres</code> imajı, sabit etiket (<code>latest</code> değil).</span></label>
+        <label>Bellek sınırı (MB) <input type="number" name="memory_mb" min="{{.MinMem}}" step="256" value="{{.SuggestMem}}">
+          <span class="muted small">{{if .MemTotalMB}}Sunucuda toplam {{.MemTotalMB}} MB RAM var. {{end}}<code>shared_buffers</code> bunun %25'i, <code>effective_cache_size</code> %75'i olarak ayarlanır.</span></label>
+      </div>
+      <ul class="small muted">
+        <li>Yalnızca <code>127.0.0.1:5432</code> üzerinde dinler; veriler <code>/var/lib/hostpanel/postgres/</code> altında kalıcıdır.</li>
+        <li>Süper kullanıcının (<code>postgres</code>) şifresi yoktur ve TCP ile bağlanamaz; panel PostgreSQL'e hiç bağlanmaz, tüm işler root helper'ı ile yapılır.</li>
+        <li>Her müşteri kendi rolüyle (<code>c_…</code>) yalnızca kendi veritabanlarına bağlanabilir.</li>
+      </ul>
+      <div><button type="submit" class="primary">PostgreSQL'i kur</button> <span class="muted small">İmaj ~160 MB.</span></div>
+    </form>
+  </section>
+  {{end}}
+{{else}}{{$srv := .Server}}
+<div class="grid two">
+<section class="card stack">
+  <div class="card-head"><h2>PostgreSQL sunucusu</h2>{{template "site-badge" $srv.Status}}</div>
+  <dl class="kv">
+    <dt>İmaj</dt><dd><code>{{$srv.Image}}</code></dd>
+    {{if $srv.Version}}<dt>Sürüm</dt><dd>{{$srv.Version}}</dd>{{end}}
+    <dt>Bellek</dt><dd>{{$srv.MemoryMB}} MB</dd>
+    <dt>Dinleme</dt><dd>{{if $srv.External}}*:5432 <span class="tag">izinli: {{range $i, $ip := $srv.AllowIPs}}{{if $i}}, {{end}}{{$ip}}{{end}}</span>{{else}}127.0.0.1:5432 <span class="muted small">(yalnızca yerel)</span>{{end}}</dd>
+    <dt>Veri</dt><dd><code>/var/lib/hostpanel/postgres/</code></dd>
+  </dl>
+  {{if $srv.LastError}}<div class="alert err small">{{$srv.LastError}}</div>{{end}}
+  <div hx-get="/postgres/status" hx-trigger="load" hx-swap="outerHTML"><p class="muted small">Container durumu okunuyor…</p></div>
+  {{if or (eq $srv.Status "running") (eq $srv.Status "stopped")}}
+  <div class="ops">
+    {{if eq $srv.Status "stopped"}}{{template "pg-op" list $ "start" "Başlat" "primary"}}{{else}}
+    {{template "pg-op" list $ "restart" "Yeniden başlat" ""}}{{template "pg-op" list $ "stop" "Durdur" "danger"}}{{end}}
+  </div>
+  {{end}}
+  {{if eq $srv.Status "running"}}
+  <div class="ops">
+    <form method="post" action="/postgres/isolation-test"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">İzolasyon testini çalıştır</button></form>
+    <form method="post" action="/postgres/sizes"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">Boyutları yenile</button></form>
+  </div>
+  <p class="muted small">İzolasyon testi iki geçici rol + veritabanı oluşturur; birinin diğerine bağlanamadığını, süper kullanıcı işlemi ve sunucu dosyası erişimi yapamadığını doğrular, sonra temizler. Not: PostgreSQL'de veritabanı <em>adları</em> tüm rollere görünür; içerik görünmez.</p>
+  {{end}}
+  {{if eq $srv.Status "error"}}
+  <form method="post" action="/postgres/server/remove" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <p class="muted small">Kurulum tamamlanmadıysa iş kaydından <strong>tekrar deneyebilir</strong> ya da kurulumu kaldırabilirsiniz (container silinir, veri dizini <code>postgres.removed-*</code> olarak kenara alınır).</p>
+    <div><button type="submit" class="danger">Kurulumu kaldır</button></div>
+  </form>
+  {{end}}
+</section>
+
+<section class="card stack">
+  <h2>Ayarlar</h2>
+  {{if eq $srv.Status "installing"}}<p class="muted">Kurulum sürüyor…</p>{{else}}
+  <form method="post" action="/postgres/server/settings" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Bellek sınırı (MB) <input type="number" name="memory_mb" min="{{.MinMem}}" step="256" value="{{$srv.MemoryMB}}"></label>
+    <label class="check"><input type="checkbox" name="external" value="1" {{if $srv.External}}checked{{end}}> <span>Dış erişim (pgAdmin, DBeaver vb.) — *:5432</span></label>
+    <label>İzinli IP'ler <textarea name="allow_ips" rows="3" placeholder="203.0.113.7&#10;198.51.100.0/24" spellcheck="false">{{range $srv.AllowIPs}}{{.}}
+{{end}}</textarea>
+      <span class="muted small">Dış erişim yalnızca <strong>UFW etkinken</strong> açılır; panel 5432/tcp için yalnızca bu IP'lere UFW izni ve <code>pg_hba</code> kuralı ekler, UFW'yi kendisi açmaz ve başka kurala dokunmaz.</span></label>
+    <div><button type="submit">Uygula (container yeniden oluşturulur)</button></div>
+    <p class="muted small">Veriler korunur; uygulama sırasında PostgreSQL birkaç saniye erişilemez.</p>
+  </form>
+  {{end}}
+</section>
+</div>
+
+<section class="card table-wrap">
+  <h2 class="pad">Roller</h2>
+  <table class="table">
+    <thead><tr><th>Rol</th><th>Müşteri</th><th class="right">Veritabanı</th><th>Durum</th><th></th></tr></thead>
+    <tbody>
+    {{range .Roles}}
+      <tr>
+        <td><code>{{.Name}}</code></td>
+        <td><a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a></td>
+        <td class="right">{{.DBCount}}</td>
+        <td>{{if .Disabled}}<span class="badge">devre dışı</span>{{else}}<span class="badge success">etkin</span>{{end}}</td>
+        <td class="right"><div class="ops end">
+          {{template "pg-role-op" list $ .ID "password" "Şifreyi sıfırla" "" "Yeni şifre üretilsin mi? Siteler yeni şifreyi yeniden başlatılınca kullanır."}}
+          {{if .Disabled}}{{template "pg-role-op" list $ .ID "enable" "Etkinleştir" "" ""}}{{else}}{{template "pg-role-op" list $ .ID "disable" "Devre dışı bırak" "" "Rol devre dışı bırakılsın mı? Açık bağlantıları kapatılır."}}{{end}}
+          {{if eq .DBCount 0}}{{template "pg-role-op" list $ .ID "delete" "Sil" "danger" "Rol silinsin mi?"}}{{end}}
+        </div></td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not .Roles}}<p class="muted pad">Henüz rol yok. Veritabanı oluşturunca müşterinin rolü otomatik oluşturulur.</p>{{end}}
+  {{if and (eq $srv.Status "running") .Customers}}
+  <form method="post" action="/postgres/roles" class="inline-form pad">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <select name="customer_id">{{range .Customers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
+    <button type="submit">Müşteri için rol oluştur</button>
+  </form>
+  {{end}}
+</section>
+
+<section class="card table-wrap">
+  <h2 class="pad">Veritabanları</h2>
+  <table class="table">
+    <thead><tr><th>Ad</th><th>Müşteri</th><th>Site</th><th class="right">Boyut</th><th>Durum</th><th></th></tr></thead>
+    <tbody>
+    {{range .DBs}}
+      <tr class="{{if eq .Status "error"}}row-failed{{end}}">
+        <td><code>{{.Name}}</code></td>
+        <td><a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a></td>
+        <td>{{if .SiteID}}<a href="/sites/{{.SiteID}}">{{.SiteDomain}}</a>{{if .EnvKey}} <span class="tag" title="Bağlantı dizesi bu ortam değişkeninde">{{.EnvKey}}</span>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="right nowrap">{{if .SizeBytes}}{{size .SizeBytes}}{{else}}—{{end}}</td>
+        <td>{{template "site-badge" .Status}}</td>
+        <td class="right"><div class="ops end">
+          {{if eq .Status "ready"}}<button type="button" hx-post="/postgres/{{.ID}}/connection" hx-target="#db-conn" hx-swap="innerHTML">Bağlantı bilgisi</button>{{end}}
+          {{if ne .Status "dropping"}}
+          <details class="inline-details"><summary class="button danger">Sil</summary>
+            <form method="post" action="/postgres/{{.ID}}/delete" class="stack pad">
+              <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+              <span class="small">Silmeden önce <code>pg_dump</code> yedeği alınır (<code>/var/lib/hostpanel/postgres-backup/</code>). Onay için adı yazın: <strong>{{.Name}}</strong></span>
+              <input name="confirm" autocomplete="off" spellcheck="false" required>
+              <button type="submit" class="danger">Kalıcı olarak sil</button>
+            </form>
+          </details>
+          {{end}}
+        </div></td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not .DBs}}<p class="muted pad">Henüz veritabanı yok. Mevcut bir veritabanını taşımak için: site → <strong>Taşıma</strong> sekmesi → “PostgreSQL dökümü yükle”.</p>{{end}}
+  <div id="db-conn"></div>
+</section>
+
+{{if eq $srv.Status "running"}}
+<section class="card stack" id="new-db">
+  <h2>Yeni veritabanı</h2>
+  {{if not .Customers}}<p class="muted">Önce bir <a href="/customers/new">müşteri ekleyin</a>.</p>{{else}}
+  <form method="post" action="/postgres" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <div class="form-grid">
+      <label>Müşteri *
+        <select name="customer_id" required>{{range .Customers}}<option value="{{.ID}}" {{if eq .ID $.Data.Form.CustomerID}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+        <span class="muted small">Müşterinin rolü yoksa oluşturulur; veritabanının sahibi o rol olur.</span></label>
+      <label>Ad * <input name="name" value="{{.Form.Name}}" placeholder="ornek_db" pattern="[a-z][a-z0-9_]{1,62}" required spellcheck="false" autocomplete="off">
+        <span class="muted small">Küçük harf, rakam ve _.</span></label>
+      <label>Site <select name="site_id"><option value="0">— yok —</option>{{range .Sites}}<option value="{{.ID}}" {{if eq .ID $.Data.Form.SiteID}}selected{{end}}>{{.Domain}} ({{.CustomerName}})</option>{{end}}</select>
+        <span class="muted small">Site aynı müşteriye ait olmalı.</span></label>
+      <label>Ortam değişkeni adı <input name="env_key" value="{{.Form.EnvKey}}" placeholder="boş: .NET → ConnectionStrings__DefaultConnection, diğerleri → DATABASE_URL" spellcheck="false"></label>
+      <label class="check full"><input type="checkbox" name="write_env" value="1" {{if .Form.WriteEnv}}checked{{end}}> <span>Bağlantı dizesini sitenin ortam değişkenine yaz</span></label>
+    </div>
+    <div><button type="submit" class="primary">Oluştur</button></div>
+  </form>
+  {{end}}
+</section>
+{{end}}
+{{end}}
+{{end}}
+{{end}}
+
+{{define "pg-op"}}{{/* list: page, op, label, class */}}
+<form method="post" action="/postgres/server/op/{{index . 1}}">
+  <input type="hidden" name="_csrf" value="{{(index . 0).CSRF}}">
+  <button type="submit" class="{{index . 3}}">{{index . 2}}</button>
+</form>
+{{end}}
+
+{{define "pg-role-op"}}{{/* list: page, role id, action, label, class, confirm */}}
+<form method="post" action="/postgres/roles/{{index . 1}}/{{index . 2}}">
+  <input type="hidden" name="_csrf" value="{{(index . 0).CSRF}}">
+  <button type="submit" class="{{index . 4}}" {{with index . 5}}data-confirm="{{.}}"{{end}}>{{index . 3}}</button>
+</form>
+{{end}}
+
+{{define "pg-status"}}{{with .Data}}
+<dl class="kv">
+  <dt>Docker</dt><dd>{{if eq .Docker "active"}}<span class="badge success">active</span>{{else if .Docker}}<span class="badge">{{.Docker}}</span>{{else}}<span class="muted">bilinmiyor</span>{{end}}</dd>
+  <dt>Container</dt><dd>{{if eq .Container "running"}}<span class="badge success">running</span>{{else if .Container}}<span class="badge failed">{{.Container}}</span>{{else}}<span class="muted">bilinmiyor</span>{{end}}{{if .OOM}} <span class="badge failed">bellek yetmedi (OOM)</span>{{end}}{{if and .Restarts (ne .Restarts "0")}} <span class="tag">{{.Restarts}} yeniden başlama</span>{{end}}</dd>
+  {{if .Running}}
+  <dt>CPU</dt><dd>{{.CPU}}</dd>
+  <dt>Bellek</dt><dd>{{.Mem}} ({{.MemPct}})</dd>
+  <dt>Başlangıç</dt><dd class="small">{{.StartedAt}}</dd>
+  {{end}}
+</dl>
+{{if .Err}}<p class="err-text small">{{.Err}}</p>{{end}}
+<p class="small"><a href="/logs/system?source=postgres">Container logları →</a></p>
+{{end}}{{end}}
+
+{{define "pg-conn"}}{{with .Data}}
+<div class="pad stack">
+  <div class="card-head"><h3>{{.DB.Name}} · bağlantı bilgisi</h3><span class="muted small">Bu görüntüleme İşlem Geçmişi'ne kaydedildi.</span></div>
+  <dl class="kv">
+    <dt>Sunucu</dt><dd><code>{{.Host}}:{{.Port}}</code>{{if .Extern}} <span class="muted small">(dışarıdan: sunucunun genel IP'si, 5432)</span>{{end}}</dd>
+    <dt>Veritabanı</dt><dd><code>{{.DB.Name}}</code></dd>
+    <dt>Rol</dt><dd><code>{{.Role}}</code></dd>
+    <dt>Şifre</dt><dd><code id="conn-pass">{{.Pass}}</code> <button type="button" x-data="copy" data-target="conn-pass" x-on:click="copy" x-text="label">Kopyala</button></dd>
+  </dl>
+  <div class="card-head"><h4>.NET (Npgsql)</h4><button type="button" x-data="copy" data-target="conn-npg" x-on:click="copy" x-text="label">Kopyala</button></div>
+  <pre id="conn-npg">{{.Npgsql}}</pre>
+  <div class="card-head"><h4>URL (Node pg, Prisma, PHP…)</h4><button type="button" x-data="copy" data-target="conn-url" x-on:click="copy" x-text="label">Kopyala</button></div>
+  <pre id="conn-url">{{.URL}}</pre>
+</div>
+{{end}}{{end}}

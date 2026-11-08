@@ -5,7 +5,8 @@
 #       stdin: config.json (written by the panel). Packs into
 #       /var/backups/hostpanel/<domain>/<name>/ (root 0700): files.tar.zst
 #       (active release + shared/), db-<db>.bak (moved from the MSSQL volume,
-#       written there by the panel's BACKUP DATABASE), config.json, nginx.conf,
+#       written there by the panel's BACKUP DATABASE), db-pg-<db>.dump (db
+#       argument pg:<db>; written by hp-pg.sh dump), config.json, nginx.conf,
 #       ssl.tar.zst, SHA256SUMS, manifest.json. Prints size=<bytes>.
 #   delete <domain> <name>               local copy (+ leftover DB staging files)
 #   verify <domain> <name>               SHA256SUMS check
@@ -30,6 +31,7 @@
 # root-only and the Drive token never becomes readable by the panel user.
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
+check_db_dirs
 [[ $# -ge 1 ]] || die "kullanım: $(basename "$0") create|delete|verify|read-config|rclone-install|remote-config|remote-test|upload|remote-list|remote-manifest|remote-delete|download|restore-files|stage-db|stage-upload|unstage …"
 action=$1
 shift
@@ -81,14 +83,17 @@ case $action in
     domain=$1 name=$2 comps=$3 release=$4
     shift 4
     validate_components "$comps"
-    for db in "$@"; do validate_name "$db" 63; done
+    # db arguments: <name> (MSSQL .bak) or pg:<name> (PostgreSQL .dump)
+    for db in "$@"; do validate_name "${db#pg:}" 63; done
     [[ ! -e $out ]] || die "yedek zaten var: ${out}"
     install -d -o root -g root -m 0700 "$BACKUP_ROOT" "$BACKUP_ROOT/$domain"
     install -d -o root -g root -m 0700 "$out"
     done_ok=0
     cleanup() {
       local db
-      for db in "${dbs[@]}"; do rm -f -- "$MSSQL_HOST_BACKUP/hpbk-$name-$db.bak"; done
+      for db in "${dbs[@]}"; do
+        if [[ $db == pg:* ]]; then rm -f -- "$PG_HOST_BACKUP/hpbk-$name-${db#pg:}.dump"; else rm -f -- "$MSSQL_HOST_BACKUP/hpbk-$name-$db.bak"; fi
+      done
       ((done_ok)) || rm -rf --one-file-system -- "$out"
     }
     dbs=("$@")
@@ -109,12 +114,16 @@ case $action in
     fi
     if [[ ,$comps, == *,db,* ]]; then
       for db in "${dbs[@]}"; do
-        src=$MSSQL_HOST_BACKUP/hpbk-$name-$db.bak
+        if [[ $db == pg:* ]]; then
+          src=$PG_HOST_BACKUP/hpbk-$name-${db#pg:}.dump dst=$out/db-pg-${db#pg:}.dump
+        else
+          src=$MSSQL_HOST_BACKUP/hpbk-$name-$db.bak dst=$out/db-$db.bak
+        fi
         [[ -f $src && ! -L $src ]] || die "veritabanı yedeği bulunamadı: ${src}"
-        mv -f -- "$src" "$out/db-$db.bak"
-        chown root:root "$out/db-$db.bak"
-        chmod 0600 "$out/db-$db.bak"
-        log "veritabanı: ${db} ($(du -h "$out/db-$db.bak" | cut -f1))"
+        mv -f -- "$src" "$dst"
+        chown root:root "$dst"
+        chmod 0600 "$dst"
+        log "veritabanı: ${db} ($(du -h "$dst" | cut -f1))"
       done
     fi
     if [[ ,$comps, == *,config,* ]]; then
@@ -158,7 +167,7 @@ case $action in
   delete)
     [[ $# -eq 2 ]] || die "kullanım: delete <domain> <name>"
     out=$(backup_dir "$1" "$2")
-    rm -f -- "$MSSQL_HOST_BACKUP"/hpbk-"$2"-*.bak
+    rm -f -- "$MSSQL_HOST_BACKUP"/hpbk-"$2"-*.bak "$PG_HOST_BACKUP"/hpbk-"$2"-*.dump
     if [[ -e $out ]]; then
       [[ ! -L $out ]] || die "symlink olamaz"
       rm -rf --one-file-system -- "$out"

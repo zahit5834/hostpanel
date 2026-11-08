@@ -14,6 +14,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/backups"
 	"github.com/zahit5834/hostpanel/internal/databases"
 	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/pgsql"
 	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
@@ -451,6 +452,72 @@ func (s *Server) siteImportDB(w http.ResponseWriter, r *http.Request) {
 	jobID, err := s.Backups.StartImportDB(r.Context(), in)
 	if err != nil {
 		s.Backups.DiscardUpload(in.Upload)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("HX-Redirect", fmt.Sprintf("/sites/%d?tab=import&job=%d", site.ID, jobID))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// siteImportPG is the Taşıma tab's PostgreSQL dump upload (same streaming
+// rules as the .bak upload: X-CSRF-Token header, size cap, 1 h read deadline).
+func (s *Server) siteImportPG(w http.ResponseWriter, r *http.Request) {
+	site, ok := s.loadSite(w, r)
+	if !ok {
+		return
+	}
+	rc := http.NewResponseController(w)
+	rc.SetReadDeadline(time.Now().Add(time.Hour))
+	r.Body = http.MaxBytesReader(w, r.Body, MaxBakBytes+1<<20)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		http.Error(w, "multipart form bekleniyor", http.StatusBadRequest)
+		return
+	}
+	var in pgsql.ImportInput
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			http.Error(w, "yükleme okunamadı: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		switch part.FormName() {
+		case "name", "env_key", "write_env":
+			b, _ := io.ReadAll(io.LimitReader(part, 256))
+			v := strings.TrimSpace(string(b))
+			switch part.FormName() {
+			case "name":
+				in.Name = v
+			case "env_key":
+				in.EnvKey = v
+			case "write_env":
+				in.WriteEnv = v == "1"
+			}
+		case "dump":
+			if in.Name == "" {
+				part.Close()
+				http.Error(w, "veritabanı adı dosyadan önce gönderilmeli", http.StatusBadRequest)
+				return
+			}
+			in.Upload, _, err = s.PG.SaveUpload(part, MaxBakBytes)
+			part.Close()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		part.Close()
+	}
+	if in.Upload == "" {
+		http.Error(w, "döküm dosyası seçilmedi", http.StatusBadRequest)
+		return
+	}
+	jobID, err := s.PG.StartImport(r.Context(), site, in)
+	if err != nil {
+		s.PG.DiscardUpload(in.Upload)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

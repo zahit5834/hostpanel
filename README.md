@@ -7,6 +7,7 @@ Ubuntu 24.04 için tek yöneticili, ultra hafif hosting kontrol paneli: Go, tek 
 - **Deploy:** zip yükleme veya Git (SSH deploy key / açık https), sunucuda build. Health check başarısızsa önceki sürüme otomatik döner; tek tıkla rollback.
 - **SSL:** Let's Encrypt (DNS + HTTP ön kontrolü, otomatik yenileme), CSR üretimi, ücretli sertifika doğrulama ve kurulumu, bitiş takibi.
 - **MSSQL 2025 (Docker):** müşteri başına login, izole veritabanları, dış erişim için IP allowlist + UFW.
+- **PostgreSQL 18 (Docker):** müşteri başına rol, sahibine ait veritabanları, site env'ine connection string, `pg_dump -Fc` dökümüyle taşıma, yedek/geri yükleme, dış erişim için IP allowlist + UFW.
 - **Yedekleme:** yerel + Google Drive (rclone, isteğe bağlı şifreleme). Planlar, saklama kuralları, geri yükleme/klon ve taşıma sihirbazı.
 - **DNS (kendi nameserver'larınız):** BIND 9 (yalnızca yetkili sunucu), zone ve kayıt yönetimi (A, AAAA, CNAME, MX, TXT, SRV, CAA, NS), sitelerin A/AAAA kayıtları otomatik, yetki devri kontrolü, isteğe bağlı DNSSEC.
 - **İzleme:** CPU/RAM/disk, site başına RAM/CPU, health check, çökme döngüsü tespiti, Telegram/e-posta bildirimleri.
@@ -18,7 +19,7 @@ Ubuntu 24.04 için tek yöneticili, ultra hafif hosting kontrol paneli: Go, tek 
 ## Gereksinimler
 - Ubuntu 24.04 LTS, amd64 veya arm64
 - root (sudo) erişimi
-- Önerilen en az 2 GB RAM; MSSQL kullanılacaksa 4 GB
+- Önerilen en az 2 GB RAM; MSSQL kullanılacaksa 4 GB (PostgreSQL varsayılan olarak 2 GB ayırır, en az 512 MB)
 - Panel için alan adı isteğe bağlıdır. Verilmezse panel `https://<sunucu-ip>:8443` adresinde self-signed sertifikayla açılır.
 
 ## Kurulum
@@ -54,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/zahit5834/hostpanel/main/install.sh
 - **fail2ban:** panel girişi ve SSH için jail kurar; kurulumu yapan IP muaf tutulur.
 - **logrotate** kurallarını ekler.
 
-Docker, MSSQL, .NET/Node/PHP ve rclone **kurulmaz**; bunları panelden ihtiyaç olduğunda kurarsınız.
+Docker, MSSQL, PostgreSQL, .NET/Node/PHP ve rclone **kurulmaz**; bunları panelden ihtiyaç olduğunda kurarsınız.
 
 ## İlk giriş
 1. Kurulumun sonunda ekrana panel adresi, kullanıcı adı (`admin`) ve şifre basılır. Self-signed modda sertifikanın SHA-256 parmak izi de basılır.
@@ -81,6 +82,26 @@ Ardından `https://127.0.0.1:8443` adresini açın.
 
 Sunucu kapalıyken bu domain'ler çözülmez. E-posta gibi kritik hizmetler için bunu göz önünde bulundurun.
 
+## PostgreSQL
+1. **Veritabanları → PostgreSQL:** Docker yoksa "Docker'ı kur", ardından bellek miktarını seçip "PostgreSQL'i kur".
+   - İmaj `postgres:18.6-trixie`, container `hostpanel-postgres`, veri `/var/lib/hostpanel/postgres`.
+   - Yalnızca `127.0.0.1:5432`'de dinler. `postgres` süper kullanıcısının şifresi yoktur ve TCP'den bağlanamaz; yönetim işlerini root helper container içinden yapar.
+2. **Müşteri rolü + veritabanı:** veritabanını oluştururken müşteriyi ve (isteğe bağlı) siteyi seçin. Rol (`c_<müşteri>`) gerekirse otomatik açılır. Bağlantı dizesi sitenin ortam değişkenine yazılır:
+   - .NET (Npgsql): `ConnectionStrings__DefaultConnection` = `Host=127.0.0.1;Port=5432;Database=…;Username=…;Password=…`
+   - Node / PHP: `DATABASE_URL` = `postgresql://rol:şifre@127.0.0.1:5432/db`
+3. **Mevcut veritabanını taşıma:** eski sunucuda custom formatta döküm alın:
+   ```bash
+   pg_dump -Fc -d <veritabani> -f <veritabani>.dump
+   ```
+   Ardından site → Taşıma → "PostgreSQL dökümü yükle".
+   - Döküm müşteri rolüyle, tek transaction'da geçici bir veritabanına açılır; başarılı olursa yerine konur.
+   - Düz `.sql` dökümleri kabul edilmez: psql meta komutları (`\!`) container içinde komut çalıştırabilir.
+   - Süper kullanıcı isteyen ("untrusted") uzantılar ve imajda olmayanlar (ör. `postgis`) yüklenemez; hata job logunda görünür. `pgcrypto`, `uuid-ossp`, `citext` gibi güvenilir uzantılar sorun çıkarmaz.
+4. **Yedekler:** site yedeğinin "veritabanları" bileşeni PostgreSQL veritabanlarını da kapsar (`db-pg-<ad>.dump`). Geri yükleme ve klon MSSQL'deki gibi çalışır.
+5. **Dış erişim (isteğe bağlı):** ayarlardan IP/CIDR listesi girin. UFW etkin olmalıdır; kurallar `hostpanel-pg` yorumuyla eklenir.
+
+Not: PostgreSQL'de veritabanı **adları** tüm rollere görünür; içerik görünmez. Bir müşteri başka bir müşterinin veritabanına bağlanamaz, okuyamaz ve yazamaz. "İzolasyon testi" bunu iki yönde doğrular.
+
 ## Güncelleme
 - **Panelden:** Ayarlar → Güncelleme → "vX.Y.Z sürümüne güncelle".
   - Panel her gün yeni sürümü kontrol eder ve bildirim gönderir.
@@ -102,7 +123,7 @@ Varsayılan olarak yalnızca panel kaldırılır. Siteler çalışmaya devam ede
 | Bayrak | Siler |
 |---|---|
 | `--delete-sites` | Tüm siteler: servisler, nginx config'leri, site kullanıcıları, `/var/www/sites` |
-| `--delete-databases` | MSSQL container'ı ve tüm veritabanları |
+| `--delete-databases` | MSSQL ve PostgreSQL container'ları ve tüm veritabanları |
 | `--delete-backups` | Yerel yedekler (`/var/backups/hostpanel`); Drive'dakiler kalır |
 | `--purge-config` | Panel veritabanı, config, `master.key`, loglar, `hostpanel` kullanıcısı |
 
@@ -126,7 +147,7 @@ Varsayılan olarak yalnızca panel kaldırılır. Siteler çalışmaya devam ede
    - rclone'u kurun ve Drive token'ını yeniden girin (crypt anahtarları dosyadan gelir).
    - "Drive'ı tara" ile yedekleri listeye alın.
 4. DNS kullanılıyorsa: DNS → IP'leri kontrol edip kaydedin → "DNS sunucusunu kur"; registrar'da glue IP'lerini değiştirin. DNSSEC'li zone'lar yeni anahtarla imzalanır, yeni DS kaydını registrar'a girin.
-5. MSSQL kullanılıyorsa sunucuyu kurun ve müşteri login'lerini yeniden oluşturun (müşteri detayı).
+5. MSSQL/PostgreSQL kullanılıyorsa sunucuyu kurun ve müşteri login'lerini/rollerini yeniden oluşturun (müşteri detayı).
 6. Siteleri oluşturup yedekten geri yükleyin. DNS'i yeni sunucuya çevirip SSL alın.
 
 ## Güvenlik özeti
@@ -136,7 +157,7 @@ Varsayılan olarak yalnızca panel kaldırılır. Siteler çalışmaya devam ede
 - **Panel arkada:** panel yalnızca `127.0.0.1:8090`'da dinler; dışarıya nginx (TLS 1.2/1.3) açar.
 - **Gizli bilgiler:** AES-256-GCM ile saklanır (`master.key`, 0600) ve loglarda maskelenir.
 - **Yalnızca root'ta duranlar:** Drive token'ı, git deploy key'leri ve yedek dosyaları. Panel ele geçirilse bile bunları okuyamaz.
-- **Site izolasyonu:** her site ayrı kullanıcı ve sandbox'la çalışır. MSSQL'de müşteriler birbirinin veritabanını göremez.
+- **Site izolasyonu:** her site ayrı kullanıcı ve sandbox'la çalışır. MSSQL'de müşteriler birbirinin veritabanını göremez; PostgreSQL'de bağlanamaz.
 - **Oturum güvenliği:** argon2id, 2FA, CSRF, sıkı CSP, giriş rate limit'i, fail2ban.
 
 ## Geliştirme

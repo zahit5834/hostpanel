@@ -63,7 +63,14 @@ type ConfigGit struct {
 type ConfigDB struct {
 	Name   string `json:"name"`
 	EnvKey string `json:"env_key,omitempty"`
+	Engine string `json:"engine,omitempty"` // "" = MSSQL (db-<name>.bak), "postgres" (db-pg-<name>.dump)
 }
+
+// EnginePostgres marks a PostgreSQL database in config.json.
+const EnginePostgres = "postgres"
+
+// IsPG reports a PostgreSQL database.
+func (c ConfigDB) IsPG() bool { return c.Engine == EnginePostgres }
 
 // ConfigFor builds the config of site.
 func ConfigFor(site sites.Site, active string, envSealed map[string]string, dbs []ConfigDB) SiteConfig {

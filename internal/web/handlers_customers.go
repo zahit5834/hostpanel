@@ -10,6 +10,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/customers"
 	"github.com/zahit5834/hostpanel/internal/databases"
 	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/pgsql"
 )
 
 func customerFromForm(r *http.Request) customers.Customer {
@@ -99,6 +100,10 @@ func (s *Server) customerDetail(w http.ResponseWriter, r *http.Request) {
 	for _, d := range dbs {
 		targets = append(targets, d.Name)
 	}
+	pgdbs, _ := s.PG.Store.Databases(r.Context(), pgsql.DBFilter{CustomerID: c.ID})
+	for _, d := range pgdbs {
+		targets = append(targets, d.Name)
+	}
 	recent, _ := s.Activity.Query(r.Context(), logs.Filter{TargetIDs: targets, Limit: 20})
 	data := map[string]any{"C": c, "Sites": siteList, "Recent": recent, "DBs": dbs, "DBAvailable": s.DBs.Available(r.Context())}
 	if s.DNS != nil {
@@ -106,6 +111,10 @@ func (s *Server) customerDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	if l, err := s.DBs.Store.LoginForCustomer(r.Context(), c.ID); err == nil {
 		data["Login"] = &l
+	}
+	data["PGDBs"], data["PGAvailable"], data["PGRole"] = pgdbs, s.PG.Available(r.Context()), (*pgsql.Role)(nil)
+	if role, err := s.PG.Store.RoleForCustomer(r.Context(), c.ID); err == nil {
+		data["PGRole"] = &role
 	}
 	s.render(w, r, http.StatusOK, "customer", "layout", Page{Title: c.Name, Nav: "customers", Data: data})
 }
@@ -146,7 +155,15 @@ func (s *Server) customerDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The SQL login is dropped on the server first (refused while it owns databases).
+	if s.PG.Store.CountForCustomer(r.Context(), c.ID) > 0 {
+		http.Error(w, "müşterinin PostgreSQL veritabanları var; önce veritabanlarını silin", http.StatusBadRequest)
+		return
+	}
 	if err := s.DBs.PrepareCustomerDelete(r.Context(), c.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.PG.PrepareCustomerDelete(r.Context(), c.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

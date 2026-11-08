@@ -35,6 +35,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
+	"github.com/zahit5834/hostpanel/internal/pgsql"
 	"github.com/zahit5834/hostpanel/internal/runtimes"
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
@@ -210,11 +211,15 @@ func serve(args []string) error {
 		dbSvc.Fake = databases.NewFakeServer("")
 	}
 	dbSvc.Register()
+	pgSvc := &pgsql.Service{Store: pgsql.NewStore(a.db), DB: a.db, Box: a.box, Runner: runner, Jobs: jm,
+		Activity: activity, Log: log, Sites: siteSvc, ScriptsDir: cfg.ScriptsDir, UploadDir: siteSvc.UploadDir,
+		DryRun: cfg.DryRun, MemTotalMB: dbSvc.MemTotalMB}
+	pgSvc.Register() // after dbSvc: chains the site delete hook
 	dnsSvc := &dns.Service{Store: dns.NewStore(a.db), DB: a.db, Runner: runner, Jobs: jm, Activity: activity, Log: log,
 		Sites: siteSvc, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun, DefaultIPs: sslSvc.ServerIPs}
 	dnsSvc.Register()
 	bkSvc := &backups.Service{Store: backups.NewStore(a.db), DB: a.db, Box: a.box, Runner: runner, Probe: probe, Jobs: jm,
-		Activity: activity, Log: log, Sites: siteSvc, DBs: dbSvc, ScriptsDir: cfg.ScriptsDir,
+		Activity: activity, Log: log, Sites: siteSvc, DBs: dbSvc, PG: pgSvc, ScriptsDir: cfg.ScriptsDir,
 		UploadDir: siteSvc.UploadDir, DryRun: cfg.DryRun}
 	bkSvc.Register()
 	bkSvc.Recover(ctx)
@@ -234,7 +239,7 @@ func serve(args []string) error {
 		LogPath: cfg.UpdateLogPath(), Dev: cfg.Dev}
 	updSvc.RecordFinished(ctx)
 	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version,
-		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, Backups: bkSvc,
+		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, PG: pgSvc, Backups: bkSvc,
 		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc, Update: updSvc, DNS: dnsSvc}
 	srv.ExportConfig = func(ctx context.Context, pass string, w io.Writer) (panelcfg.Manifest, error) {
 		server := store.GetSetting(ctx, a.db, "backup_server_name", "")
@@ -255,7 +260,7 @@ func serve(args []string) error {
 		cancelJobs()
 		return err
 	}
-	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, cronSvc, updSvc, log)
+	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, pgSvc, cronSvc, updSvc, log)
 	go bkSvc.RunScheduler(jobCtx)
 	go notifySvc.Run(jobCtx)
 	go monSvc.Run(jobCtx)
@@ -291,7 +296,7 @@ func serve(args []string) error {
 
 // maintenance runs the daily cleanup: one timer, no polling.
 func maintenance(ctx context.Context, a *app, activity *logs.Activity, jm *jobs.Manager, sslSvc *ssl.Service, dbSvc *databases.Service,
-	cronSvc *crons.Service, updSvc *update.Service, log *slog.Logger) {
+	pgSvc *pgsql.Service, cronSvc *crons.Service, updSvc *update.Service, log *slog.Logger) {
 	t := time.NewTimer(time.Minute)
 	defer t.Stop()
 	for {
@@ -312,6 +317,7 @@ func maintenance(ctx context.Context, a *app, activity *logs.Activity, jm *jobs.
 		nJobs, _ := jm.Purge(ctx, days("retention_job_days", 30))
 		sslSvc.Maintain(ctx)
 		dbSvc.Maintain(ctx)
+		pgSvc.Maintain(ctx)
 		cronSvc.Maintain(ctx)
 		if update.ValidTag(updSvc.Version) {
 			if _, err := updSvc.Check(ctx); err != nil {

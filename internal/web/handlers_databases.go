@@ -69,6 +69,10 @@ func (s *Server) dbJobRedirect(w http.ResponseWriter, r *http.Request, id int64,
 
 func (s *Server) dockerInstall(w http.ResponseWriter, r *http.Request) {
 	id, err := s.DBs.StartDockerInstall(r.Context())
+	if err == nil && r.PostFormValue("back") == "postgres" {
+		http.Redirect(w, r, fmt.Sprintf("/postgres?job=%d", id), http.StatusSeeOther)
+		return
+	}
 	s.dbJobRedirect(w, r, id, err)
 }
 

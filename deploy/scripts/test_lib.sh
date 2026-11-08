@@ -224,6 +224,25 @@ ok  validate_backup_file files.tar.zst
 ok  validate_backup_file db-shop_db.bak
 bad validate_backup_file ../config.json
 bad validate_backup_file db-Shop.bak
+ok  validate_backup_file db-pg-otopanom.dump
+bad validate_backup_file db-pg-../x.dump
+bad validate_backup_file db-shop.dump
+
+ok  validate_pg_image postgres:18.6-trixie
+ok  validate_pg_image postgres:16.10-bookworm
+bad validate_pg_image postgres:latest
+bad validate_pg_image postgres:15.4-bookworm
+bad validate_pg_image evil/postgres:18.6-trixie
+bad validate_pg_image "postgres:18.6-trixie --privileged"
+ok  validate_pg_name otopanom
+ok  validate_pg_name c_acme
+bad validate_pg_name postgres
+bad validate_pg_name template1
+bad validate_pg_name pg_shadow
+bad validate_pg_name hpiso_a
+bad validate_pg_name hprs_1
+bad validate_pg_name Otopanom
+bad validate_pg_name 'a";drop'
 
 ok  validate_ufw_port 8080
 ok  validate_ufw_port 6000:6100

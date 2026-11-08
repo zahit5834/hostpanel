@@ -119,6 +119,7 @@ var diskLabels = []struct{ Key, Label string }{
 	{"sites", "Siteler (/var/www/sites)"},
 	{"backups", "Yerel yedekler (/var/backups/hostpanel)"},
 	{"mssql", "MSSQL verisi"},
+	{"postgres", "PostgreSQL verisi (+ silme öncesi dökümler)"},
 	{"docker", "Docker (imajlar)"},
 	{"panel", "Panel verisi"},
 	{"logs", "Loglar (/var/log)"},
