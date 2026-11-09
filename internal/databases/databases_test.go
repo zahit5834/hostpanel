@@ -157,7 +157,7 @@ func TestParseAllowIPs(t *testing.T) {
 	if strings.Join(got, ",") != want {
 		t.Errorf("got %v", got)
 	}
-	for _, bad := range []string{"0.0.0.0/0", "::/0", "1.2.3", "any", "1.2.3.4; ufw disable"} {
+	for _, bad := range []string{"0.0.0.0/0", "::/0", "0.0.0.0", "::", "0.0.0.0/8", "127.0.0.1", "224.0.0.1", "1.2.3", "any", "1.2.3.4; ufw disable"} {
 		if _, err := ParseAllowIPs(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}

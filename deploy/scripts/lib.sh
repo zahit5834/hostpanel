@@ -328,6 +328,8 @@ validate_pg_name() {
 validate_ip_or_cidr() {
   [[ ${#1} -le 50 && $1 =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ && $1 == *[.:]* ]] || die "geçersiz IP/CIDR: $1"
   [[ $1 != */0 ]] || die "/0 kabul edilmez: $1"
+  # 0.0.0.0 / :: as a source match nothing (Go ParseAllowIPs gives the message).
+  [[ ${1%%/*} != 0.0.0.0 && ${1%%/*} != :: && ${1%%/*} != 127.* ]] || die "geçersiz kaynak adresi: $1"
 }
 
 # ---------------------------------------------------------------------------

@@ -187,6 +187,10 @@ ok  validate_ip_or_cidr 198.51.100.0/24
 ok  validate_ip_or_cidr 2001:db8::1
 bad validate_ip_or_cidr 0.0.0.0/0
 bad validate_ip_or_cidr ::/0
+bad validate_ip_or_cidr 0.0.0.0
+bad validate_ip_or_cidr 0.0.0.0/8
+bad validate_ip_or_cidr ::
+bad validate_ip_or_cidr 127.0.0.1
 bad validate_ip_or_cidr "1.2.3.4 port 22"
 bad validate_ip_or_cidr any
 bad validate_ip_or_cidr 1234

@@ -597,7 +597,17 @@ func ParseAllowIPs(raw string) ([]string, error) {
 			if err != nil {
 				return nil, fmt.Errorf("geçersiz IP: %s", f)
 			}
-			norm = a.Unmap().String()
+			a = a.Unmap()
+			norm = a.String()
+		}
+		// 0.0.0.0 / :: as a source matches no client in UFW: someone typing
+		// it to "open everything" would silently get no access at all.
+		base, _ := netip.ParseAddr(strings.Split(norm, "/")[0])
+		if base.IsUnspecified() {
+			return nil, fmt.Errorf("%s bir istemci adresi değil; tüm interneti açmak desteklenmez. Bağlanacak bilgisayarların IP'lerini girin ya da SSH tüneli kullanın", f)
+		}
+		if base.IsLoopback() || base.IsMulticast() {
+			return nil, fmt.Errorf("%s dış erişim için geçerli değil (yerel erişim zaten açık)", f)
 		}
 		if !seen[norm] {
 			seen[norm] = true
