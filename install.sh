@@ -138,11 +138,22 @@ confirm() {
   [[ -z $a || $a == [EeYy]* ]]
 }
 
+# os_release FILE — prints "<ID> <VERSION_ID>". Sourced in a subshell:
+# os-release defines VERSION, NAME, ID… which would overwrite our own
+# variables (VERSION is the release tag to download).
+os_release() {
+  (
+    # shellcheck disable=SC1090
+    . "$1"
+    printf '%s %s\n' "${ID:-}" "${VERSION_ID:-}"
+  )
+}
+
 check_system() {
   [[ $EUID -eq 0 ]] || fail "root olarak çalıştırın (sudo)"
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  [[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 24.04 ]] || fail "yalnızca Ubuntu 24.04 desteklenir (bulunan: ${PRETTY_NAME:-?})"
+  local os
+  os=$(os_release /etc/os-release)
+  [[ $os == "ubuntu 24.04" ]] || fail "yalnızca Ubuntu 24.04 desteklenir (bulunan: ${os:-?})"
   case $(dpkg --print-architecture) in
     amd64) ARCH=amd64 ;;
     arm64) ARCH=arm64 ;;

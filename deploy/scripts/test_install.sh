@@ -51,6 +51,17 @@ got=$( load; PORT=8443; ufw_plan 22 2222 | paste -sd' ' - )
 got=$( load; PORT=443; ufw_plan 22 | paste -sd' ' - )
 [[ $got == "22/tcp 80/tcp 443/tcp" ]] || { echo "FAIL ufw_plan 443: $got"; fail=1; }
 
+# os-release must not clobber the installer's VERSION (release tag).
+cat >"$tmp/os-release" <<'OS'
+PRETTY_NAME="Ubuntu 24.04.3 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.3 LTS (Noble Numbat)"
+ID=ubuntu
+OS
+got=$( load; VERSION=latest; o=$(os_release "$tmp/os-release"); echo "$o|$VERSION" )
+[[ $got == "ubuntu 24.04|latest" ]] || { echo "FAIL os_release: $got"; fail=1; }
+
 # Installer's own SSH client address (kept out of fail2ban bans).
 got=$( load; SSH_CONNECTION="203.0.113.7 51234 10.0.0.5 22" client_ip )
 [[ $got == 203.0.113.7 ]] || { echo "FAIL client_ip: $got"; fail=1; }
