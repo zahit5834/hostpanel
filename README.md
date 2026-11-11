@@ -8,6 +8,7 @@ Ubuntu 24.04 için tek yöneticili, ultra hafif hosting kontrol paneli: Go, tek 
 - **SSL:** Let's Encrypt (DNS + HTTP ön kontrolü, otomatik yenileme), CSR üretimi, ücretli sertifika doğrulama ve kurulumu, bitiş takibi.
 - **MSSQL 2025 (Docker):** müşteri başına login, izole veritabanları, dış erişim için IP allowlist + UFW.
 - **PostgreSQL 18 (Docker):** müşteri başına rol, sahibine ait veritabanları, site env'ine connection string, `pg_dump -Fc` dökümüyle taşıma, yedek/geri yükleme, dış erişim için IP allowlist + UFW.
+- **E-posta (docker-mailserver):** müşteri alan adları için posta kutuları, kota, yönlendirmeler; DKIM/SPF/DMARC/MX kayıtları panelin DNS'ine otomatik; Let's Encrypt sertifikası, kuyruk, engellenen IP'ler, yedek/geri yükleme. Webmail yoktur (Outlook, Thunderbird, telefon).
 - **Yedekleme:** yerel + Google Drive (rclone, isteğe bağlı şifreleme). Planlar, saklama kuralları, geri yükleme/klon ve taşıma sihirbazı.
 - **DNS (kendi nameserver'larınız):** BIND 9 (yalnızca yetkili sunucu), zone ve kayıt yönetimi (A, AAAA, CNAME, MX, TXT, SRV, CAA, NS), sitelerin A/AAAA kayıtları otomatik, yetki devri kontrolü, isteğe bağlı DNSSEC.
 - **İzleme:** CPU/RAM/disk, site başına RAM/CPU, health check, çökme döngüsü tespiti, Telegram/e-posta bildirimleri.
@@ -19,7 +20,7 @@ Ubuntu 24.04 için tek yöneticili, ultra hafif hosting kontrol paneli: Go, tek 
 ## Gereksinimler
 - Ubuntu 24.04 LTS, amd64 veya arm64
 - root (sudo) erişimi
-- Önerilen en az 2 GB RAM; MSSQL kullanılacaksa 4 GB (PostgreSQL varsayılan olarak 2 GB ayırır, en az 512 MB)
+- Önerilen en az 2 GB RAM; MSSQL kullanılacaksa 4 GB (PostgreSQL varsayılan olarak 2 GB ayırır, en az 512 MB; posta sunucusu 1 GB, virüs taramasıyla en az 2.5 GB)
 - Panel için alan adı isteğe bağlıdır. Verilmezse panel `https://<sunucu-ip>:8443` adresinde self-signed sertifikayla açılır.
 
 ## Kurulum
@@ -102,6 +103,24 @@ Sunucu kapalıyken bu domain'ler çözülmez. E-posta gibi kritik hizmetler içi
 
 Not: PostgreSQL'de veritabanı **adları** tüm rollere görünür; içerik görünmez. Bir müşteri başka bir müşterinin veritabanına bağlanamaz, okuyamaz ve yazamaz. "İzolasyon testi" bunu iki yönde doğrular.
 
+## E-posta
+1. **Ön koşullar:**
+   - Posta sunucusunun adı (ör. `mail.ornek.com`) için bu sunucuyu gösteren bir **A kaydı**.
+   - Sağlayıcı panelinden sunucu IP'sinin **PTR** (ters DNS) kaydı = posta sunucusunun adı.
+   - Sağlayıcı giden 25. portu açmış olmalı (E-posta sayfasındaki "Kontrol et" bunu dener).
+   - Bu ad bir site ya da panel domain'i olamaz.
+2. **E-posta → kurulum:** Docker yoksa "Docker'ı kur". Ardından posta sunucusunun adı, ilk alan adı, Let's Encrypt e-postası ve bellek (varsayılan 1024 MB) → "Posta sunucusunu kur".
+   - İmaj `mailserver/docker-mailserver:17.0.0-r1`, container `hostpanel-mail`, veri `/var/lib/hostpanel-mail`.
+   - 25, 465, 587 ve 993. portlar açılır. Bu portlar Docker üzerinden yayınlandığı için **UFW'den geçmez**; UFW onları kapatamaz.
+   - Kurulum sertifikayı alır, DKIM anahtarını üretir ve açık röle testi yapar.
+3. **Alan adı ekle** (müşteri seçilebilir) → alan adı sayfasında posta kutuları, kota ve yönlendirmeler.
+   - Şifre panelde **saklanmaz**: oluşturma ve sıfırlamada bir kez gösterilir.
+   - Zone panelin DNS'indeyse MX, SPF, DKIM ve DMARC kayıtları otomatik yayınlanır. Değilse sayfadaki tabloyu alan adının DNS sağlayıcısına girin.
+4. **İstemci ayarları:** IMAP `<posta adı>:993` (SSL/TLS), SMTP `<posta adı>:465` (SSL/TLS) ya da `587` (STARTTLS); kullanıcı adı tam e-posta adresidir.
+5. **Yedek:** E-posta sayfasından "Şimdi yedekle" ya da Yedekler → plan kapsamı "Posta sunucusu". Yedek tüm hesapları, DKIM anahtarlarını ve postaları içerir (tam yedek). Geri yükleme E-posta sayfasından yapılır.
+
+Kaba kuvvet denemelerini container içindeki fail2ban engeller (yalnızca posta portları; SSH'a dokunmaz). Engellenen IP'ler E-posta sayfasından kaldırılabilir.
+
 ## Güncelleme
 - **Panelden:** Ayarlar → Güncelleme → "vX.Y.Z sürümüne güncelle".
   - Panel her gün yeni sürümü kontrol eder ve bildirim gönderir.
@@ -118,12 +137,13 @@ Not: PostgreSQL'de veritabanı **adları** tüm rollere görünür; içerik gör
 ```bash
 sudo /opt/hostpanel/uninstall.sh
 ```
-Varsayılan olarak yalnızca panel kaldırılır. Siteler çalışmaya devam eder; veritabanları, yedekler, panel ayarları ve UFW kuralları korunur. Bunları da silmek için ayrı bayraklar vardır; her biri ayrıca yazılı onay ister:
+Varsayılan olarak yalnızca panel kaldırılır. Siteler çalışmaya devam eder; veritabanları, posta sunucusu, yedekler, panel ayarları ve UFW kuralları korunur. Bunları da silmek için ayrı bayraklar vardır; her biri ayrıca yazılı onay ister:
 
 | Bayrak | Siler |
 |---|---|
 | `--delete-sites` | Tüm siteler: servisler, nginx config'leri, site kullanıcıları, `/var/www/sites` |
 | `--delete-databases` | MSSQL ve PostgreSQL container'ları ve tüm veritabanları |
+| `--delete-mail` | Posta sunucusu, tüm posta kutuları ve postalar (`/var/lib/hostpanel-mail`), sertifikası ve vhost'u |
 | `--delete-backups` | Yerel yedekler (`/var/backups/hostpanel`); Drive'dakiler kalır |
 | `--purge-config` | Panel veritabanı, config, `master.key`, loglar, `hostpanel` kullanıcısı |
 
@@ -148,7 +168,8 @@ Varsayılan olarak yalnızca panel kaldırılır. Siteler çalışmaya devam ede
    - "Drive'ı tara" ile yedekleri listeye alın.
 4. DNS kullanılıyorsa: DNS → IP'leri kontrol edip kaydedin → "DNS sunucusunu kur"; registrar'da glue IP'lerini değiştirin. DNSSEC'li zone'lar yeni anahtarla imzalanır, yeni DS kaydını registrar'a girin.
 5. MSSQL/PostgreSQL kullanılıyorsa sunucuyu kurun ve müşteri login'lerini/rollerini yeniden oluşturun (müşteri detayı).
-6. Siteleri oluşturup yedekten geri yükleyin. DNS'i yeni sunucuya çevirip SSL alın.
+6. E-posta kullanılıyorsa: posta sunucusunu aynı adla kurun, ardından Drive'dan taranan posta yedeğini E-posta sayfasından geri yükleyin (alan adları ve DKIM anahtarları yedekten gelir). A/PTR kayıtlarını yeni IP'ye çevirin.
+7. Siteleri oluşturup yedekten geri yükleyin. DNS'i yeni sunucuya çevirip SSL alın.
 
 ## Güvenlik özeti
 - **Yetki sınırı:**

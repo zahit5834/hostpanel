@@ -61,6 +61,8 @@ func TestExportImportRoundTrip(t *testing.T) {
 	mustExec(t, db, `INSERT INTO pg_servers(image, memory_mb, status, created_at, updated_at) VALUES('postgres:18.6-trixie', 2048, 'running', ?, ?)`, now, now)
 	mustExec(t, db, `INSERT INTO pg_roles(customer_id, name, password_sealed, created_at, updated_at) VALUES(1, 'c_x', 'sealed', ?, ?)`, now, now)
 	mustExec(t, db, `INSERT INTO pg_databases(customer_id, role_id, name, status, created_at) VALUES(1, 1, 'x_db', 'ready', ?)`, now)
+	mustExec(t, db, `INSERT INTO mail_servers(image, hostname, le_email, memory_mb, status, created_at, updated_at) VALUES('mailserver/docker-mailserver:17.0.0-r1', 'mail.ornek.com', 'a@ornek.com', 1024, 'running', ?, ?)`, now, now)
+	mustExec(t, db, `INSERT INTO mail_domains(customer_id, name, created_at) VALUES(1, 'ornek.com', ?)`, now)
 	rt := filepath.Join(src, "runtimes")
 	os.MkdirAll(rt, 0o755)
 	os.WriteFile(filepath.Join(rt, "static.yaml"), []byte("id: static # old shipped\n"), 0o644)
@@ -139,6 +141,8 @@ func TestExportImportRoundTrip(t *testing.T) {
 		`SELECT COUNT(*) FROM pg_servers`:                                                       0,
 		`SELECT COUNT(*) FROM pg_roles`:                                                         0,
 		`SELECT COUNT(*) FROM pg_databases`:                                                     0,
+		`SELECT COUNT(*) FROM mail_servers`:                                                     0,
+		`SELECT COUNT(*) FROM mail_domains`:                                                     0,
 		`SELECT COUNT(*) FROM dns_records`:                                                      1,
 		`SELECT COUNT(*) FROM settings WHERE key='dns_ns1'`:                                     1,
 		`SELECT COUNT(*) FROM settings WHERE key IN ('dns_installed','dns_ips')`:                0,

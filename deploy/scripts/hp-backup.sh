@@ -54,31 +54,10 @@ rclone_() {
 }
 
 
-backup_dir() {
-  validate_domain "$1"
-  validate_backup_name "$2"
-  printf '%s\n' "$BACKUP_ROOT/$1/$2"
-}
-
-# check_sums DIR — every file is an expected one and matches SHA256SUMS.
-check_sums() {
-  local d=$1 f line
-  [[ -f $d/SHA256SUMS ]] || die "SHA256SUMS yok: ${d}"
-  while IFS= read -r f; do
-    validate_backup_file "$f"
-  done < <(find "$d" -mindepth 1 -maxdepth 1 -printf '%f\n')
-  [[ -z $(find "$d" -mindepth 1 \( -type l -o -type d \)) ]] || die "yedekte dizin/symlink olamaz"
-  while IFS= read -r line; do
-    [[ $line =~ ^[0-9a-f]{64}\ \ (.+)$ ]] || die "SHA256SUMS biçimi bozuk"
-    validate_backup_file "${BASH_REMATCH[1]}"
-  done <"$d/SHA256SUMS"
-  (cd "$d" && sha256sum --quiet --strict -c SHA256SUMS) || die "sağlama toplamı tutmuyor: ${d}"
-  log "sağlama toplamları doğru"
-}
-
 case $action in
   create)
     [[ $# -ge 4 ]] || die "kullanım: create <domain> <name> <components> <release|-> [db...]"
+    [[ $1 != _mail ]] || die "posta yedekleri hp-mail.sh backup ile alınır"
     out=$(backup_dir "$1" "$2")
     domain=$1 name=$2 comps=$3 release=$4
     shift 4
@@ -342,6 +321,7 @@ case $action in
 
   restore-files)
     [[ $# -ge 5 ]] || die "kullanım: restore-files <src_domain> <name> <domain> <site_user> <release> [dir...]"
+    [[ $1 != _mail ]] || die "posta yedeği siteye geri yüklenemez"
     src=$(backup_dir "$1" "$2")
     dir=$(site_dir "$3")
     expected_user=$4 release=$5

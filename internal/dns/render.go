@@ -59,13 +59,31 @@ type SiteNames struct {
 	Names  []string // domain, www (when used) and aliases
 }
 
+// MailDomain is a mail domain served by the panel's mail server.
+type MailDomain struct {
+	Name         string
+	DKIMSelector string
+	DKIMTXT      string // "" until the key exists
+}
+
 // RenderInput is everything a zone file is built from.
 type RenderInput struct {
 	Zone     Zone
 	Records  []Record    // stored records
 	Sites    []SiteNames // sites whose names fall into this zone
 	Settings Settings
+	// MailHost is the mail server's name ("" = no mail server); its A record
+	// is added when it falls into this zone. MailDomains are the mail
+	// domains of this zone (MX, SPF, DKIM and DMARC records).
+	MailHost    string
+	MailDomains []MailDomain
 }
+
+// DMARCPolicy and SPFPolicy are the records published for mail domains.
+const (
+	SPFPolicy   = "v=spf1 mx ~all"
+	DMARCPolicy = "v=DMARC1; p=quarantine"
+)
 
 // AutoRecords derives the A/AAAA records for the nameservers living inside
 // the zone (glue content) and, when the zone has AutoSites, for every site
@@ -107,6 +125,84 @@ func AutoRecords(in RenderInput) []Record {
 			for _, n := range s.Names {
 				add(n, s.Domain)
 			}
+		}
+	}
+	return append(out, mailRecords(in, taken)...)
+}
+
+// relName returns host relative to zone ("" when outside it).
+func relName(host, zone string) string {
+	if host == zone {
+		return "@"
+	}
+	if !strings.HasSuffix(host, "."+zone) {
+		return ""
+	}
+	return strings.TrimSuffix(host, "."+zone)
+}
+
+func under(label, rel string) string {
+	if rel == "@" {
+		return label
+	}
+	return label + "." + rel
+}
+
+// mailRecords derives the mail server's A record (IPv4 only: the container
+// publishes its ports on IPv4) and, per mail domain, MX + SPF + DKIM + DMARC.
+// Manual records win: an MX at the name, a "v=spf1" TXT, any TXT/CNAME at the
+// DKIM or DMARC name, and a CNAME at the domain name (nothing may sit next
+// to a CNAME) each suppress the corresponding automatic record.
+func mailRecords(in RenderInput, taken map[string]bool) []Record {
+	if in.MailHost == "" {
+		return nil
+	}
+	zone := in.Zone.Name
+	var out []Record
+	auto := func(r Record) {
+		r.ZoneID, r.Auto, r.Source = in.Zone.ID, true, "posta"
+		out = append(out, r)
+	}
+	if rel := relName(in.MailHost, zone); rel != "" && !taken[rel] {
+		taken[rel] = true
+		for _, ip := range in.Settings.IPs {
+			if ip.Is4() {
+				auto(Record{Name: rel, Type: TypeA, Value: ip.String()})
+			}
+		}
+	}
+	cname, mx, spf, txt := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, r := range in.Records {
+		switch r.Type {
+		case TypeCNAME:
+			cname[r.Name] = true
+		case TypeMX:
+			mx[r.Name] = true
+		case TypeTXT:
+			txt[r.Name] = true
+			if strings.HasPrefix(strings.ToLower(r.Value), "v=spf1") {
+				spf[r.Name] = true
+			}
+		}
+	}
+	for _, d := range in.MailDomains {
+		rel := relName(d.Name, zone)
+		if rel == "" || cname[rel] {
+			continue
+		}
+		if !mx[rel] {
+			auto(Record{Name: rel, Type: TypeMX, Prio: 10, Value: in.MailHost})
+		}
+		if !spf[rel] {
+			auto(Record{Name: rel, Type: TypeTXT, Value: SPFPolicy})
+		}
+		if sel := d.DKIMSelector; d.DKIMTXT != "" && sel != "" {
+			if n := under(sel+"._domainkey", rel); !txt[n] && !cname[n] {
+				auto(Record{Name: n, Type: TypeTXT, Value: d.DKIMTXT})
+			}
+		}
+		if n := under("_dmarc", rel); !txt[n] && !cname[n] {
+			auto(Record{Name: n, Type: TypeTXT, Value: DMARCPolicy})
 		}
 	}
 	return out

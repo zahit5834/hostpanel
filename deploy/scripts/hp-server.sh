@@ -7,7 +7,7 @@
 #   hp-server.sh ufw-delete <rule-number> <hash>
 #       hash = first 16 hex of sha256 of the rule's "ufw status numbered" line
 #       as the panel saw it: if the list changed meanwhile, nothing is deleted.
-#   hp-server.sh disk-usage           key=bytes lines (sites, backups, mssql, postgres, docker, panel, logs)
+#   hp-server.sh disk-usage           key=bytes lines (sites, backups, mssql, postgres, mail, docker, panel, logs)
 #
 # The panel never enables or disables UFW (SSH lock-out risk); rules are only
 # added/removed while UFW is already active. Rules for SSH (22 and sshd's real
@@ -107,6 +107,7 @@ case $action in
     echo "mssql=$(du_b /var/lib/hostpanel/mssql)"
     pg=$(($(du_b /var/lib/hostpanel/postgres) + $(du_b /var/lib/hostpanel/postgres-backup)))
     echo "postgres=$pg"
+    echo "mail=$(du_b /var/lib/hostpanel-mail)"
     echo "docker=$(du_b /var/lib/docker)"
     echo "panel=$(du_b /var/lib/hostpanel --exclude=/var/lib/hostpanel/mssql --exclude=/var/lib/hostpanel/postgres --exclude=/var/lib/hostpanel/postgres-backup)"
     echo "logs=$(du_b /var/log)"

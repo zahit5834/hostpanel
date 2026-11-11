@@ -25,7 +25,7 @@ func init() {
 	funcs["schedule"] = backups.Describe
 	funcs["compLabel"] = func(c string) string {
 		return map[string]string{backups.CompFiles: "Dosyalar", backups.CompDB: "Veritabanı", backups.CompConfig: "Ayarlar",
-			backups.CompSSL: "SSL"}[c]
+			backups.CompSSL: "SSL", backups.CompMail: "Posta (hesaplar + postalar)"}[c]
 	}
 	funcs["kindLabel"] = func(k string) string {
 		return map[string]string{backups.KindManual: "elle", backups.KindScheduled: "plan", backups.KindPreRestore: "geri yükleme öncesi",
@@ -59,6 +59,7 @@ type backupsPageData struct {
 	Keys       *backups.CryptSecret // shown once after generation / on reveal
 	Rclone     string
 	DryRun     bool
+	MailReady  bool // mail server installed: plans may back it up
 }
 
 var backupTabs = map[string]bool{"list": true, "plans": true, "settings": true}
@@ -92,6 +93,7 @@ func (s *Server) renderBackups(w http.ResponseWriter, r *http.Request, status in
 		Rclone: backups.RcloneVersion}
 	d.Sites, _ = s.Sites.Store.List(ctx, 0)
 	d.Remote = s.Backups.Remote(ctx)
+	d.MailReady = s.Mail != nil && s.Mail.Installed(ctx)
 	switch tab {
 	case "list":
 		d.Backups, _ = s.Backups.Store.Backups(ctx, backups.Filter{SiteID: d.SiteFilter, Limit: 500})
@@ -313,6 +315,10 @@ type restorePageData struct {
 func (s *Server) backupRestorePage(w http.ResponseWriter, r *http.Request) {
 	b, ok := s.loadBackup(w, r)
 	if !ok {
+		return
+	}
+	if b.IsMail() {
+		http.Redirect(w, r, "/mail", http.StatusSeeOther)
 		return
 	}
 	s.renderRestore(w, r, http.StatusOK, b, "")

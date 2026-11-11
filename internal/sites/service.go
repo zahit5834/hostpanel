@@ -50,6 +50,9 @@ type Service struct {
 	ProbeToken string
 	// PanelDomain is the panel's own nginx name (config panel_domain); sites can't use it.
 	PanelDomain string
+	// MailHost returns the mail server's name ("" = none); its port 80
+	// vhost (certificate challenges) owns it.
+	MailHost func(ctx context.Context) string
 	// DeleteHook runs inside the site delete job before the site row is
 	// removed (databases inject "drop the site's databases"). The site lock is
 	// held: the hook must not call SaveEnv/Operate.
@@ -149,7 +152,7 @@ func (s *Service) Prepare(ctx context.Context, in CreateInput) (Site, error) {
 	if site.Aliases, err = ParseAliases(in.Aliases, site.Domain); err != nil {
 		return site, err
 	}
-	if err := s.notPanelDomain(append([]string{site.Domain, "www." + site.Domain}, site.Aliases...)); err != nil {
+	if err := s.notPanelDomain(ctx, append([]string{site.Domain, "www." + site.Domain}, site.Aliases...)); err != nil {
 		return site, err
 	}
 	switch site.WWWMode {
@@ -1034,14 +1037,19 @@ func contains(list []string, v string) bool {
 // ErrNotFound is returned for unknown sites.
 var ErrNotFound = sql.ErrNoRows
 
-// notPanelDomain rejects the panel's own name: its nginx vhost already owns it.
-func (s *Service) notPanelDomain(names []string) error {
-	if s.PanelDomain == "" {
-		return nil
+// notPanelDomain rejects the panel's own name and the mail server's name:
+// their nginx vhosts already own them.
+func (s *Service) notPanelDomain(ctx context.Context, names []string) error {
+	mail := ""
+	if s.MailHost != nil {
+		mail = s.MailHost(ctx)
 	}
 	for _, n := range names {
-		if n == s.PanelDomain {
+		if s.PanelDomain != "" && n == s.PanelDomain {
 			return fmt.Errorf("%s panelin kendi adresi; site olarak kullanılamaz", n)
+		}
+		if mail != "" && n == mail {
+			return fmt.Errorf("%s posta sunucusunun adı; site olarak kullanılamaz", n)
 		}
 	}
 	return nil

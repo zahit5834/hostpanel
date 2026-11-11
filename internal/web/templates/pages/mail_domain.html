@@ -1,0 +1,151 @@
+{{define "content"}}
+{{with .Data}}{{$d := .Domain}}
+<div class="card-head">
+  <h1><a href="/mail" class="muted">E-posta</a> / {{$d.Name}}</h1>
+  {{if $d.CustomerID}}<span class="muted">Müşteri: <a href="/customers/{{$d.CustomerID}}">{{$d.CustomerName}}</a></span>{{end}}
+</div>
+
+{{if .JobID}}{{template "job-console" .JobID}}{{end}}
+
+{{with .Revealed}}
+<section class="card stack alert-card">
+  <h2>{{if .Created}}Posta kutusu oluşturuldu{{else}}Şifre değiştirildi{{end}}</h2>
+  <p class="small">Şifre panelde <strong>saklanmaz</strong> ve bir daha gösterilmez; şimdi kopyalayıp kullanıcıya iletin.</p>
+  <dl class="kv">
+    <dt>Adres / kullanıcı adı</dt><dd><code>{{.Address}}</code></dd>
+    <dt>Şifre</dt><dd><code id="mb-pass">{{.Password}}</code> <button type="button" x-data="copy" data-target="mb-pass" x-on:click="copy" x-text="label">Kopyala</button></dd>
+  </dl>
+</section>
+{{end}}
+
+{{if not .Installed}}<div class="alert">Posta sunucusunun kurulumu tamamlanmadı.</div>{{end}}
+{{if .ListErr}}<p class="err-text small">Hesap listesi okunamadı: {{.ListErr}}</p>{{end}}
+
+<section class="card table-wrap">
+  <h2 class="pad">Posta kutuları</h2>
+  <table class="table">
+    <thead><tr><th>Adres</th><th>Kullanım</th><th></th></tr></thead>
+    <tbody>
+    {{range .Mailboxes}}
+      <tr>
+        <td><code>{{.Address}}</code></td>
+        <td class="nowrap">{{if .HasUsage}}{{.UsedMB}} MB{{else}}—{{end}} / {{if .QuotaMB}}{{.QuotaMB}} MB{{if .HasUsage}} <progress max="100" value="{{.UsedPct}}"></progress>{{end}}{{else}}sınırsız{{end}}</td>
+        <td class="right"><div class="ops end">
+          <details class="inline-details"><summary class="button">Şifre</summary>
+            <form method="post" action="/mail/domains/{{$d.ID}}/mailboxes/password" class="stack pad">
+              <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="address" value="{{.Address}}">
+              <input type="password" name="password" placeholder="boş: rastgele üretilir" autocomplete="new-password" minlength="10" maxlength="128">
+              <button type="submit">Şifreyi değiştir</button>
+            </form>
+          </details>
+          <details class="inline-details"><summary class="button">Kota</summary>
+            <form method="post" action="/mail/domains/{{$d.ID}}/mailboxes/quota" class="inline-form pad">
+              <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="address" value="{{.Address}}">
+              <input type="number" name="quota_mb" min="0" step="256" value="{{.QuotaMB}}"> MB
+              <button type="submit">Kaydet</button>
+            </form>
+          </details>
+          <details class="inline-details"><summary class="button danger">Sil</summary>
+            <form method="post" action="/mail/domains/{{$d.ID}}/mailboxes/delete" class="stack pad">
+              <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="address" value="{{.Address}}">
+              <span class="small">Postalar önce arşivlenir (<code>/var/backups/hostpanel/_mail/</code>), sonra hesap, kota ve bu adrese giden yönlendirmeler silinir. Onay için adresi yazın: <strong>{{.Address}}</strong></span>
+              <input name="confirm" autocomplete="off" spellcheck="false" required>
+              <button type="submit" class="danger">Kalıcı olarak sil</button>
+            </form>
+          </details>
+        </div></td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not .Mailboxes}}<p class="muted pad">Bu alan adında posta kutusu yok. İlk kutu ya da yönlendirme eklenene kadar bu alan adına gelen posta reddedilir.</p>{{end}}
+  {{if .Installed}}
+  <form method="post" action="/mail/domains/{{$d.ID}}/mailboxes" class="stack pad">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <h3>Yeni posta kutusu</h3>
+    <div class="form-grid">
+      <label>Adres * <span class="inline-form"><input name="local" placeholder="ali" required pattern="[a-z0-9][a-z0-9._\-]{0,63}" spellcheck="false" autocomplete="off"> <span>@{{$d.Name}}</span></span>
+        <span class="muted small">Küçük harf, rakam, nokta, tire, alt çizgi.</span></label>
+      <label>Şifre <input type="password" name="password" placeholder="boş: rastgele 20 karakter" autocomplete="new-password" minlength="10" maxlength="128">
+        <span class="muted small">10–128 karakter, boşluksuz. Oluşturunca bir kez gösterilir.</span></label>
+      <label>Kota (MB) <input type="number" name="quota_mb" min="0" step="256" value="2048"><span class="muted small">0 = sınırsız.</span></label>
+    </div>
+    <div><button type="submit" class="primary">Oluştur</button></div>
+  </form>
+  {{end}}
+</section>
+
+<section class="card table-wrap">
+  <h2 class="pad">Yönlendirmeler</h2>
+  <table class="table">
+    <thead><tr><th>Adres</th><th>Hedefler</th></tr></thead>
+    <tbody>
+    {{range .Aliases}}{{$a := .Address}}
+      <tr>
+        <td><code>{{$a}}</code></td>
+        <td><div class="stack">{{range .Targets}}
+          <form method="post" action="/mail/domains/{{$d.ID}}/aliases/delete" class="inline-form">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="alias" value="{{$a}}"><input type="hidden" name="target" value="{{.}}">
+            <code>{{.}}</code> <button type="submit" class="link-btn" data-confirm="{{$a}} → {{.}} yönlendirmesi silinsin mi?">kaldır</button>
+          </form>{{end}}</div></td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not .Aliases}}<p class="muted pad">Yönlendirme yok.</p>{{end}}
+  {{if .Installed}}
+  <form method="post" action="/mail/domains/{{$d.ID}}/aliases" class="inline-form pad">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <input name="local" placeholder="info" required pattern="[a-z0-9][a-z0-9._\-]{0,63}" spellcheck="false" autocomplete="off"> <span>@{{$d.Name}} →</span>
+    <input type="email" name="target" placeholder="ali@{{$d.Name}} ya da dis@gmail.com" required>
+    <button type="submit">Yönlendirme ekle</button>
+  </form>
+  <p class="muted small pad">Bir adres birden çok hedefe yönlenebilir (en fazla {{.MaxTargets}}); aynı adres hem kutu hem yönlendirme olamaz. Dış adrese yönlendirmede gönderenin SPF'i bu sunucuyu kapsamadığından bazı postalar karşı tarafta spama düşebilir.</p>
+  {{end}}
+</section>
+
+<section class="card stack">
+  <div class="card-head"><h2>DNS kayıtları</h2>
+    {{if .Running}}<button type="button" hx-post="/mail/domains/{{$d.ID}}/check" hx-target="#domain-checks" hx-swap="innerHTML">Yayındaki kayıtları kontrol et</button>{{end}}</div>
+  <div id="domain-checks"></div>
+  {{if .Zone}}
+  <p class="small">Bu alan adının zone'u panelin DNS'inde (<a href="/dns">{{.Zone}}</a>){{if not .DNSReady}}, ancak DNS sunucusu henüz kurulu değil{{end}}: aşağıdaki kayıtlar otomatik yayınlanır. Aynı adda elle girilmiş kayıt (MX, <code>v=spf1</code>, <code>_dmarc</code>, DKIM) varsa otomatik kayıt üretilmez.</p>
+  {{else}}
+  <p class="small">Zone panelde değil: aşağıdaki kayıtları alan adının DNS sağlayıcısına (registrar, Cloudflare…) girin.</p>
+  {{end}}
+  <table class="table">
+    <thead><tr><th>Ad</th><th>Tür</th><th>Değer</th></tr></thead>
+    <tbody>
+    {{range $i, $r := .Records}}
+      <tr><td class="nowrap"><code>{{$r.Name}}</code></td><td>{{$r.Type}}</td>
+        <td><code id="rec-{{$i}}" class="ellipsis">{{$r.Value}}</code> <button type="button" x-data="copy" data-target="rec-{{$i}}" x-on:click="copy" x-text="label">Kopyala</button></td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not $d.DKIMTXT}}<p class="muted small">DKIM anahtarı posta sunucusu çalışırken üretilir.</p>{{end}}
+  <p class="muted small">Ek olarak: posta sunucusunun adı <code>{{.Host}}</code> için A kaydı ve sağlayıcı panelinden PTR. DMARC başlangıçta <code>p=quarantine</code>; raporlama adresi isterseniz kaydı elle düzenleyin.</p>
+</section>
+
+<section class="card stack danger-zone">
+  <h2>Alan adını kaldır</h2>
+  {{if or .Mailboxes .Aliases}}<p class="muted small">Önce bu alan adındaki posta kutularını ve yönlendirmeleri silin.</p>{{else}}
+  <form method="post" action="/mail/domains/{{$d.ID}}/delete" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <span class="small">DKIM anahtarı arşivlenip silinir, DNS kayıtları kaldırılır. Onay için alan adını yazın: <strong>{{$d.Name}}</strong></span>
+    <input name="confirm" autocomplete="off" spellcheck="false" required>
+    <div><button type="submit" class="danger">Alan adını kaldır</button></div>
+  </form>
+  {{end}}
+</section>
+{{end}}
+{{end}}
+
+{{define "mail-checks"}}
+<ul class="checks">
+  {{range .Data}}<li class="check-{{if .OK}}ok{{else}}err{{end}}">{{if .OK}}✓{{else}}✗{{end}} <strong>{{.Name}}</strong>: {{.Detail}}</li>{{end}}
+</ul>
+{{end}}

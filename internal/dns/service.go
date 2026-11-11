@@ -58,6 +58,8 @@ type Service struct {
 	LookupNS func(ctx context.Context, zone string) ([]*net.NS, error)
 	// LocalAddr is the local BIND for "answers locally" checks (default 127.0.0.1:53).
 	LocalAddr string
+	// Mail returns the mail server's name and mail domains (nil = no mail).
+	Mail func(ctx context.Context) (host string, domains []MailDomain)
 
 	mu    sync.Mutex // one apply at a time
 	cache sync.Map   // zone → delegationCache
@@ -339,6 +341,15 @@ func (s *Service) Input(ctx context.Context, z Zone) (RenderInput, error) {
 			}
 		}
 	}
+	if s.Mail != nil {
+		host, domains := s.Mail(ctx)
+		in.MailHost = host
+		for _, d := range domains {
+			if ZoneFor(d.Name, zones) == z.Name {
+				in.MailDomains = append(in.MailDomains, d)
+			}
+		}
+	}
 	return in, nil
 }
 
@@ -511,6 +522,34 @@ func (s *Service) SitesChanged(ctx context.Context, names []string) {
 		}
 		if _, err := s.submitApply(ctx, z.ID, false); err != nil && s.Log != nil {
 			s.Log.Warn("dns apply after site change", "zone", zn, "err", err)
+		}
+	}
+}
+
+// MailChanged re-renders the zones covering names (mail server installed or
+// removed, mail domain added/removed, DKIM key created). Unlike sites, mail
+// records do not depend on the zone's AutoSites switch.
+func (s *Service) MailChanged(ctx context.Context, names []string) {
+	if !s.Installed(ctx) {
+		return
+	}
+	zones, err := s.Store.ZoneNames(ctx)
+	if err != nil {
+		return
+	}
+	seen := map[string]bool{}
+	for _, n := range names {
+		zn := ZoneFor(n, zones)
+		if zn == "" || seen[zn] {
+			continue
+		}
+		seen[zn] = true
+		z, err := s.Store.ZoneByName(ctx, zn)
+		if err != nil {
+			continue
+		}
+		if _, err := s.submitApply(ctx, z.ID, false); err != nil && s.Log != nil {
+			s.Log.Warn("dns apply after mail change", "zone", zn, "err", err)
 		}
 	}
 }

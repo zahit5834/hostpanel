@@ -415,7 +415,31 @@ validate_staged_bak() {
 
 # validate_backup_file NAME — files allowed inside a backup directory.
 validate_backup_file() {
-  [[ ${1:-} =~ ^(files\.tar\.zst|ssl\.tar\.zst|config\.json|nginx\.conf|manifest\.json|SHA256SUMS|db-[a-z][a-z0-9_]{1,62}\.bak|db-pg-[a-z][a-z0-9_]{1,62}\.dump)$ ]] || die "yedekte beklenmeyen dosya: '${1:-}'"
+  [[ ${1:-} =~ ^(files\.tar\.zst|ssl\.tar\.zst|config\.json|nginx\.conf|manifest\.json|SHA256SUMS|db-[a-z][a-z0-9_]{1,62}\.bak|db-pg-[a-z][a-z0-9_]{1,62}\.dump|mail-config\.tar\.zst|mail-data\.tar\.zst)$ ]] || die "yedekte beklenmeyen dosya: '${1:-}'"
+}
+
+# backup_dir DOMAIN NAME — the local directory of one backup. DOMAIN is a site
+# domain or "_mail" (mail server backups, Faz 9).
+backup_dir() {
+  [[ ${1:-} == _mail ]] || validate_domain "$1"
+  validate_backup_name "$2"
+  printf '%s\n' "$BACKUP_ROOT/$1/$2"
+}
+
+# check_sums DIR — every file is an expected one and matches SHA256SUMS.
+check_sums() {
+  local d=$1 f line
+  [[ -f $d/SHA256SUMS ]] || die "SHA256SUMS yok: ${d}"
+  while IFS= read -r f; do
+    validate_backup_file "$f"
+  done < <(find "$d" -mindepth 1 -maxdepth 1 -printf '%f\n')
+  [[ -z $(find "$d" -mindepth 1 \( -type l -o -type d \)) ]] || die "yedekte dizin/symlink olamaz"
+  while IFS= read -r line; do
+    [[ $line =~ ^[0-9a-f]{64}\ \ (.+)$ ]] || die "SHA256SUMS biçimi bozuk"
+    validate_backup_file "${BASH_REMATCH[1]}"
+  done <"$d/SHA256SUMS"
+  (cd "$d" && sha256sum --quiet --strict -c SHA256SUMS) || die "sağlama toplamı tutmuyor: ${d}"
+  log "sağlama toplamları doğru"
 }
 
 # ---------------------------------------------------------------------------
@@ -777,6 +801,22 @@ ${hsts}
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
     }
+
+    # Database backup uploads (.bak / pg_dump): the panel allows 10 GiB there
+    # (MaxBakBytes), everything else stays at 1100m.
+    location ~ ^/sites/[0-9]+/import/(db|pg)\$ {
+        client_max_body_size 10300m;
+        proxy_pass http://${PANEL_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
 }
 CONF
 }
@@ -803,6 +843,179 @@ write_panel_vhost() {
     fi
     rm -f -- "$backup"
     die "panel nginx yapılandırması reddedildi; önceki hali geri yüklendi"
+  fi
+  rm -f -- "$backup"
+  systemctl reload nginx
+}
+
+# ---------------------------------------------------------------------------
+# Mail server (Faz 9, docker-mailserver)
+# ---------------------------------------------------------------------------
+# The account, alias and quota files are docker-mailserver's documented plain
+# formats; root writes them here (never DMS's "setup email add", which puts the
+# password on argv inside the container). Addresses are validated before they
+# reach these functions, so they never contain "|", ":", "," or whitespace.
+
+MAIL_ROOT=/var/lib/hostpanel-mail
+MAIL_VHOST=/etc/nginx/sites-available/hostpanel-mail.conf
+MAIL_VHOST_LINK=/etc/nginx/sites-enabled/hostpanel-mail.conf
+MAIL_CERT_NAME=hostpanel-mail
+MAIL_FILE_OWNER=${MAIL_FILE_OWNER:-root:root} # tests run unprivileged
+
+# validate_mail_image REF — only docker-mailserver 17+, pinned release tag.
+validate_mail_image() {
+  [[ ${1:-} =~ ^mailserver/docker-mailserver:1[7-9]\.[0-9]{1,2}\.[0-9]{1,2}(-r[0-9]{1,2})?$ ]] || die "izin verilmeyen imaj: '${1:-}'"
+}
+
+_mail_local_ok() { [[ $1 =~ $2 && $1 != *..* && $1 != *. ]]; }
+
+# validate_mail_addr A — mailbox/alias address (mirrors mail.ValidAddress).
+validate_mail_addr() {
+  local a=${1:-}
+  [[ ${#a} -le 254 && $a == *@* ]] || die "geçersiz adres: '${a}'"
+  _mail_local_ok "${a%%@*}" '^[a-z0-9][a-z0-9._-]{0,63}$' || die "geçersiz adres: '${a}'"
+  validate_domain "${a#*@}"
+}
+
+# validate_mail_target A — forwarding target, may be external (mail.ValidTarget).
+validate_mail_target() {
+  local a=${1:-}
+  [[ ${#a} -le 254 && $a == *@* ]] || die "geçersiz hedef: '${a}'"
+  _mail_local_ok "${a%%@*}" '^[a-z0-9][a-z0-9._+-]{0,63}$' || die "geçersiz hedef: '${a}'"
+  validate_domain "${a#*@}"
+}
+
+mail_write() { atomic_write "$1" 0600 "$MAIL_FILE_OWNER"; }
+_mail_src() { if [[ -f $1 ]]; then printf '%s\n' "$1"; else echo /dev/null; fi; }
+
+# mail_list ACC VIRT QUOTA — "account <addr> <quota_mb>" and
+# "alias <addr> <target,target>" lines (no password hashes).
+mail_list() {
+  local acc virt quota
+  acc=$(_mail_src "$1") virt=$(_mail_src "$2") quota=$(_mail_src "$3")
+  awk -F'|' -v Q="$quota" '
+    FILENAME == Q {
+      n = split($0, q, ":")
+      if (n == 2 && q[2] ~ /^[0-9]+M$/) { sub(/M$/, "", q[2]); qs[q[1]] = q[2] + 0 }
+      next
+    }
+    NF >= 2 && $1 != "" { print "account " $1 " " (($1 in qs) ? qs[$1] : 0) }' "$quota" "$acc"
+  awk '!/^[[:space:]]*#/ && NF == 2 { print "alias " $1 " " $2 }' "$virt"
+}
+
+# mail_has_account ACC ADDR / mail_has_alias VIRT ADDR
+mail_has_account() { awk -F'|' -v a="$2" '$1 == a { f = 1 } END { exit !f }' "$(_mail_src "$1")"; }
+mail_has_alias() { awk -v a="$2" 'NF == 2 && $1 == a { f = 1 } END { exit !f }' "$(_mail_src "$1")"; }
+mail_account_count() { awk -F'|' 'NF >= 2 && $1 != "" { n++ } END { print n + 0 }' "$(_mail_src "$1")"; }
+
+# mail_domain_used ACC VIRT DOMAIN — true if DOMAIN has an account or alias.
+mail_domain_used() {
+  awk -F'|' -v d="$3" '{ n = split($1, p, "@") } n == 2 && p[2] == d { f = 1 } END { exit !f }' "$(_mail_src "$1")" ||
+    awk -v d="$3" 'NF == 2 { n = split($1, p, "@") } NF == 2 && n == 2 && p[2] == d { f = 1 } END { exit !f }' "$(_mail_src "$2")"
+}
+
+# mail_account_set ACC ADDR HASH — add or replace the account's line.
+mail_account_set() {
+  local acc=$1 addr=$2 hash=$3 re='^\$6\$[A-Za-z0-9./]{1,16}\$[A-Za-z0-9./]{86}$'
+  [[ $hash =~ $re ]] || die "geçersiz şifre özeti"
+  {
+    awk -F'|' -v a="$addr" '$1 != a' "$(_mail_src "$acc")"
+    printf '%s|{SHA512-CRYPT}%s\n' "$addr" "$hash"
+  } | mail_write "$acc"
+}
+
+# mail_virt_drop VIRT ALIAS TARGET — remove TARGET from ALIAS ("" = from every
+# alias); aliases left without targets disappear.
+mail_virt_drop() {
+  awk -v al="$2" -v t="$3" '
+    NF == 2 && (al == "" || $1 == al) {
+      n = split($2, ts, ","); out = ""
+      for (i = 1; i <= n; i++) if (ts[i] != t && ts[i] != "") out = out (out == "" ? "" : ",") ts[i]
+      if (out != "") print $1 " " out
+      next
+    }
+    { print }' "$(_mail_src "$1")"
+}
+
+# mail_account_del ACC VIRT QUOTA ADDR — the account, its quota and every
+# alias target pointing at it.
+mail_account_del() {
+  local acc=$1 virt=$2 quota=$3 addr=$4
+  awk -F'|' -v a="$addr" '$1 != a' "$(_mail_src "$acc")" | mail_write "$acc"
+  if [[ -f $quota ]]; then awk -F: -v a="$addr" '$1 != a' "$quota" | mail_write "$quota"; fi
+  if [[ -f $virt ]]; then mail_virt_drop "$virt" "" "$addr" | mail_write "$virt"; fi
+}
+
+# mail_quota_set QUOTA ADDR MB — 0 removes the limit.
+mail_quota_set() {
+  local quota=$1 addr=$2 mb=$3
+  {
+    awk -F: -v a="$addr" '$1 != a' "$(_mail_src "$quota")"
+    if ((mb > 0)); then printf '%s:%dM\n' "$addr" "$mb"; fi
+  } | mail_write "$quota"
+}
+
+# mail_alias_add VIRT ALIAS TARGET — at most 50 targets per alias.
+mail_alias_add() {
+  local virt=$1 al=$2 t=$3 n
+  n=$(awk -v al="$al" 'NF == 2 && $1 == al { print split($2, x, ",") }' "$(_mail_src "$virt")")
+  ((${n:-0} < 50)) || die "bir adres en fazla 50 hedefe yönlendirilebilir"
+  awk -v al="$al" -v t="$t" '
+    NF == 2 && $1 == al {
+      n = split($2, ts, ","); f = 0
+      for (i = 1; i <= n; i++) if (ts[i] == t) f = 1
+      print $1 " " (f ? $2 : $2 "," t); done = 1; next
+    }
+    { print }
+    END { if (!done) print al " " t }' "$(_mail_src "$virt")" | mail_write "$virt"
+}
+
+# mail_alias_del VIRT ALIAS TARGET
+mail_alias_del() { mail_virt_drop "$1" "$2" "$3" | mail_write "$1"; }
+
+# render_mail_vhost HOST — port 80 only: the ACME challenge for the mail
+# certificate; nothing else is served for the mail host name.
+render_mail_vhost() {
+  validate_domain "$1"
+  cat <<CONF
+# HostPanel mail server (hp-mail.sh) — certificate challenges only; do not edit.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $1;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type text/plain;
+    }
+    location / {
+        return 404;
+    }
+}
+CONF
+}
+
+# write_mail_vhost HOST — install it; nginx -t must pass, otherwise the
+# previous file is restored.
+write_mail_vhost() {
+  local tmp backup=""
+  tmp=$(mktemp)
+  render_mail_vhost "$1" >"$tmp"
+  if [[ -f $MAIL_VHOST ]]; then
+    backup=$(mktemp)
+    cp -p -- "$MAIL_VHOST" "$backup"
+  fi
+  install -o root -g root -m 0644 "$tmp" "$MAIL_VHOST"
+  rm -f -- "$tmp"
+  ln -sfn -- "$MAIL_VHOST" "$MAIL_VHOST_LINK"
+  if ! nginx -t -q 2>/dev/null; then
+    nginx -t 2>&1 | tail -n 5 >&2 || true
+    if [[ -n $backup ]]; then
+      install -o root -g root -m 0644 "$backup" "$MAIL_VHOST"
+    else
+      rm -f -- "$MAIL_VHOST" "$MAIL_VHOST_LINK"
+    fi
+    rm -f -- "$backup"
+    die "posta sunucusu nginx yapılandırması reddedildi; önceki hali geri yüklendi"
   fi
   rm -f -- "$backup"
   systemctl reload nginx

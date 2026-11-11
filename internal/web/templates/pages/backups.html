@@ -48,7 +48,7 @@
       <tr>
         <td>{{.Name}}{{if not .Enabled}} <span class="badge">kapalı</span>{{end}}<div>{{range .Components}}<span class="tag">{{compLabel .}}</span> {{end}}</div></td>
         <td class="small">{{schedule .Schedule}}<div class="muted"><code>{{.Schedule}}</code></div></td>
-        <td class="small">{{if eq .Scope "all"}}Tüm siteler{{else}}{{len .SiteIDs}} site{{end}}</td>
+        <td class="small">{{if eq .Scope "mail"}}Posta sunucusu{{else if eq .Scope "all"}}Tüm siteler{{else}}{{len .SiteIDs}} site{{end}}</td>
         <td class="small">{{destLabel .Destination}}</td>
         <td class="small">{{if ne .Destination "remote"}}yerel son {{.KeepLocal}}{{end}}{{if ne .Destination "local"}}<div>Drive: {{if .KeepRemote}}son {{.KeepRemote}}{{else}}sayı sınırı yok{{end}}{{if .KeepRemoteDays}}, {{.KeepRemoteDays}} günden eskiler silinir{{end}}</div>{{end}}</td>
         <td class="small nowrap">{{datetime .LastRunAt}}<div class="muted">{{if .Enabled}}{{datetime .NextRunAt}}{{else}}—{{end}}</div></td>
@@ -99,9 +99,10 @@
     </fieldset>
     <fieldset class="stack">
       <legend>Kapsam</legend>
-      <label class="check"><input type="radio" name="scope" value="all" {{if ne $f.Plan.Scope "sites"}}checked{{end}}> <span>Tüm siteler (sonradan eklenenler dahil)</span></label>
+      <label class="check"><input type="radio" name="scope" value="all" {{if and (ne $f.Plan.Scope "sites") (ne $f.Plan.Scope "mail")}}checked{{end}}> <span>Tüm siteler (sonradan eklenenler dahil)</span></label>
       <label class="check"><input type="radio" name="scope" value="sites" {{if eq $f.Plan.Scope "sites"}}checked{{end}}> <span>Seçili siteler:</span></label>
       <div class="ops">{{range $d.Sites}}<label class="check"><input type="checkbox" name="site_ids" value="{{.ID}}" {{if hasInt $f.Plan.SiteIDs .ID}}checked{{end}}> <span>{{.Domain}}</span></label>{{end}}</div>
+      {{if or $d.MailReady (eq $f.Plan.Scope "mail")}}<label class="check"><input type="radio" name="scope" value="mail" {{if eq $f.Plan.Scope "mail"}}checked{{end}}> <span>Posta sunucusu (tüm hesaplar, DKIM anahtarları ve postalar; bileşen seçimi uygulanmaz)</span></label>{{end}}
     </fieldset>
     <div class="form-grid">
       <label>Yerelde sakla (son N) <input type="number" name="keep_local" min="0" max="365" value="{{$f.Plan.KeepLocal}}"></label>

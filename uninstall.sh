@@ -3,7 +3,7 @@
 #
 # By default only the panel goes: service, unit, sudoers, /opt/hostpanel, the
 # panel's nginx vhost, fail2ban jail and logrotate rule. Sites keep running,
-# MSSQL/PostgreSQL keep running, backups stay, UFW rules are not touched, and the panel's
+# MSSQL/PostgreSQL and the mail server keep running, backups stay, UFW rules are not touched, and the panel's
 # config/database stay in /etc/hostpanel and /var/lib/hostpanel (re-running
 # install.sh brings the panel back as it was).
 #
@@ -14,9 +14,11 @@
 #   --delete-databases  the hostpanel-mssql and hostpanel-postgres containers and
 #                       their data (all databases!)
 #   --delete-backups    /var/backups/hostpanel (local backups; Drive copies are not touched)
+#   --delete-mail       the hostpanel-mail container, ALL mailboxes and mail
+#                       (/var/lib/hostpanel-mail), its nginx vhost, certificate and renewal hook
 set -euo pipefail
 
-PURGE=0 SITES=0 DBS=0 BACKUPS=0
+PURGE=0 SITES=0 DBS=0 BACKUPS=0 MAIL=0
 
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mUYARI:\033[0m %s\n' "$*" >&2; }
@@ -31,8 +33,9 @@ for a in "$@"; do
     --delete-sites) SITES=1 ;;
     --delete-databases) DBS=1 ;;
     --delete-backups) BACKUPS=1 ;;
+    --delete-mail) MAIL=1 ;;
     -h | --help)
-      sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) fail "bilinmeyen seçenek: $a" ;;
@@ -55,6 +58,9 @@ if ((SITES)); then
 fi
 if ((DBS)); then
   typed VERITABANLARINI-SIL "MSSQL ve PostgreSQL container'ları ve TÜM veritabanları (/var/lib/hostpanel/{mssql,postgres,postgres-backup}) silinecek." || fail "iptal edildi"
+fi
+if ((MAIL)); then
+  typed POSTALARI-SIL "Posta sunucusu ve TÜM posta kutuları, postalar ve DKIM anahtarları (/var/lib/hostpanel-mail) silinecek." || fail "iptal edildi"
 fi
 if ((BACKUPS)); then
   typed YEDEKLERI-SIL "Yerel yedekler (/var/backups/hostpanel) silinecek; Drive'dakiler kalır." || fail "iptal edildi"
@@ -112,6 +118,22 @@ if ((DBS)); then
   rm -rf /var/lib/hostpanel/mssql /var/lib/hostpanel/postgres /var/lib/hostpanel/postgres-backup
 fi
 
+if ((MAIL)); then
+  say "Posta sunucusu siliniyor"
+  if command -v docker >/dev/null; then
+    docker rm -f hostpanel-mail >/dev/null 2>&1 || true
+  fi
+  rm -rf /var/lib/hostpanel-mail
+  rm -f /etc/letsencrypt/renewal-hooks/deploy/hostpanel-mail.sh
+  if command -v certbot >/dev/null && [[ -d /etc/letsencrypt/live/hostpanel-mail ]]; then
+    certbot delete --non-interactive --cert-name hostpanel-mail >/dev/null 2>&1 || true
+  fi
+  if [[ -e /etc/nginx/sites-available/hostpanel-mail.conf || -L /etc/nginx/sites-enabled/hostpanel-mail.conf ]]; then
+    rm -f /etc/nginx/sites-enabled/hostpanel-mail.conf /etc/nginx/sites-available/hostpanel-mail.conf
+    reload_nginx
+  fi
+fi
+
 if ((BACKUPS)); then
   say "Yerel yedekler siliniyor"
   rm -rf /var/backups/hostpanel
@@ -135,6 +157,7 @@ echo
 say "HostPanel kaldırıldı."
 ((SITES)) || echo "    Siteler çalışmaya devam ediyor (hp-site-* servisleri, /var/www/sites)."
 ((DBS)) || echo "    MSSQL/PostgreSQL container'ları ve veritabanları duruyor."
+((MAIL)) || [[ ! -d /var/lib/hostpanel-mail ]] || echo "    Posta sunucusu (hostpanel-mail) ve postalar duruyor: /var/lib/hostpanel-mail"
 [[ ! -f /etc/bind/.hostpanel ]] || echo "    DNS sunucusu (BIND) çalışmaya devam ediyor; zone'lar /var/lib/bind/hostpanel (apt purge bind9 ile kaldırılır)."
 ((BACKUPS)) || echo "    Yerel yedekler: /var/backups/hostpanel"
 ((PURGE)) || echo "    Panel ayarları: /etc/hostpanel, /var/lib/hostpanel (install.sh ile geri kurulur)."

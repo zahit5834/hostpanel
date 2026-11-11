@@ -32,6 +32,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/mail"
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
@@ -107,9 +108,23 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 			return nil, &net.DNSError{Err: "no such host", Name: zone, IsNotFound: true}
 		}}
 	dnsSvc.Register()
+	mailSvc := &mail.Service{Store: mail.NewStore(db), DB: db, Runner: runner, Jobs: jm, Activity: act, Log: log,
+		ScriptsDir: cfg.ScriptsDir, DryRun: true, MemTotalMB: 8000, Fake: mail.NewFake(), Changed: dnsSvc.MailChanged,
+		ServerIPs: func(context.Context) []netip.Addr { return []netip.Addr{netip.MustParseAddr("185.48.180.32")} }}
+	mailSvc.Register()
+	svc.MailHost = mailSvc.Host
+	bkSvc.Mail = mailSvc
+	dnsSvc.Mail = func(ctx context.Context) (string, []dns.MailDomain) {
+		host, ds := mailSvc.DNSInfo(ctx)
+		var out []dns.MailDomain
+		for _, d := range ds {
+			out = append(out, dns.MailDomain{Name: d.Name, DKIMSelector: d.DKIMSelector, DKIMTXT: d.DKIMTXT})
+		}
+		return host, out
+	}
 	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
 		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, PG: pgSvc, Backups: bkSvc,
-		Monitor: monSvc, Notify: notifySvc, DNS: dnsSvc,
+		Monitor: monSvc, Notify: notifySvc, DNS: dnsSvc, Mail: mailSvc,
 		Crons: &crons.Service{Store: crons.NewStore(db), Sites: svc, Runner: runner, Activity: act, Log: log,
 			ScriptsDir: cfg.ScriptsDir, DryRun: true, Notify: notifySvc.Send}, BaseCtx: ctx}
 	bkSvc.Crons = s.Crons

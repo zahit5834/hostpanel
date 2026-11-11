@@ -16,6 +16,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,6 +33,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/mail"
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
@@ -218,9 +220,25 @@ func serve(args []string) error {
 	dnsSvc := &dns.Service{Store: dns.NewStore(a.db), DB: a.db, Runner: runner, Jobs: jm, Activity: activity, Log: log,
 		Sites: siteSvc, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun, DefaultIPs: sslSvc.ServerIPs}
 	dnsSvc.Register()
+	mailSvc := &mail.Service{Store: mail.NewStore(a.db), DB: a.db, Runner: runner, Jobs: jm, Activity: activity, Log: log,
+		ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun, MemTotalMB: dbSvc.MemTotalMB, ServerIPs: sslSvc.ServerIPs,
+		Changed: dnsSvc.MailChanged, NameTaken: mailNameTaken(siteSvc, cfg.PanelDomain)}
+	if cfg.DryRun {
+		mailSvc.Fake = mail.NewFake() // hp-mail.sh is only logged: accounts live in memory
+	}
+	mailSvc.Register()
+	siteSvc.MailHost = mailSvc.Host
+	dnsSvc.Mail = func(ctx context.Context) (string, []dns.MailDomain) {
+		host, ds := mailSvc.DNSInfo(ctx)
+		out := make([]dns.MailDomain, 0, len(ds))
+		for _, d := range ds {
+			out = append(out, dns.MailDomain{Name: d.Name, DKIMSelector: d.DKIMSelector, DKIMTXT: d.DKIMTXT})
+		}
+		return host, out
+	}
 	bkSvc := &backups.Service{Store: backups.NewStore(a.db), DB: a.db, Box: a.box, Runner: runner, Probe: probe, Jobs: jm,
 		Activity: activity, Log: log, Sites: siteSvc, DBs: dbSvc, PG: pgSvc, ScriptsDir: cfg.ScriptsDir,
-		UploadDir: siteSvc.UploadDir, DryRun: cfg.DryRun}
+		UploadDir: siteSvc.UploadDir, DryRun: cfg.DryRun, Mail: mailSvc}
 	bkSvc.Register()
 	bkSvc.Recover(ctx)
 	notifySvc := &notify.Service{DB: a.db, Box: a.box, Activity: activity, Log: log}
@@ -240,7 +258,7 @@ func serve(args []string) error {
 	updSvc.RecordFinished(ctx)
 	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version,
 		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, PG: pgSvc, Backups: bkSvc,
-		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc, Update: updSvc, DNS: dnsSvc}
+		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc, Update: updSvc, DNS: dnsSvc, Mail: mailSvc}
 	srv.ExportConfig = func(ctx context.Context, pass string, w io.Writer) (panelcfg.Manifest, error) {
 		server := store.GetSetting(ctx, a.db, "backup_server_name", "")
 		if server == "" {
@@ -452,4 +470,24 @@ Sıradaki adımlar:
      yeni DS kaydını registrar'a girin (eskisini kaldırın).
 `, m.Server, m.Version, m.Created.Format("2006-01-02 15:04"), m.Customers, m.Plans, m.Zones)
 	return nil
+}
+
+// mailNameTaken rejects a mail server name that a site or the panel uses
+// (their nginx vhosts own the name on port 80).
+func mailNameTaken(siteSvc *sites.Service, panelDomain string) func(ctx context.Context, host string) error {
+	return func(ctx context.Context, host string) error {
+		if panelDomain != "" && host == panelDomain {
+			return fmt.Errorf("%s panelin kendi adresi; posta sunucusu adı olarak kullanılamaz", host)
+		}
+		list, err := siteSvc.Store.List(ctx, 0)
+		if err != nil {
+			return err
+		}
+		for _, st := range list {
+			if slices.Contains(st.HostNames(), host) {
+				return fmt.Errorf("%s bir sitenin adı (%s); posta sunucusu için ayrı bir ad seçin (ör. mail.%s)", host, st.Domain, st.Domain)
+			}
+		}
+		return nil
+	}
 }

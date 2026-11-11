@@ -81,6 +81,18 @@
 </section>
 {{end}}
 
+{{if .MailDomains}}
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Posta alan adları</h2><a class="small" href="/mail">E-posta →</a></div>
+  <table class="table">
+    <thead><tr><th>Alan adı</th><th>DKIM</th></tr></thead>
+    <tbody>
+    {{range .MailDomains}}<tr><td><a href="/mail/domains/{{.ID}}">{{.Name}}</a></td><td>{{if .DKIMTXT}}<span class="badge success">hazır</span>{{else}}<span class="badge">bekliyor</span>{{end}}</td></tr>{{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
+
 <section class="card table-wrap">
   <div class="card-head pad"><h2>Son işlemler</h2><a class="small" href="/logs/activity">Tüm işlem geçmişi →</a></div>
   <table class="table">

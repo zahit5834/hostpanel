@@ -334,5 +334,89 @@ bad archive_ok "$tmp6/link.tgz" pkg-v1
 bad archive_ok "$tmp6/outside.tgz" pkg-v1
 bad archive_ok "$tmp6/good.tgz" pkg-v2
 
+# Panel vhost: database dump uploads get their own body limit.
+v=$(vhost domain panel.ornek.com 8443)
+[[ $v == *'location ~ ^/sites/[0-9]+/import/(db|pg)$ {'* && $v == *"client_max_body_size 10300m;"* && $v == *"client_max_body_size 1100m;"* ]] ||
+  { echo "FAIL panel vhost upload limits"; fail=1; }
+
+# Faz 9: mail server.
+ok  validate_mail_image mailserver/docker-mailserver:17.0.0-r1
+ok  validate_mail_image mailserver/docker-mailserver:18.1.2
+bad validate_mail_image mailserver/docker-mailserver:latest
+bad validate_mail_image mailserver/docker-mailserver:16.0.0
+bad validate_mail_image evil/docker-mailserver:17.0.0
+ok  validate_mail_addr info@ornek.com
+ok  validate_mail_addr ali.veli_1@sub.ornek.com.tr
+bad validate_mail_addr Info@ornek.com
+bad validate_mail_addr "a|b@ornek.com"
+bad validate_mail_addr "a b@ornek.com"
+bad validate_mail_addr a+b@ornek.com
+bad validate_mail_addr a..b@ornek.com
+bad validate_mail_addr a.@ornek.com
+bad validate_mail_addr .a@ornek.com
+bad validate_mail_addr a@b@ornek.com
+bad validate_mail_addr "a:1@ornek.com"
+bad validate_mail_addr "a,b@ornek.com"
+bad validate_mail_addr ornek.com
+ok  validate_mail_target a+tag@gmail.com
+bad validate_mail_target "a,b@gmail.com"
+ok  validate_backup_file mail-config.tar.zst
+ok  validate_backup_file mail-data.tar.zst
+ok  backup_dir _mail 20261111-120000-abcd
+bad backup_dir _other 20261111-120000-abcd
+bad backup_dir ../x 20261111-120000-abcd
+
+tm=$(mktemp -d)
+mailtest() { (
+  source ./lib.sh
+  MAIL_FILE_OWNER="$(id -u):$(id -g)"
+  set -e
+  A=$tm/postfix-accounts.cf V=$tm/postfix-virtual.cf Q=$tm/dovecot-quotas.cf
+  h=$(printf 'parola12345' | openssl passwd -6 -stdin)
+  [[ $(mail_account_count "$A") == 0 ]]
+  mail_account_set "$A" postmaster@ornek.com "$h"
+  mail_account_set "$A" ali@ornek.com "$h"
+  mail_account_set "$A" ali@ornek.com "$h" # replace, not duplicate
+  [[ $(mail_account_count "$A") == 2 ]]
+  [[ $(stat -c %a "$A") == 600 ]]
+  mail_has_account "$A" ali@ornek.com
+  if mail_has_account "$A" ali@ornek.co; then exit 1; fi
+  if mail_has_account "$A" li@ornek.com; then exit 1; fi
+  mail_quota_set "$Q" ali@ornek.com 500
+  mail_quota_set "$Q" ali@ornek.com 250
+  [[ $(cat "$Q") == "ali@ornek.com:250M" ]]
+  mail_alias_add "$V" info@ornek.com ali@ornek.com
+  mail_alias_add "$V" info@ornek.com dis@gmail.com
+  mail_alias_add "$V" info@ornek.com dis@gmail.com
+  mail_alias_add "$V" satis@ornek.com ali@ornek.com
+  [[ $(grep -c . "$V") == 2 ]]
+  mail_has_alias "$V" info@ornek.com
+  out=$(mail_list "$A" "$V" "$Q")
+  [[ $out == *"account ali@ornek.com 250"* && $out == *"account postmaster@ornek.com 0"* ]]
+  [[ $out == *"alias info@ornek.com ali@ornek.com,dis@gmail.com"* ]]
+  [[ $out != *SHA512* ]]
+  mail_domain_used "$A" "$V" ornek.com
+  if mail_domain_used "$A" "$V" diger.com; then exit 1; fi
+  mail_alias_del "$V" info@ornek.com dis@gmail.com
+  [[ $(mail_list "$A" "$V" "$Q") == *"alias info@ornek.com ali@ornek.com"* ]]
+  mail_account_del "$A" "$V" "$Q" ali@ornek.com
+  [[ $(mail_account_count "$A") == 1 ]]
+  [[ ! -s $Q && ! -s $V ]] # quota line and the aliases pointing only at ali are gone
+  mail_quota_set "$Q" postmaster@ornek.com 0
+  [[ ! -s $Q ]]
+  [[ $(mail_list "$tm/none" "$tm/none" "$tm/none") == "" ]]
+) >/dev/null 2>&1; }
+# Not "mailtest || …": set -e is ignored inside a tested command.
+mailtest
+[[ $? -eq 0 ]] || { echo "FAIL mail account/alias/quota file functions"; fail=1; }
+bad mail_account_set "$tm/x" a@ornek.com 'plain'
+( source ./lib.sh; MAIL_FILE_OWNER="$(id -u):$(id -g)"; for i in $(seq 1 50); do mail_alias_add "$tm/v50" x@ornek.com "t$i@gmail.com"; done ) >/dev/null 2>&1
+bad mail_alias_add "$tm/v50" x@ornek.com t51@gmail.com
+rm -rf "$tm"
+v=$( (source ./lib.sh; render_mail_vhost mail.ornek.com) )
+[[ $v == *"server_name mail.ornek.com;"* && $v == *"/.well-known/acme-challenge/"* && $v == *"return 404;"* && $v != *ssl* ]] ||
+  { echo "FAIL mail vhost"; fail=1; }
+bad render_mail_vhost "mail.ornek.com; include /etc/passwd"
+
 if [[ $fail -eq 0 ]]; then echo "lib.sh: tüm testler geçti"; fi
 exit $fail

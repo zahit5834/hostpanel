@@ -45,6 +45,7 @@ var systemSources = []sysSource{
 	{ID: "mssql", Label: "MSSQL container"},
 	{ID: "postgres", Label: "PostgreSQL container"},
 	{ID: "dns", Label: "DNS (BIND)", Unit: "named.service"},
+	{ID: "mail", Label: "Posta sunucusu (Postfix, Dovecot, Rspamd)"},
 	{ID: "fail2ban", Label: "fail2ban"},
 	{ID: "sshauth", Label: "SSH / sistem girişleri (auth.log)"},
 }
@@ -182,6 +183,11 @@ func (s *Server) readSysLines(ctx context.Context, sq sysQuery) []string {
 		return s.filterLines(sq, s.DBs.ContainerLogs(ctx, sq.N))
 	case sq.Src.ID == "postgres":
 		return s.filterLines(sq, s.PG.ContainerLogs(ctx, sq.N))
+	case sq.Src.ID == "mail":
+		if s.Mail == nil {
+			return nil
+		}
+		return s.filterLines(sq, s.Mail.ContainerLogs(ctx, sq.N))
 	case sq.Src.Site && sq.Site == nil && sq.Src.ID == "site":
 		return []string{"(bir site seçin)"}
 	case sq.Unit != "":

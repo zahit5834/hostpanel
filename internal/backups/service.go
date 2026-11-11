@@ -64,6 +64,7 @@ type Service struct {
 	Sites      *sites.Service
 	DBs        *databases.Service
 	PG         *pgsql.Service
+	Mail       MailBackend // optional: mail server backups
 	ScriptsDir string
 	UploadDir  string
 	DryRun     bool
@@ -91,6 +92,8 @@ func (s *Service) Register() {
 	s.Jobs.Register("backup.delete", s.jobDelete)
 	s.Jobs.Register("backup.restore", s.jobRestore)
 	s.Jobs.Register("backup.import-db", s.jobImportDB)
+	s.Jobs.Register("backup.mail", s.jobMailBackup)
+	s.Jobs.Register("backup.mail.restore", s.jobMailRestore)
 }
 
 // Recover marks backups left "running" by a crash as failed.
@@ -676,6 +679,11 @@ func (s *Service) ValidatePlan(ctx context.Context, p *Plan) error {
 		return errors.New("plan adı gerekli (en fazla 100 karakter)")
 	}
 	switch p.Scope {
+	case ScopeMail:
+		if err := s.mailReady(ctx); err != nil {
+			return err
+		}
+		p.SiteIDs, p.Components = nil, []string{CompMail}
 	case "all":
 		p.SiteIDs = nil
 	case "sites":
@@ -691,8 +699,10 @@ func (s *Service) ValidatePlan(ctx context.Context, p *Plan) error {
 		return errors.New("geçersiz kapsam")
 	}
 	var err error
-	if p.Components, err = cleanComponents(p.Components); err != nil {
-		return err
+	if p.Scope != ScopeMail {
+		if p.Components, err = cleanComponents(p.Components); err != nil {
+			return err
+		}
 	}
 	switch p.Destination {
 	case DestLocal:
@@ -784,6 +794,9 @@ func (s *Service) jobPlan(ctx context.Context, l *jobs.Log, params map[string]an
 	if err != nil {
 		return errors.New("plan bulunamadı")
 	}
+	if p.Scope == ScopeMail {
+		return s.jobMailPlan(ctx, l, p)
+	}
 	list, err := s.planSites(ctx, p)
 	if err != nil {
 		return err
@@ -811,16 +824,41 @@ func (s *Service) jobPlan(ctx context.Context, l *jobs.Log, params map[string]an
 	}
 	s.Store.SetPlanRun(ctx, p.ID, s.now(), p.NextRunAt)
 	if len(failures) > 0 {
-		msg := fmt.Sprintf("%d/%d site yedeklenemedi: %s", len(failures), len(list), strings.Join(failures, ", "))
-		s.Activity.Record(ctx, logs.Entry{Action: "backup.failed", TargetType: "backup", TargetID: p.Name,
-			Summary: "Yedekleme planı başarısız: " + p.Name, Status: logs.StatusFailed, Error: msg}, map[string]any{"job_id": l.ID()})
-		if s.Notify != nil {
-			s.Notify(ctx, notify.Event{Kind: notify.KindBackup, Key: fmt.Sprintf("backup:%d", p.ID),
-				Title: "Yedekleme planı başarısız: " + p.Name, Text: msg})
-		}
-		return errors.New(msg)
+		return s.planFailed(ctx, l, p, fmt.Sprintf("%d/%d site yedeklenemedi: %s", len(failures), len(list), strings.Join(failures, ", ")))
 	}
 	return nil
+}
+
+// jobMailPlan runs a plan whose scope is the mail server.
+func (s *Service) jobMailPlan(ctx context.Context, l *jobs.Log, p Plan) error {
+	l.Printf("Plan: %s — posta sunucusu, hedef: %s", p.Name, p.Destination)
+	remote := p.Destination == DestRemote || p.Destination == DestBoth
+	if remote && !s.Remote(ctx).Configured() {
+		return errors.New("uzak hedef yapılandırılmamış (rclone/Drive)")
+	}
+	b, err := s.runMailBackup(ctx, l, KindScheduled, p.ID)
+	if err == nil && remote {
+		l.Progress(60)
+		err = s.upload(ctx, l, &b)
+	}
+	s.applyRetention(ctx, l, p, MailDomain)
+	s.Store.SetPlanRun(ctx, p.ID, s.now(), p.NextRunAt)
+	l.Progress(100)
+	if err != nil {
+		return s.planFailed(ctx, l, p, "posta sunucusu yedeklenemedi: "+err.Error())
+	}
+	return nil
+}
+
+// planFailed records and reports a failed plan run.
+func (s *Service) planFailed(ctx context.Context, l *jobs.Log, p Plan, msg string) error {
+	s.Activity.Record(ctx, logs.Entry{Action: "backup.failed", TargetType: "backup", TargetID: p.Name,
+		Summary: "Yedekleme planı başarısız: " + p.Name, Status: logs.StatusFailed, Error: msg}, map[string]any{"job_id": l.ID()})
+	if s.Notify != nil {
+		s.Notify(ctx, notify.Event{Kind: notify.KindBackup, Key: fmt.Sprintf("backup:%d", p.ID),
+			Title: "Yedekleme planı başarısız: " + p.Name, Text: msg})
+	}
+	return errors.New(msg)
 }
 
 // applyRetention deletes the plan's surplus copies of one site.
@@ -899,7 +937,7 @@ func (s *Service) jobRemoteScan(ctx context.Context, l *jobs.Log, _ map[string]a
 	added := 0
 	for _, line := range strings.Split(res.Stdout, "\n") {
 		domain, name, ok := strings.Cut(strings.Trim(strings.TrimSpace(line), "/"), "/")
-		if !ok || !sites.ValidDomain(domain) || !ValidName(name) || s.Store.Exists(ctx, domain, name) {
+		if !ok || !(sites.ValidDomain(domain) || domain == MailDomain) || !ValidName(name) || s.Store.Exists(ctx, domain, name) {
 			continue
 		}
 		created, err := time.ParseInLocation("20060102-150405", name[:15], time.Local)
@@ -1087,6 +1125,9 @@ func (s *Service) StartRestore(ctx context.Context, in RestoreInput) (int64, err
 	b, err := s.Store.Backup(ctx, in.BackupID)
 	if err != nil {
 		return 0, errors.New("yedek bulunamadı")
+	}
+	if b.IsMail() {
+		return 0, errors.New("posta sunucusu yedeği E-posta sayfasından geri yüklenir")
 	}
 	if b.Status != StatusSuccess || (!b.Local && !b.Remote) {
 		return 0, errors.New("bu yedek geri yüklenemez")

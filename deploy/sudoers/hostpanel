@@ -31,6 +31,7 @@ Cmnd_Alias HOSTPANEL_HELPERS = \
     /opt/hostpanel/scripts/hp-site-cron.sh, \
     /opt/hostpanel/scripts/hp-site-git.sh, \
     /opt/hostpanel/scripts/hp-php-pool.sh, \
-    /opt/hostpanel/scripts/hp-update.sh
+    /opt/hostpanel/scripts/hp-update.sh, \
+    /opt/hostpanel/scripts/hp-mail.sh
 
 hostpanel ALL=(root) NOPASSWD: HOSTPANEL_HELPERS

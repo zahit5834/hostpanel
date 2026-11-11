@@ -109,6 +109,9 @@ func (s *Server) customerDetail(w http.ResponseWriter, r *http.Request) {
 	if s.DNS != nil {
 		data["Zones"], _ = s.DNS.Store.Zones(r.Context(), c.ID)
 	}
+	if s.Mail != nil {
+		data["MailDomains"], _ = s.Mail.Store.Domains(r.Context(), c.ID)
+	}
 	if l, err := s.DBs.Store.LoginForCustomer(r.Context(), c.ID); err == nil {
 		data["Login"] = &l
 	}

@@ -12,3 +12,5 @@ dkim._domainkey.ornek.com. 300 IN TXT "v=DKIM1; k=rsa; p=abc[]^~{}" "x\"y\\"
 _sip._tcp.ornek.com. 3600 IN SRV 10 5 5060 sip.ornek.com.
 *.app.ornek.com. 3600 IN A 1.2.3.4
 sub.ornek.com. 3600 IN NS ns.baska.com.
+mail._domainkey.ornek.com. 3600 IN TXT "v=DKIM1; k=rsa; p=LXEWQrcmsEQBYnyp+6wy9chTD7GQPMTbAiWHF5IaSIEKMlyjA+swFMQ64ASXDzQ2NNsXb6Fpe8yMnvrJRiZIjUMegVElkjElr0GXxChhpOwBtJAeeRfNfbH5jH3r3yLFK7RywpVgytTLQ4iqGVb+kfdvpLlNAbJajqj3dBu4ImTkdJ9NDF8cXHDDfLUBZE+ROMsWb3WTbsRUNh9ye0bqAeLmci4kxk5dRNt5Lp08z5t95" "s91vVqBKgNn8Lg95+dAC+Bs7GoaO2nXD5ShBLi+/LZIqlyiZUpTRSuuBppTXh7p0gifvdrIo4hMjfxYvkpKmotDSrJuQ1wIBcOaAGwBK2mzLt82oxHyq5rDKKRgq/ogG9JmcHZwyvTkqBbMgHnlmYVmKdvw"
+_dmarc.ornek.com. 3600 IN TXT "v=DMARC1; p=quarantine"
