@@ -7,6 +7,7 @@
 #   vhost <hostname>                 port 80 nginx vhost (ACME only)
 #   cert <hostname> <email>          Let's Encrypt (lineage hostpanel-mail) → tls/, renewal hook
 #   create <image> <hostname> <memory_mb> <clamav 0|1> <msg_limit_mb> <postmaster_domain>
+#   pull <image>                     download an image (update; the container keeps running)
 #   wait                             until the container reports healthy (≤180 s)
 #   remove                           container only; data, accounts, keys kept
 #   purge                            failed installs: container, vhost, certificate; data moved aside
@@ -37,7 +38,7 @@
 # its internal services (Rspamd, Redis) would listen on the host.
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
-[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") precheck|prepare|vhost|cert|create|wait|remove|purge|start|stop|restart|status|logs|list|usage|account-*|quota-set|alias-*|dkim|domain-del|queue|flush|bans|unban|backup|restore …"
+[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") precheck|prepare|vhost|cert|create|pull|wait|remove|purge|start|stop|restart|status|logs|list|usage|account-*|quota-set|alias-*|dkim|domain-del|queue|flush|bans|unban|backup|restore …"
 action=$1
 shift
 
@@ -288,6 +289,14 @@ case $action in
       -e POSTFIX_MESSAGE_SIZE_LIMIT="$limit" -e POSTMASTER_ADDRESS="postmaster@$pmd" \
       "$image" >/dev/null
     log "container başlatıldı"
+    ;;
+
+  pull)
+    [[ $# -eq 1 ]] || die "kullanım: pull <image>"
+    validate_mail_image "$1"
+    need_docker
+    log "docker pull $1"
+    docker pull -q "$1"
     ;;
 
   wait)

@@ -14,6 +14,7 @@
   <a href="/sites/{{$s.ID}}?tab=settings" class="{{if eq .Tab "settings"}}active{{end}}">Ayarlar</a>
   <a href="/sites/{{$s.ID}}?tab=backups" class="{{if eq .Tab "backups"}}active{{end}}">Yedekler</a>
   <a href="/sites/{{$s.ID}}?tab=import" class="{{if eq .Tab "import"}}active{{end}}">Taşıma</a>
+  <a href="/sites/{{$s.ID}}?tab=stats" class="{{if eq .Tab "stats"}}active{{end}}">İstatistik</a>
   <a href="/sites/{{$s.ID}}?tab=logs" class="{{if eq .Tab "logs"}}active{{end}}">Loglar</a>
 </div>
 
@@ -27,6 +28,7 @@
 {{else if eq .Tab "backups"}}{{template "site-backups" $}}
 {{else if eq .Tab "import"}}{{template "site-import" $}}
 {{else if eq .Tab "cron"}}{{template "site-cron" $}}
+{{else if eq .Tab "stats"}}<div hx-get="/sites/{{$s.ID}}/stats" hx-trigger="load" hx-swap="outerHTML"><section class="card"><p class="muted small">İstatistikler hazırlanıyor… (ilk açılışta son iki haftanın erişim logları işlenir)</p></section></div>
 {{else if eq .Tab "logs"}}{{template "site-logs-tab" $}}{{end}}
 {{end}}
 {{end}}
@@ -535,3 +537,72 @@ DNS henüz bu sunucuyu göstermiyorsa siteyi kendi bilgisayarınızda denemek i�
   {{template "cron-runs" $d.CronRuns}}
 </section>
 {{end}}
+
+{{define "site-stats"}}{{with .Data}}{{$d := .}}
+<div id="site-stats">
+<div class="card-head">
+  <h2>Son {{.Days}} gün</h2>
+  <div class="ops">{{range .Ranges}}<button type="button" hx-get="/sites/{{$d.Site.ID}}/stats?days={{.}}" hx-target="#site-stats" hx-swap="outerHTML"{{if eq . $d.Days}} class="primary"{{end}}>{{.}} gün</button>{{end}}</div>
+</div>
+{{if .ScanErr}}<p class="muted small">Erişim logu okunamadı: {{.ScanErr}}</p>{{end}}
+<div class="grid metrics">
+  <div class="card stat"><div class="label">İstek</div><div class="value">{{.Totals.Requests}}</div><div class="muted small">bot/araç: {{.Totals.Bots}}</div></div>
+  <div class="card stat"><div class="label">Ziyaretçi</div><div class="value">{{.Totals.VisitorDays}}</div><div class="muted small">günlük tekil IP toplamı</div></div>
+  <div class="card stat"><div class="label">Trafik</div><div class="value">{{size .Totals.Bytes}}</div><div class="muted small">yanıt gövdeleri</div></div>
+  <div class="card stat"><div class="label">Hata</div><div class="value">{{.Totals.S5}}</div><div class="muted small">5xx · 4xx: {{.Totals.S4}}</div></div>
+  <div class="card stat"><div class="label">Erişilebilirlik</div><div class="value">{{if .Uptime.Checks}}{{printf "%.2f" .Uptime.Pct}}%{{else}}—{{end}}</div><div class="muted small">{{if .Uptime.Checks}}{{.Uptime.Checks}} kontrol, {{.Uptime.Fails}} başarısız{{else}}henüz kontrol yok{{end}}</div></div>
+  <div class="card stat"><div class="label">Ort. yanıt</div><div class="value">{{if .Uptime.AvgMS}}{{ms .Uptime.AvgMS}}{{else}}—{{end}}</div><div class="muted small">{{if .Uptime.MSMax}}en yavaş {{ms .Uptime.MSMax}}{{else}}health check{{end}}</div></div>
+</div>
+
+<section class="card stack">
+  <h3>Günlük istek</h3>
+  <svg class="bars" viewBox="0 0 {{.ChartW}} 100" preserveAspectRatio="none" role="img" aria-label="Günlük istek sayısı">
+    {{range .Rows}}<rect x="{{.BarX}}" y="{{.BarY}}" width="{{$d.BarInner}}" height="{{.BarH}}"{{if .Today}} class="today"{{end}}><title>{{.Label}}: {{.Traffic.Requests}} istek, {{.Traffic.Visitors}} ziyaretçi</title></rect>{{end}}
+  </svg>
+  <h3>Erişilebilirlik (health check)</h3>
+  <svg class="upstrip" viewBox="0 0 {{.ChartW}} 10" preserveAspectRatio="none" role="img" aria-label="Günlük erişilebilirlik">
+    {{range .Rows}}<rect x="{{.BarX}}" y="0" width="{{$d.BarInner}}" height="10" class="{{if .HasUptime}}{{.UpClass}}{{else}}up-none{{end}}"><title>{{.Label}}: {{if .HasUptime}}%{{printf "%.2f" .Uptime.Pct}} ({{.Uptime.Checks}} kontrol){{else}}kontrol yok{{end}}</title></rect>{{end}}
+  </svg>
+  <div class="chart-axis small muted"><span>{{(index .Rows 0).Label}}</span><span>bugün</span></div>
+  <p class="muted small">Bugün canlı hesaplanır; önceki günler günlük bakımda saklanır ({{if .Health.Enabled}}health check {{.Health.Interval}} sn'de bir{{else}}health check kapalı — Genel sekmesinden açılabilir{{end}}). Sayılmayanlar: 127.0.0.1'den gelen istekler (panelin kontrolleri), Let's Encrypt doğrulamaları. Bot sayımı user-agent'a göredir; site Cloudflare gibi bir proxy arkasındaysa ziyaretçi IP'leri proxy'nin IP'leridir.</p>
+</section>
+
+<div class="grid two">
+<section class="card table-wrap">
+  <h3 class="pad">En çok açılan sayfalar</h3>
+  <table class="table">
+    <thead><tr><th>Sayfa</th><th class="right">İstek</th></tr></thead>
+    <tbody>{{range .Top}}<tr><td class="ellipsis"><code>{{.Path}}</code></td><td class="right">{{.Count}}</td></tr>{{end}}</tbody>
+  </table>
+  {{if not .Top}}<p class="muted pad small">Kayıt yok.</p>{{end}}
+  <p class="muted small pad">Botlar, statik dosyalar (css/js/resim/font) ve hata yanıtları hariç; günlük ilk 10'ların toplamı.</p>
+</section>
+<section class="card table-wrap">
+  <h3 class="pad">Kesintiler{{if .Down}} <span class="muted small">— toplam {{.Down}}</span>{{end}}</h3>
+  <table class="table">
+    <thead><tr><th>Başlangıç</th><th>Süre</th><th>Neden</th></tr></thead>
+    <tbody>{{range .Incidents}}<tr class="{{if .Open}}row-failed{{end}}">
+      <td class="nowrap">{{datetime .Start}}</td>
+      <td class="nowrap">{{.Duration}}{{if .Open}} <span class="badge failed">sürüyor</span>{{end}}</td>
+      <td class="small">{{.Reason}}{{if .EndNote}} <span class="muted">({{.EndNote}})</span>{{end}}</td></tr>{{end}}</tbody>
+  </table>
+  {{if not .Incidents}}<p class="muted pad small">Bu dönemde kesinti yok.</p>{{end}}
+</section>
+</div>
+
+<details class="card">
+  <summary>Günlük tablo</summary>
+  <div class="table-wrap">
+  <table class="table">
+    <thead><tr><th>Gün</th><th class="right">İstek</th><th class="right">Ziyaretçi</th><th class="right">Trafik</th><th class="right">4xx</th><th class="right">5xx</th><th class="right">Bot</th><th class="right">Erişilebilirlik</th><th class="right">Ort. yanıt</th></tr></thead>
+    <tbody>{{range .Rows}}<tr>
+      <td class="nowrap">{{.Label}}{{if .Today}} <span class="muted small">(bugün)</span>{{end}}</td>
+      <td class="right">{{.Traffic.Requests}}</td><td class="right">{{.Traffic.Visitors}}{{if .Traffic.Capped}}+{{end}}</td>
+      <td class="right nowrap">{{size .Traffic.Bytes}}</td><td class="right">{{.Traffic.S4}}</td><td class="right">{{.Traffic.S5}}</td><td class="right">{{.Traffic.Bots}}</td>
+      <td class="right">{{if .HasUptime}}%{{printf "%.2f" .Uptime.Pct}}{{else}}—{{end}}</td>
+      <td class="right nowrap">{{if .Uptime.AvgMS}}{{ms .Uptime.AvgMS}}{{else}}—{{end}}</td></tr>{{end}}</tbody>
+  </table>
+  </div>
+</details>
+</div>
+{{end}}{{end}}

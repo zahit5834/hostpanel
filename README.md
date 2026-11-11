@@ -12,6 +12,8 @@ Ubuntu 24.04 için tek yöneticili, ultra hafif hosting kontrol paneli: Go, tek 
 - **Yedekleme:** yerel + Google Drive (rclone, isteğe bağlı şifreleme). Planlar, saklama kuralları, geri yükleme/klon ve taşıma sihirbazı.
 - **DNS (kendi nameserver'larınız):** BIND 9 (yalnızca yetkili sunucu), zone ve kayıt yönetimi (A, AAAA, CNAME, MX, TXT, SRV, CAA, NS), sitelerin A/AAAA kayıtları otomatik, yetki devri kontrolü, isteğe bağlı DNSSEC.
 - **İzleme:** CPU/RAM/disk, site başına RAM/CPU, health check, çökme döngüsü tespiti, Telegram/e-posta bildirimleri.
+- **İstatistikler:** site bazlı günlük trafik (istek, ziyaretçi, bant genişliği, 4xx/5xx, bot, en çok açılan sayfalar; nginx loglarından) ve uptime geçmişi (günlük erişilebilirlik, ortalama yanıt süresi, kesinti kayıtları).
+- **Container güncellemeleri:** MSSQL ve posta sunucusu imajları her gün kontrol edilir, yeni sürümde bildirim gelir; tek tıkla güncelleme (başarısız olursa eski sürüme otomatik dönüş).
 - **Log Merkezi:** işlem geçmişi, iş logları (canlı), sistem logları (nginx, journal, certbot, fail2ban, auth.log…).
 - **Site cron'ları,** Sunucu sayfası (servisler, güvenlik güncellemeleri, disk dağılımı, UFW).
 - **Güvenlik:** 2FA (TOTP + kurtarma kodları), IP allowlist, fail2ban entegrasyonu.
@@ -120,6 +122,19 @@ Not: PostgreSQL'de veritabanı **adları** tüm rollere görünür; içerik gör
 5. **Yedek:** E-posta sayfasından "Şimdi yedekle" ya da Yedekler → plan kapsamı "Posta sunucusu". Yedek tüm hesapları, DKIM anahtarlarını ve postaları içerir (tam yedek). Geri yükleme E-posta sayfasından yapılır.
 
 Kaba kuvvet denemelerini container içindeki fail2ban engeller (yalnızca posta portları; SSH'a dokunmaz). Engellenen IP'ler E-posta sayfasından kaldırılabilir.
+
+## İstatistikler
+- **Site → İstatistik** sekmesi: son 7/30/90 gün; günlük istek grafiği, erişilebilirlik şeridi, en çok açılan sayfalar, kesintiler ve günlük tablo. Bugün canlı hesaplanır; önceki günler saklanır (400 gün).
+- **İstatistikler** menüsü: tüm sitelerin özeti.
+- Trafik nginx'in erişim logundan gelir: panelin kendi kontrolleri (127.0.0.1) ve Let's Encrypt doğrulamaları sayılmaz, botlar ayrı gösterilir. Site Cloudflare gibi bir proxy arkasındaysa ziyaretçi IP'leri proxy'nin IP'leridir.
+- Erişilebilirlik, sitenin health check sonuçlarından hesaplanır (Genel sekmesindeki "Sağlık kontrolü" açık olmalı).
+
+## Container güncellemeleri (MSSQL, posta)
+- Panel her gün Microsoft Container Registry'ye ve Docker Hub'a bakar. Yeni sürüm çıkınca bir kez bildirim gönderir (Bildirimler → "Panel ve container güncellemeleri").
+- **Ayarlar → Güncelleme → Container imajları** ya da ilgili sayfadaki **Güncelle** düğmesi:
+  - **MSSQL:** yalnızca aynı SQL Server sürümünün yeni CU/GDR'leri (ör. `2025-CU10` → `2025-CU10-GDR1`). Yeni imaj önce indirilir, sonra SQL Server durdurulup veri dizininin kopyası alınır (`/var/backups/hostpanel/_mssql/pre-update`; yeterli boş disk gerekir) ve yeni sürümle başlatılır. Açılmazsa kopya ve eski sürüm otomatik geri konur.
+  - **Posta sunucusu:** aynı ana sürümün yeni sürüm/revizyonları. Postalar ve hesaplar korunur; açılmazsa eski sürüme dönülür.
+- Ana sürüm geçişleri (ör. SQL Server 2027, docker-mailserver 18) yalnızca bilgi olarak gösterilir.
 
 ## Güncelleme
 - **Panelden:** Ayarlar → Güncelleme → "vX.Y.Z sürümüne güncelle".

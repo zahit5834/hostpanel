@@ -76,6 +76,7 @@ func (s *Service) Register() {
 	s.Jobs.Register("db.create", s.jobCreate)
 	s.Jobs.Register("db.drop", s.jobDrop)
 	s.Jobs.Register("db.isolation-test", s.jobIsolation)
+	s.Jobs.Register("db.server.update", s.jobImageUpdate)
 	s.Sites.DeleteHook = s.siteDeleted
 }
 
@@ -401,6 +402,15 @@ func (s *Service) waitReady(ctx context.Context, l *jobs.Log) error {
 	timeout := s.ReadyTimeout
 	if timeout == 0 {
 		timeout = 3 * time.Minute
+	}
+	return s.waitReadyFor(ctx, l, timeout)
+}
+
+// waitReadyFor is waitReady with an explicit limit (a cumulative update
+// upgrades the system databases on its first start).
+func (s *Service) waitReadyFor(ctx context.Context, l *jobs.Log, timeout time.Duration) error {
+	if s.ReadyTimeout != 0 && s.ReadyTimeout < timeout {
+		timeout = s.ReadyTimeout // tests
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

@@ -282,7 +282,7 @@ type siteData struct {
 type envRow struct{ Key, Value string }
 
 var siteTabs = map[string]bool{"overview": true, "deploy": true, "env": true, "ssl": true, "settings": true, "logs": true,
-	"backups": true, "import": true, "cron": true}
+	"backups": true, "import": true, "cron": true, "stats": true}
 
 func (s *Server) siteDetail(w http.ResponseWriter, r *http.Request) {
 	site, ok := s.loadSite(w, r)

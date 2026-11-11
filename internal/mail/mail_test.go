@@ -2,6 +2,7 @@ package mail
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -111,8 +112,9 @@ func TestRecords(t *testing.T) {
 
 // recRunner records helper calls like exec.DryRun (empty output, success).
 type recRunner struct {
-	mu    sync.Mutex
-	calls []call
+	mu     sync.Mutex
+	calls  []call
+	failOn map[string]int // subcommand → failures left
 }
 
 type call struct {
@@ -128,8 +130,12 @@ func (r *recRunner) Run(ctx context.Context, c exec.Cmd) (exec.Result, error) {
 		in = string(b)
 	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.calls = append(r.calls, call{args: c.Args, stdin: in, secrets: c.Secrets})
-	r.mu.Unlock()
+	if len(c.Args) > 2 && r.failOn[c.Args[2]] > 0 {
+		r.failOn[c.Args[2]]--
+		return exec.Result{}, errors.New(c.Args[2] + " failed")
+	}
 	return exec.Result{DryRun: true}, nil
 }
 
@@ -448,5 +454,64 @@ func TestLengthChecks(t *testing.T) {
 	key := func(n int) string { return "txt=" + dkimPrefix + strings.Repeat("A", n) }
 	if ParseDKIM(key(100)) == "" || ParseDKIM(key(1002)) == "" || ParseDKIM(key(99)) != "" || ParseDKIM(key(1003)) != "" {
 		t.Error("DKIM key length bounds")
+	}
+}
+
+func TestImageUpdate(t *testing.T) {
+	ctx := context.Background()
+	s, rr, _ := testService(t)
+	store.SetSetting(ctx, s.DB, settingDockerInstalled, "1")
+	id, err := s.StartInstall(ctx, InstallInput{Hostname: "mail.ornek.com", Domain: "ornek.com", LEEmail: "a@ornek.com", MemoryMB: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitJob(t, s, id)
+	for _, bad := range []string{DefaultImage, "mailserver/docker-mailserver:16.0.1-r2", "mailserver/docker-mailserver:18.0.0-r1", "evil/x:17.0.1-r1", "mailserver/docker-mailserver:17.0.1"} {
+		if _, err := s.StartImageUpdate(ctx, bad); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	next := "mailserver/docker-mailserver:17.0.1-r1"
+	if id, err = s.StartImageUpdate(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	if j := waitJob(t, s, id); j.Status != jobs.StatusSuccess {
+		t.Fatalf("%+v", j)
+	}
+	srv, _ := s.Store.Server(ctx)
+	if srv.Image != next || srv.Status != StatusRunning {
+		t.Fatalf("%+v", srv)
+	}
+	if p := rr.find("pull"); len(p) != 1 || p[0].args[1] != next {
+		t.Fatalf("pull %+v", p)
+	}
+	if c := rr.find("create"); c[len(c)-1].args[1] != next {
+		t.Fatalf("create %+v", c)
+	}
+	// the new version does not become healthy → back to the old image
+	rr.mu.Lock()
+	rr.failOn = map[string]int{"wait": 1}
+	rr.mu.Unlock()
+	creates := len(rr.find("create"))
+	if id, err = s.StartImageUpdate(ctx, "mailserver/docker-mailserver:17.1.0-r1"); err != nil {
+		t.Fatal(err)
+	}
+	j := waitJob(t, s, id)
+	if j.Status != jobs.StatusFailed || !strings.Contains(j.Error, "eski sürüme dönüldü") {
+		t.Fatalf("%+v", j)
+	}
+	srv, _ = s.Store.Server(ctx)
+	c := rr.find("create")
+	if srv.Image != next || srv.Status != StatusRunning || len(c) != creates+2 || c[len(c)-1].args[1] != next {
+		t.Fatalf("after rollback: %+v, creates %d", srv, len(c)-creates)
+	}
+	// a failed pull leaves the server alone
+	rr.mu.Lock()
+	rr.failOn = map[string]int{"pull": 1}
+	rr.mu.Unlock()
+	removes := len(rr.find("remove"))
+	id, _ = s.StartImageUpdate(ctx, "mailserver/docker-mailserver:17.1.0-r1")
+	if j := waitJob(t, s, id); j.Status != jobs.StatusFailed || len(rr.find("remove")) != removes {
+		t.Fatalf("pull failure touched the container: %+v", j)
 	}
 }

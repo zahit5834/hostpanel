@@ -30,6 +30,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/databases"
 	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/images"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
 	"github.com/zahit5834/hostpanel/internal/mail"
@@ -41,6 +42,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
 	"github.com/zahit5834/hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/traffic"
 	"github.com/zahit5834/hostpanel/internal/update"
 )
 
@@ -128,6 +130,30 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 		Crons: &crons.Service{Store: crons.NewStore(db), Sites: svc, Runner: runner, Activity: act, Log: log,
 			ScriptsDir: cfg.ScriptsDir, DryRun: true, Notify: notifySvc.Send}, BaseCtx: ctx}
 	bkSvc.Crons = s.Crons
+	s.Traffic = &traffic.Service{DB: db, Sites: svc, Log: log}
+	// Container registries: local stand-ins (MCR tag list + Docker Hub tags).
+	reg2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/mssql/") {
+			w.Write([]byte(`{"name":"mssql/server","tags":["2025-CU10-ubuntu-24.04","2025-CU10-GDR1-ubuntu-24.04","2027-CU1-ubuntu-24.04"]}`))
+			return
+		}
+		w.Write([]byte(`{"results":[{"name":"17.0.0-r1"},{"name":"17.0.1-r1"},{"name":"latest"}]}`))
+	}))
+	t.Cleanup(reg2.Close)
+	s.Images = &images.Service{DB: db, Notify: notifySvc.Send, Log: log, MCR: reg2.URL, Hub: reg2.URL, Engines: []images.Engine{
+		{ID: images.MSSQL, Label: "MSSQL", Current: func(ctx context.Context) string {
+			if srv, err := dbSvc.Store.Server(ctx); err == nil && srv.Status != databases.StatusInstalling {
+				return srv.Image
+			}
+			return ""
+		}},
+		{ID: images.Mail, Label: "Posta sunucusu", Current: func(ctx context.Context) string {
+			if srv, err := mailSvc.Store.Server(ctx); err == nil && srv.Status != mail.StatusInstalling {
+				return srv.Image
+			}
+			return ""
+		}},
+	}}
 	// Releases come from a local stand-in for the GitHub API.
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"tag_name":"v0.2.0","name":"v0.2.0","body":"- yeni <script>x</script>","html_url":"https://github.com/zahit5834/hostpanel/releases/tag/v0.2.0","published_at":"2026-11-06T10:00:00Z"}`))

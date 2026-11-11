@@ -1,0 +1,21 @@
+{{/* Container image update card: Page with .Data = *images.Info. */}}
+{{define "image-update"}}{{with .Data}}
+<div class="stack image-update">
+  <p class="small"><strong>Sürüm güncellemesi</strong> · çalışan <code>{{imageTag .Current}}</code> · {{if .CheckedAt.IsZero}}<span class="muted">henüz kontrol edilmedi</span>{{else}}<span class="muted">son kontrol {{ago .CheckedAt}}</span>{{end}}</p>
+  {{if .Err}}<p class="err-text small">Son kontrol hatası: {{.Err}}</p>{{end}}
+  {{if .Available}}
+  <form method="post" action="{{if eq .Engine "mail"}}/mail/server/update{{else}}/databases/server/update{{end}}" class="inline-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="image" value="{{.Latest}}">
+    <span class="badge running">Yeni: {{imageTag .Latest}}</span>
+    <button type="submit" class="primary" data-confirm="{{.Label}} {{imageTag .Latest}} sürümüne güncellenecek; işlem sırasında kısa süre erişilemez. Devam edilsin mi?">Güncelle</button>
+  </form>
+  {{if eq .Engine "mail"}}
+  <p class="muted small">Yeni imaj önce indirilir (posta çalışmaya devam eder), sonra container yeniden oluşturulur: 1–2 dk kesinti, gelen posta göndericide bekler. Postalar, hesaplar ve anahtarlar korunur; yeni sürüm açılmazsa eski sürüme otomatik dönülür.</p>
+  {{else}}
+  <p class="muted small">Yeni imaj önce indirilir (SQL Server çalışmaya devam eder). Sonra SQL Server durdurulur, veri dizininin kopyası alınır (<code>/var/backups/hostpanel/_mssql/pre-update</code>; boş disk gerekir) ve yeni sürümle başlatılır. Kesinti veri boyutuna göre birkaç dakika; yeni sürüm açılmazsa kopya ve eski sürüm otomatik geri konur.</p>
+  {{end}}
+  {{else if not .CheckedAt.IsZero}}{{if not .Err}}<p class="muted small">Güncel (aynı ana sürümde daha yeni imaj yok).</p>{{end}}{{end}}
+  {{if .NewMajor}}<p class="muted small">Yeni ana sürüm yayında: <code>{{imageTag .NewMajor}}</code>. Ana sürüm geçişi veri/ayar biçimini değiştirebileceği için tek tıkla yapılmaz.</p>{{end}}
+</div>
+{{end}}{{end}}

@@ -68,6 +68,7 @@ func (s *Service) Register() {
 	s.Jobs.Register("mail.install", s.jobInstall)
 	s.Jobs.Register("mail.recreate", s.jobRecreate)
 	s.Jobs.Register("mail.mailbox.delete", s.jobDeleteMailbox)
+	s.Jobs.Register("mail.update", s.jobImageUpdate)
 }
 
 func paramID(p map[string]any, key string) int64 {

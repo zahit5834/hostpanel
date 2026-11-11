@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/zahit5834/hostpanel/internal/images"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 type dbPageData struct {
 	Server       *databases.Server
+	Image        *images.Info
 	DockerReady  bool
 	Logins       []databases.Login
 	DBs          []databases.Database
@@ -45,6 +47,7 @@ func (s *Server) renderDatabases(w http.ResponseWriter, r *http.Request, status 
 		Editions: databases.Editions, Form: form, DockerReady: s.DBs.DockerPresent(ctx)}
 	if srv, err := s.DBs.Store.Server(ctx); err == nil {
 		d.Server = &srv
+		d.Image = s.imageInfo(r, images.MSSQL)
 	}
 	d.Logins, _ = s.DBs.Store.Logins(ctx)
 	d.DBs, _ = s.DBs.Store.Databases(ctx, databases.DBFilter{})

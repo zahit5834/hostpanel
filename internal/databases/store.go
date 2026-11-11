@@ -368,3 +368,9 @@ func (st *Store) CountForCustomer(ctx context.Context, customerID int64) int {
 	st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM databases WHERE customer_id=?`, customerID).Scan(&n)
 	return n
 }
+
+// SetImage records the container image (image update / rollback).
+func (st *Store) SetImage(ctx context.Context, id int64, image string) error {
+	_, err := st.db.ExecContext(ctx, `UPDATE db_servers SET image=?, updated_at=? WHERE id=?`, image, time.Now().Unix(), id)
+	return err
+}

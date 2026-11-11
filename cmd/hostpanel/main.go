@@ -31,6 +31,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/databases"
 	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/images"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
 	"github.com/zahit5834/hostpanel/internal/mail"
@@ -43,6 +44,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/ssl"
 	"github.com/zahit5834/hostpanel/internal/store"
 	"github.com/zahit5834/hostpanel/internal/system"
+	"github.com/zahit5834/hostpanel/internal/traffic"
 	"github.com/zahit5834/hostpanel/internal/update"
 	"github.com/zahit5834/hostpanel/internal/web"
 )
@@ -256,9 +258,29 @@ func serve(args []string) error {
 		Notify: notifySvc.Send, Version: version, Repo: cfg.UpdateRepo, StatusPath: statusPath,
 		LogPath: cfg.UpdateLogPath(), Dev: cfg.Dev}
 	updSvc.RecordFinished(ctx)
+	// After 30 s without requests or jobs, freed memory goes back to the OS.
+	idle := &system.IdleGC{Delay: 30 * time.Second}
+	defer idle.Stop()
+	jm.AfterJob = idle.Touch
+	trafficSvc := &traffic.Service{DB: a.db, Sites: siteSvc, Log: log}
+	imgSvc := &images.Service{DB: a.db, Notify: notifySvc.Send, Log: log, Version: version, Engines: []images.Engine{
+		{ID: images.MSSQL, Label: "MSSQL", Current: func(ctx context.Context) string {
+			if srv, err := dbSvc.Store.Server(ctx); err == nil && srv.Status != databases.StatusInstalling {
+				return srv.Image
+			}
+			return ""
+		}},
+		{ID: images.Mail, Label: "Posta sunucusu", Current: func(ctx context.Context) string {
+			if srv, err := mailSvc.Store.Server(ctx); err == nil && srv.Status != mail.StatusInstalling {
+				return srv.Image
+			}
+			return ""
+		}},
+	}}
 	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version,
 		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, PG: pgSvc, Backups: bkSvc,
-		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc, Update: updSvc, DNS: dnsSvc, Mail: mailSvc}
+		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc, Update: updSvc, DNS: dnsSvc, Mail: mailSvc,
+		Traffic: trafficSvc, Images: imgSvc, Idle: idle}
 	srv.ExportConfig = func(ctx context.Context, pass string, w io.Writer) (panelcfg.Manifest, error) {
 		server := store.GetSetting(ctx, a.db, "backup_server_name", "")
 		if server == "" {
@@ -278,7 +300,18 @@ func serve(args []string) error {
 		cancelJobs()
 		return err
 	}
-	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, pgSvc, cronSvc, updSvc, log)
+	daily := []func(context.Context){
+		trafficSvc.CollectAll,
+		func(ctx context.Context) {
+			cut := time.Now().AddDate(0, 0, -statsKeepDays)
+			trafficSvc.Purge(ctx, traffic.DayKey(cut))
+			monSvc.Store.PurgeUptime(ctx, cut)
+		},
+	}
+	if !cfg.DryRun { // dry-run has no real containers to compare with
+		daily = append(daily, func(ctx context.Context) { imgSvc.Check(ctx) })
+	}
+	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, pgSvc, cronSvc, updSvc, log, daily)
 	go bkSvc.RunScheduler(jobCtx)
 	go notifySvc.Run(jobCtx)
 	go monSvc.Run(jobCtx)
@@ -312,9 +345,12 @@ func serve(args []string) error {
 	return nil
 }
 
+// statsKeepDays is how long daily traffic and uptime history is kept.
+const statsKeepDays = 400
+
 // maintenance runs the daily cleanup: one timer, no polling.
 func maintenance(ctx context.Context, a *app, activity *logs.Activity, jm *jobs.Manager, sslSvc *ssl.Service, dbSvc *databases.Service,
-	pgSvc *pgsql.Service, cronSvc *crons.Service, updSvc *update.Service, log *slog.Logger) {
+	pgSvc *pgsql.Service, cronSvc *crons.Service, updSvc *update.Service, log *slog.Logger, daily []func(context.Context)) {
 	t := time.NewTimer(time.Minute)
 	defer t.Stop()
 	for {
@@ -341,6 +377,9 @@ func maintenance(ctx context.Context, a *app, activity *logs.Activity, jm *jobs.
 			if _, err := updSvc.Check(ctx); err != nil {
 				log.Warn("update check failed", "err", err)
 			}
+		}
+		for _, f := range daily {
+			f(ctx)
 		}
 		a.db.ExecContext(ctx, `PRAGMA optimize`)
 		if nAct+int64(nJobs) > 0 {

@@ -70,6 +70,7 @@
     {{template "mail-op" list $ "restart" "Yeniden başlat" ""}}{{template "mail-op" list $ "stop" "Durdur" "danger"}}{{end}}
   </div>
   {{end}}
+  {{if .Image}}{{template "image-update" (page $ .Image)}}{{end}}
   {{if eq $srv.Status "error"}}
   <form method="post" action="/mail/server/remove" class="stack">
     <input type="hidden" name="_csrf" value="{{$.CSRF}}">

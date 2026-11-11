@@ -71,6 +71,7 @@
   </div>
   <p class="muted small">İzolasyon testi iki geçici login + veritabanı oluşturur, birinin diğerini göremediğini ve erişemediğini doğrular, sonra temizler.</p>
   {{end}}
+  {{if .Image}}{{template "image-update" (page $ .Image)}}{{end}}
   {{if eq $srv.Status "error"}}
   <form method="post" action="/databases/server/remove" class="stack">
     <input type="hidden" name="_csrf" value="{{$.CSRF}}">

@@ -165,3 +165,9 @@ func (st *Store) DeleteDomain(ctx context.Context, id int64) error {
 	_, err := st.db.ExecContext(ctx, `DELETE FROM mail_domains WHERE id=?`, id)
 	return err
 }
+
+// SetImage records the container image (image update / rollback).
+func (st *Store) SetImage(ctx context.Context, id int64, image string) error {
+	_, err := st.db.ExecContext(ctx, `UPDATE mail_servers SET image=?, updated_at=? WHERE id=?`, image, time.Now().Unix(), id)
+	return err
+}

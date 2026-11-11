@@ -276,3 +276,61 @@ func TestRunStops(t *testing.T) {
 		t.Fatal("Run did not stop")
 	}
 }
+
+func TestUptimeHistory(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	site := e.site(t, "up.example.com", "dotnet", 5011)
+	fail := false
+	e.svc.CheckFunc = func(context.Context, sites.Site, Check) (int, error) {
+		if fail {
+			return 0, errors.New("zaman aşımı")
+		}
+		return 200, nil
+	}
+	step := func() {
+		e.svc.RunDue(ctx, e.now)
+		e.now = e.now.Add(time.Duration(DefaultInterval) * time.Second)
+	}
+	step()
+	step()
+	fail = true
+	firstFail := e.now
+	step() // 1st failure: no incident yet
+	if inc, _ := e.svc.Store.Incidents(ctx, site.ID, time.Time{}, 10); len(inc) != 0 {
+		t.Fatalf("incident after one failure: %+v", inc)
+	}
+	step() // 2nd failure → down, incident starts at the first failure
+	inc, _ := e.svc.Store.Incidents(ctx, site.ID, time.Time{}, 10)
+	if len(inc) != 1 || !inc[0].Open() || !inc[0].StartedAt.Equal(firstFail) || inc[0].Reason != "zaman aşımı" {
+		t.Fatalf("%+v (first fail %v)", inc, firstFail)
+	}
+	fail = false
+	upAt := e.now
+	step()
+	inc, _ = e.svc.Store.Incidents(ctx, site.ID, time.Time{}, 10)
+	if inc[0].Open() || !inc[0].EndedAt.Equal(upAt) || inc[0].Duration(e.now) != 10*time.Minute {
+		t.Fatalf("%+v", inc)
+	}
+	days, _ := e.svc.Store.UptimeDays(ctx, site.ID, "2000-01-01")
+	if len(days) != 1 || days[0].Checks != 5 || days[0].Fails != 2 || days[0].Pct() != 60 {
+		t.Fatalf("%+v", days)
+	}
+	sum, _ := e.svc.Store.UptimeSummary(ctx, "2000-01-01")
+	if sum[site.ID].Checks != 5 {
+		t.Fatalf("%+v", sum)
+	}
+	// down, then stopped on purpose: the incident is closed with a note
+	fail = true
+	step()
+	step()
+	e.sites.SetStatus(ctx, site.ID, sites.StatusStopped)
+	step()
+	inc, _ = e.svc.Store.Incidents(ctx, site.ID, time.Time{}, 10)
+	if len(inc) != 2 || inc[0].Open() || inc[0].EndNote == "" {
+		t.Fatalf("%+v", inc)
+	}
+	if n, _ := e.svc.Store.PurgeUptime(ctx, e.now.AddDate(0, 0, 1)); n != 3 {
+		t.Fatalf("purged %d", n)
+	}
+}

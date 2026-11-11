@@ -60,6 +60,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /sites/{id}/delete", s.requireAuth(s.siteDelete))
 
 	mux.Handle("GET /sites/{id}/ssl/check", s.requireAuth(s.siteSSLCheck))
+	mux.Handle("GET /sites/{id}/stats", s.requireAuth(s.siteStats))
+	mux.Handle("GET /stats", s.requireAuth(s.statsPage))
 	mux.Handle("POST /sites/{id}/ssl/letsencrypt", s.requireAuth(s.siteSSLLetsEncrypt))
 	mux.Handle("POST /sites/{id}/ssl/renew", s.requireAuth(s.siteSSLRenew))
 	mux.Handle("POST /sites/{id}/ssl/remove", s.requireAuth(s.siteSSLRemove))
@@ -81,6 +83,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /databases/server/remove", s.requireAuth(s.dbServerRemove))
 	mux.Handle("POST /databases/server/op/{op}", s.requireAuth(s.dbServerOp))
 	mux.Handle("POST /databases/server/settings", s.requireAuth(s.dbServerSettings))
+	mux.Handle("POST /databases/server/update", s.requireAuth(s.dbServerUpdate))
 	mux.Handle("POST /databases/isolation-test", s.requireAuth(s.dbIsolationTest))
 	mux.Handle("POST /databases/sizes", s.requireAuth(s.dbRefreshSizes))
 	mux.Handle("POST /databases", s.requireAuth(s.dbCreate))
@@ -108,6 +111,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /mail/server/remove", s.requireAuth(s.mailServerRemove))
 	mux.Handle("POST /mail/server/op/{op}", s.requireAuth(s.mailServerOp))
 	mux.Handle("POST /mail/server/settings", s.requireAuth(s.mailServerSettings))
+	mux.Handle("POST /mail/server/update", s.requireAuth(s.mailServerUpdate))
 	mux.Handle("POST /mail/check", s.requireAuth(s.mailCheck))
 	mux.Handle("POST /mail/flush", s.requireAuth(s.mailFlush))
 	mux.Handle("POST /mail/unban", s.requireAuth(s.mailUnban))
@@ -163,6 +167,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("GET /settings/update/status", s.requireAuth(s.updateStatus))
 	mux.Handle("POST /settings/update/check", s.requireAuth(s.updateCheck))
 	mux.Handle("POST /settings/update/start", s.requireAuth(s.updateStart))
+	mux.Handle("POST /settings/update/images", s.requireAuth(s.imagesCheck))
 	mux.Handle("GET /settings/transfer", s.requireAuth(s.transferPage))
 	mux.Handle("POST /settings/transfer/export", s.requireAuth(s.transferExport))
 

@@ -104,6 +104,9 @@ type Manager struct {
 	queue    chan *task
 	baseCtx  context.Context
 	wg       sync.WaitGroup
+
+	// AfterJob runs when a job has finished (memory release, see system.IdleGC).
+	AfterJob func()
 }
 
 // NewManager creates a manager writing job logs to dir.
@@ -241,6 +244,9 @@ func (m *Manager) worker(ctx context.Context) {
 }
 
 func (m *Manager) run(t *task) {
+	if m.AfterJob != nil {
+		defer m.AfterJob()
+	}
 	if t.ctx.Err() != nil { // canceled while queued
 		m.finish(t, StatusCanceled, t.ctx.Err())
 		return

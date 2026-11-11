@@ -27,6 +27,21 @@
   {{end}}
 </section>
 {{template "update-status" $}}
+<section class="card stack" id="images">
+  <div class="card-head"><h2>Container imajları</h2>
+    <form method="post" action="/settings/update/images" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <button type="submit">Şimdi kontrol et</button></form></div>
+  <p class="muted small">Kurulu MSSQL ve posta sunucusu için yeni imaj günde bir kez otomatik kontrol edilir (Microsoft Container Registry, Docker Hub); yeni sürüm çıkınca bir kez bildirim gönderilir (Bildirimler → "Panel ve container güncellemeleri"). Yalnızca aynı ana sürümdeki güncellemeler (SQL Server: yeni CU/GDR; posta: yeni ara sürüm/revizyon) tek tıkla kurulur.</p>
+  {{range .Images}}
+  <div class="stack">
+    <h3><a href="{{if eq .Engine "mail"}}/mail{{else}}/databases{{end}}">{{.Label}}</a></h3>
+    {{template "image-update" (page $ .)}}
+  </div>
+  {{else}}
+  <p class="muted">Kurulu container yok (MSSQL / posta sunucusu).</p>
+  {{end}}
+</section>
 <section class="card">
   <h2>Komut satırından</h2>
   <p class="muted small">Panel açılamıyorsa sunucuda: <code>sudo /opt/hostpanel/update.sh</code> (son sürüm) veya <code>sudo /opt/hostpanel/update.sh v1.2.3</code>. Aynı doğrulama ve geri dönüş mantığını kullanır; çıktı terminalde görünür.</p>

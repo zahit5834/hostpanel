@@ -200,3 +200,18 @@ pre.conf { background: var(--console-bg); color: var(--console-text); font-famil
 /* Faz 4: backups */
 fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin: 0; }
 legend { padding: 0 6px; color: var(--muted); font-size: 13px; }
+
+/* Traffic / uptime charts (SVG attributes only: CSP forbids style="") */
+svg.bars { width: 100%; height: 120px; display: block; background: var(--surface-2); border-radius: 6px; }
+svg.bars rect { fill: var(--accent); }
+svg.bars rect.today { fill: var(--run); opacity: .6; }
+svg.upstrip { width: 100%; height: 14px; display: block; }
+svg.upstrip .up-ok { fill: var(--ok); }
+svg.upstrip .up-warn { fill: var(--warn); }
+svg.upstrip .up-bad { fill: var(--err); }
+svg.upstrip .up-none { fill: var(--border); }
+.chart-axis { display: flex; justify-content: space-between; }
+.uptime-pct.up-ok { color: var(--ok); }
+.uptime-pct.up-warn { color: var(--warn); }
+.uptime-pct.up-bad { color: var(--err); }
+.image-update { border-top: 1px solid var(--border); padding-top: 10px; }

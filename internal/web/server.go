@@ -5,6 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"github.com/zahit5834/hostpanel/internal/images"
+	"github.com/zahit5834/hostpanel/internal/system"
+	"github.com/zahit5834/hostpanel/internal/traffic"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -65,6 +68,9 @@ type Server struct {
 	Update    *update.Service
 	DNS       *dns.Service
 	Mail      *mail.Service
+	Traffic   *traffic.Service
+	Idle      *system.IdleGC // returns memory to the OS after the last request
+	Images    *images.Service
 	// ExportConfig writes the encrypted panel configuration (main wires it:
 	// it needs the master key, which the web layer never holds otherwise).
 	ExportConfig func(ctx context.Context, passphrase string, w io.Writer) (panelcfg.Manifest, error)
@@ -124,6 +130,13 @@ func (s *Server) Handler() http.Handler {
 	h = s.withClientIP(h)
 	h = securityHeaders(h, s.Cfg.SecureCookies)
 	h = s.recoverer(h)
+	if s.Idle != nil {
+		inner := h
+		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer s.Idle.Touch()
+			inner.ServeHTTP(w, r)
+		})
+	}
 	return h
 }
 

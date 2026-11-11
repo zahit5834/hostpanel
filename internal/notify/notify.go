@@ -47,7 +47,7 @@ var Kinds = []struct{ ID, Label string }{
 	{KindBackup, "Yedek başarısız"},
 	{KindDisk, "Disk %85 üzeri"},
 	{KindCron, "Site cron görevi başarısız"},
-	{KindUpdate, "Panel güncellemesi (yeni sürüm / sonuç)"},
+	{KindUpdate, "Panel ve container güncellemeleri (yeni sürüm / sonuç)"},
 	{KindLoginFailed, "Başarısız panel girişi"},
 	{KindLoginNewIP, "Yeni IP'den panel girişi"},
 }

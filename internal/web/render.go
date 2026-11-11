@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/zahit5834/hostpanel/internal/images"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -135,7 +136,8 @@ func isHX(r *http.Request) bool {
 var trMonths = [...]string{"Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"}
 
 var funcs = template.FuncMap{
-	"list": func(v ...any) []any { return v },
+	"list":     func(v ...any) []any { return v },
+	"imageTag": images.Tag,
 	// pngDataURL marks a server-generated PNG data URI (the 2FA QR) as safe;
 	// html/template would otherwise replace data: URLs with #ZgotmplZ.
 	"pngDataURL": func(s string) template.URL {

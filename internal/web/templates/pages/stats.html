@@ -1,0 +1,29 @@
+{{define "content"}}
+{{with .Data}}
+<div class="card-head">
+  <h1>İstatistikler</h1>
+  <div class="ops"><a class="button{{if eq .Days 7}} primary{{end}}" href="/stats">7 gün</a><a class="button{{if eq .Days 30}} primary{{end}}" href="/stats?days=30">30 gün</a></div>
+</div>
+<section class="card table-wrap">
+  <table class="table">
+    <thead><tr><th>Site</th><th class="right">İstek</th><th class="right">Ziyaretçi</th><th class="right">Trafik</th><th class="right">5xx</th><th class="right">Erişilebilirlik (30 gün)</th><th class="right">Ort. yanıt</th><th>Şu an</th></tr></thead>
+    <tbody>
+    {{range .Rows}}
+      <tr>
+        <td><a href="/sites/{{.Site.ID}}?tab=stats">{{.Site.Domain}}</a> {{template "site-badge" .Site.Status}}</td>
+        <td class="right">{{.Traffic.Requests}}{{if .Traffic.Bots}} <span class="muted small">(bot {{.Traffic.Bots}})</span>{{end}}</td>
+        <td class="right">{{.Traffic.VisitorDays}}</td>
+        <td class="right nowrap">{{size .Traffic.Bytes}}</td>
+        <td class="right">{{.Traffic.S5}}{{if .Traffic.S5}} <span class="muted small">(%{{printf "%.1f" .Err5xx}})</span>{{end}}</td>
+        <td class="right">{{if .HasUptime}}<span class="uptime-pct {{.UpClass}}">%{{printf "%.2f" .Uptime.Pct}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="right nowrap">{{if .Uptime.AvgMS}}{{ms .Uptime.AvgMS}}{{else}}—{{end}}</td>
+        <td>{{if .HasHealth}}{{if eq .Health.State "up"}}<span class="badge success">erişilebilir</span>{{else if eq .Health.State "down"}}<span class="badge failed">erişilemiyor</span>{{else}}<span class="muted small">bilinmiyor</span>{{end}}{{else}}<span class="muted small">—</span>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if not .Rows}}<p class="muted pad">Henüz site yok.</p>{{end}}
+</section>
+<p class="muted small">Trafik nginx erişim loglarından günlük olarak hesaplanır (bugün hariç; bugünün canlı değerleri ve günlük grafikler sitenin <strong>İstatistik</strong> sekmesinde). Ziyaretçi = günlük tekil IP'lerin toplamı. Erişilebilirlik, health check sonuçlarının oranıdır; health check kapalı ya da site durdurulmuşsa sayılmaz. Geçmiş {{"400"}} gün saklanır.</p>
+{{end}}
+{{end}}

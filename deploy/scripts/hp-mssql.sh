@@ -7,6 +7,10 @@
 #       stdin line 1: sa password, line 2: MSSQL_PID (Express|Developer|product key).
 #       Secrets reach docker through a 0600 --env-file (never argv / ps).
 #   hp-mssql.sh remove-container      data directory is kept
+#   hp-mssql.sh pull <image>          download an image (update; the container keeps running)
+#   hp-mssql.sh snapshot              stop the container and copy the data directory (except
+#                                     backup/) to /var/backups/hostpanel/_mssql/pre-update
+#   hp-mssql.sh snapshot-restore      (no container) move the data aside, copy the snapshot back
 #   hp-mssql.sh purge                 remove container, move data dir aside (failed installs)
 #   hp-mssql.sh start|stop|restart
 #   hp-mssql.sh status                key=value lines (docker, container, cpu, mem…)
@@ -21,7 +25,7 @@
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
 check_db_dirs
-[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") install-docker|create|remove-container|purge|start|stop|restart|status|logs|firewall|firewall-clear …"
+[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") install-docker|create|remove-container|pull|snapshot|snapshot-restore|purge|start|stop|restart|status|logs|firewall|firewall-clear …"
 action=$1
 shift
 
@@ -29,6 +33,8 @@ NAME=hostpanel-mssql
 DATA=/var/lib/hostpanel/mssql
 MSSQL_UID=10001 # "mssql" user inside the official images
 UFW_TAG=hostpanel-mssql
+SNAP_ROOT=$BACKUP_ROOT/_mssql
+SNAP=$SNAP_ROOT/pre-update
 
 need_docker() { command -v docker >/dev/null || die "Docker kurulu değil"; }
 exists() { docker inspect --type container "$NAME" >/dev/null 2>&1; }
@@ -113,6 +119,49 @@ remove-container)
     docker rm -f "$NAME" >/dev/null
     log "container kaldırıldı (veri korunuyor: $DATA)"
   fi
+  ;;
+
+pull)
+  [[ $# -eq 1 ]] || die "kullanım: pull <image>"
+  validate_mssql_image "$1"
+  need_docker
+  log "docker pull $1"
+  docker pull -q "$1"
+  ;;
+
+snapshot)
+  [[ $# -eq 0 ]] || die "kullanım: snapshot"
+  need_docker
+  exists || die "container yok"
+  [[ -d $DATA && ! -L $DATA ]] || die "veri dizini yok: $DATA"
+  install -d -m 0700 "$BACKUP_ROOT"
+  install -d -m 0700 "$SNAP_ROOT"
+  # The previous snapshot belongs to an older update: replace it.
+  rm -rf "$SNAP" "$SNAP.tmp"
+  need=$(find "$DATA" -mindepth 1 -maxdepth 1 ! -name backup -exec du -sb {} + | awk '{s+=$1} END {print s+0}')
+  avail=$(df --output=avail -B1 "$SNAP_ROOT" | tail -n1 | tr -d ' ')
+  [[ $need =~ ^[0-9]+$ && $avail =~ ^[0-9]+$ ]] || die "disk alanı hesaplanamadı"
+  ((avail > need + need / 10 + 1073741824)) || die "yetersiz disk: kopya için $((need / 1048576)) MB + 1 GB pay gerekir, boş $((avail / 1048576)) MB"
+  log "SQL Server durduruluyor"
+  docker stop -t 120 "$NAME" >/dev/null
+  log "veri kopyalanıyor ($((need / 1048576)) MB) → $SNAP"
+  install -d -m 0700 "$SNAP.tmp"
+  find "$DATA" -mindepth 1 -maxdepth 1 ! -name backup -exec cp -a --reflink=auto {} "$SNAP.tmp/" \;
+  mv "$SNAP.tmp" "$SNAP"
+  log "kopya hazır"
+  ;;
+
+snapshot-restore)
+  [[ $# -eq 0 ]] || die "kullanım: snapshot-restore"
+  need_docker
+  ! exists || die "önce container kaldırılmalı"
+  [[ -d $SNAP && ! -L $SNAP ]] || die "güncelleme öncesi kopya yok: $SNAP"
+  [[ -d $DATA && ! -L $DATA ]] || die "veri dizini yok: $DATA"
+  failed="$SNAP_ROOT/failed-$(date +%Y%m%d-%H%M%S)"
+  install -d -m 0700 "$failed"
+  find "$DATA" -mindepth 1 -maxdepth 1 ! -name backup -exec mv {} "$failed/" \;
+  find "$SNAP" -mindepth 1 -maxdepth 1 -exec cp -a {} "$DATA/" \;
+  log "güncelleme öncesi veri geri kondu (başarısız veri: $failed)"
   ;;
 
 purge)

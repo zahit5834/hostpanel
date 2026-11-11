@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"github.com/zahit5834/hostpanel/internal/images"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ type mailDomainRow struct {
 
 type mailPageData struct {
 	Server       *mail.Server
+	Image        *images.Info
 	DockerReady  bool
 	Domains      []mailDomainRow
 	ListErr      string
@@ -52,6 +54,7 @@ func (s *Server) renderMail(w http.ResponseWriter, r *http.Request, status int, 
 	d.Customers, _ = s.Customers.List(ctx, "")
 	if srv, err := s.Mail.Store.Server(ctx); err == nil {
 		d.Server = &srv
+		d.Image = s.imageInfo(r, images.Mail)
 		ds, _ := s.Mail.Store.Domains(ctx, 0)
 		var l mail.Listing
 		if srv.Status == mail.StatusRunning || srv.Status == mail.StatusStopped {

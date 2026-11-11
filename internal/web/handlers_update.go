@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"fmt"
+	"github.com/zahit5834/hostpanel/internal/images"
 	"net/http"
 	"strconv"
 	"time"
@@ -17,10 +18,14 @@ import (
 type updateData struct {
 	update.Info
 	Started bool // just started: poll the status block
+	Images  []images.Info
 }
 
 func (s *Server) updateData(r *http.Request, refresh bool) updateData {
 	d := updateData{Info: s.Update.Info(r.Context(), refresh)}
+	if s.Images != nil {
+		d.Images = s.Images.Infos(r.Context())
+	}
 	d.Started = r.URL.Query().Get("started") == "1"
 	return d
 }

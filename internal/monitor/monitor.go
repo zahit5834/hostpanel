@@ -305,6 +305,9 @@ func (s *Service) RunDue(ctx context.Context, now time.Time) time.Time {
 		}
 		if site.Status != sites.StatusRunning || !c.Enabled {
 			if c.State != StateUnknown { // stopped on purpose: forget the state, no alert
+				if c.State == StateDown {
+					s.Store.closeIncident(ctx, site.ID, now, "site durduruldu ya da kontrol kapatıldı")
+				}
 				c.State, c.Fails = StateUnknown, 0
 				s.Store.saveResult(ctx, c)
 			}
@@ -358,13 +361,18 @@ func (s *Service) checkSite(ctx context.Context, site sites.Site, c Check, now t
 	if c.State != prev {
 		c.ChangedAt = now
 	}
+	s.Store.recordUptime(ctx, site.ID, now, ok, c.LastMS)
 	switch ev {
 	case "down":
+		// The site has been failing since the first of the consecutive failures.
+		started := now.Add(-time.Duration((c.Fails-1)*c.Interval) * time.Second)
+		s.Store.openIncident(ctx, site.ID, started, c.LastError)
 		s.Activity.Record(ctx, logs.Entry{Action: "site.down", TargetType: "site", TargetID: site.Domain, Status: logs.StatusFailed,
 			Summary: "Site erişilemiyor: " + site.Domain, Error: c.LastError}, nil)
 		s.send(ctx, notify.Event{Kind: notify.KindSiteStatus, Key: "down:" + site.Domain, NoDedupe: true,
 			Title: "🔴 " + site.Domain + " erişilemiyor", Text: c.LastError})
 	case "up":
+		s.Store.closeIncident(ctx, site.ID, now, "")
 		s.Activity.Record(ctx, logs.Entry{Action: "site.up", TargetType: "site", TargetID: site.Domain,
 			Summary: "Site tekrar erişilebilir: " + site.Domain}, nil)
 		s.send(ctx, notify.Event{Kind: notify.KindSiteStatus, Key: "up:" + site.Domain, NoDedupe: true,
