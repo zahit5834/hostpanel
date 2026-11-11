@@ -21,6 +21,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/pubdns"
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/store"
 )
@@ -55,6 +56,9 @@ type Service struct {
 
 	// ServerIPs returns the addresses of this server (DNS pre-check, PTR).
 	ServerIPs func(ctx context.Context) []netip.Addr
+	// PublicDNS answers like the outside world (nil = pubdns.Default); the
+	// system resolver reads /etc/hosts first (127.0.1.1 for the own hostname).
+	PublicDNS PublicResolver
 	// Changed is called with the mail names whose DNS records changed.
 	Changed func(ctx context.Context, names []string)
 	// NameTaken rejects a mail host name used by a site or the panel.
@@ -315,7 +319,48 @@ func (s *Service) createContainer(ctx context.Context, l *jobs.Log, srv Server) 
 	return err
 }
 
-// resolvesHere waits until host has an A record on this server.
+// PublicResolver is the subset of *pubdns.Resolver used (fakeable in tests).
+type PublicResolver interface {
+	LookupA(ctx context.Context, host string) ([]netip.Addr, error)
+	LookupPTR(ctx context.Context, ip netip.Addr) ([]string, error)
+}
+
+func (s *Service) public() PublicResolver {
+	if s.PublicDNS != nil {
+		return s.PublicDNS
+	}
+	return pubdns.Default
+}
+
+// lookupA returns the public A records of host. Public resolvers are asked
+// directly; only if none of them can be reached does it fall back to the
+// system resolver, ignoring loopback answers (/etc/hosts).
+func (s *Service) lookupA(ctx context.Context, host string) ([]netip.Addr, error) {
+	got, err := s.public().LookupA(ctx, host)
+	if err == nil || errors.Is(err, pubdns.ErrNotFound) || ctx.Err() != nil {
+		return got, err
+	}
+	lctx, cancel := lookupCtx(ctx)
+	sys, serr := net.DefaultResolver.LookupNetIP(lctx, "ip4", host)
+	cancel()
+	if serr != nil {
+		return nil, err
+	}
+	var out, loop []netip.Addr
+	for _, a := range sys {
+		if a = a.Unmap(); a.IsLoopback() {
+			loop = append(loop, a)
+		} else {
+			out = append(out, a)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%w; sistem çözümleyicisi yalnızca %v döndürdü (/etc/hosts kaydı, dışarıdan görünen değil)", err, loop)
+	}
+	return out, nil
+}
+
+// resolvesHere waits until host has a public A record on this server.
 func (s *Service) resolvesHere(ctx context.Context, l *jobs.Log, host string) error {
 	var mine []netip.Addr
 	if s.ServerIPs != nil {
@@ -330,11 +375,9 @@ func (s *Service) resolvesHere(ctx context.Context, l *jobs.Log, host string) er
 			case <-time.After(10 * time.Second):
 			}
 		}
-		lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		got, err := net.DefaultResolver.LookupNetIP(lctx, "ip4", host)
-		cancel()
+		got, err := s.lookupA(ctx, host)
 		if err != nil {
-			last = err.Error()
+			last = lookupErr(err)
 			continue
 		}
 		var names []string
@@ -1083,7 +1126,7 @@ func lookupCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 
 func lookupErr(err error) string {
 	var de *net.DNSError
-	if errors.As(err, &de) && de.IsNotFound {
+	if errors.As(err, &de) && de.IsNotFound || errors.Is(err, pubdns.ErrNotFound) {
 		return "kayıt yok"
 	}
 	return "sorgulanamadı: " + err.Error()
@@ -1106,9 +1149,7 @@ func (s *Service) CheckServer(ctx context.Context) []Check {
 	}
 
 	c := Check{Name: "A kaydı (" + srv.Hostname + ")"}
-	lctx, cancel := lookupCtx(ctx)
-	got, err := net.DefaultResolver.LookupNetIP(lctx, "ip4", srv.Hostname)
-	cancel()
+	got, err := s.lookupA(ctx, srv.Hostname)
 	var public []netip.Addr
 	if err != nil {
 		c.Detail = lookupErr(err)
@@ -1136,9 +1177,7 @@ func (s *Service) CheckServer(ctx context.Context) []Check {
 		c.Detail = "A kaydı düzelmeden denetlenemez"
 	}
 	for _, a := range public {
-		lctx, cancel := lookupCtx(ctx)
-		names, err := net.DefaultResolver.LookupAddr(lctx, a.String())
-		cancel()
+		names, err := s.public().LookupPTR(ctx, a)
 		if err != nil {
 			c.Detail = a.String() + ": " + lookupErr(err)
 			continue
