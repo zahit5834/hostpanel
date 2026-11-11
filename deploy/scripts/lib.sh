@@ -765,7 +765,7 @@ CONF
   local listen_opts="ssl http2" name=$domain hsts=""
   if [[ $mode == ip ]]; then
     name=_
-    [[ $port != 443 ]] && listen_opts="ssl http2 default_server"
+    listen_opts="ssl http2 default_server"
   else
     hsts='    add_header Strict-Transport-Security "max-age=31536000" always;'
   fi
@@ -824,28 +824,15 @@ CONF
 # write_panel_vhost MODE DOMAIN PORT — install the panel vhost; nginx -t must
 # pass, otherwise the previous file is restored.
 write_panel_vhost() {
-  local tmp backup=""
+  local tmp
   tmp=$(mktemp)
   render_panel_vhost "$@" >"$tmp"
-  if [[ -f $HP_VHOST ]]; then
-    backup=$(mktemp)
-    cp -p -- "$HP_VHOST" "$backup"
+  # an IP-mode panel on 443 is that port's default server itself: drop the
+  # catch-all first (nginx refuses two); ensure_default_vhost re-adds port 80.
+  if [[ $1 == ip && $3 == 443 && -f $HP_DEFAULT_VHOST ]]; then
+    rm -f -- "$HP_DEFAULT_VHOST_LINK" "$HP_DEFAULT_VHOST"
   fi
-  install -o root -g root -m 0644 "$tmp" "$HP_VHOST"
-  rm -f -- "$tmp"
-  ln -sfn -- "$HP_VHOST" "$HP_VHOST_LINK"
-  if ! nginx -t -q 2>/dev/null; then
-    nginx -t 2>&1 | tail -n 5 >&2 || true
-    if [[ -n $backup ]]; then
-      install -o root -g root -m 0644 "$backup" "$HP_VHOST"
-    else
-      rm -f -- "$HP_VHOST" "$HP_VHOST_LINK"
-    fi
-    rm -f -- "$backup"
-    die "panel nginx yapılandırması reddedildi; önceki hali geri yüklendi"
-  fi
-  rm -f -- "$backup"
-  systemctl reload nginx
+  install_vhost "$tmp" "$HP_VHOST" "$HP_VHOST_LINK" "panel"
 }
 
 # ---------------------------------------------------------------------------
@@ -973,10 +960,18 @@ mail_alias_add() {
 # mail_alias_del VIRT ALIAS TARGET
 mail_alias_del() { mail_virt_drop "$1" "$2" "$3" | mail_write "$1"; }
 
-# render_mail_vhost HOST — port 80 only: the ACME challenge for the mail
-# certificate; nothing else is served for the mail host name.
+# TLS profile shared by the vhosts root renders itself (Mozilla intermediate).
+HP_TLS_PROFILE='    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;'
+
+# render_mail_vhost HOST [tls] — port 80: the ACME challenge for the mail
+# host, 404 for the rest. With "tls" (the certificate exists) also port 443
+# with the mail certificate and a short notice, so https://HOST never lands
+# on (and shows the certificate of) a customer's site.
 render_mail_vhost() {
   validate_domain "$1"
+  [[ $# -lt 2 ]] || validate_oneof "$2" tls
   cat <<CONF
 # HostPanel mail server (hp-mail.sh) — certificate challenges only; do not edit.
 server {
@@ -992,31 +987,146 @@ server {
     }
 }
 CONF
+  [[ ${2:-} == tls ]] || return 0
+  cat <<CONF
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name $1;
+    ssl_certificate /etc/letsencrypt/live/${MAIL_CERT_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${MAIL_CERT_NAME}/privkey.pem;
+${HP_TLS_PROFILE}
+    location / {
+        default_type text/plain;
+        charset utf-8;
+        return 200 "$1 bir posta sunucusudur (IMAP 993 SSL/TLS, SMTP 465 SSL/TLS veya 587 STARTTLS).\n";
+    }
+}
+CONF
 }
 
-# write_mail_vhost HOST — install it; nginx -t must pass, otherwise the
-# previous file is restored.
-write_mail_vhost() {
-  local tmp backup=""
-  tmp=$(mktemp)
-  render_mail_vhost "$1" >"$tmp"
-  if [[ -f $MAIL_VHOST ]]; then
+# install_vhost TMP FILE LINK WHAT — install a rendered vhost; nginx -t must
+# pass, otherwise the previous file is restored (or the new one removed).
+install_vhost() {
+  local tmp=$1 file=$2 link=$3 what=$4 backup=""
+  if [[ -f $file ]]; then
     backup=$(mktemp)
-    cp -p -- "$MAIL_VHOST" "$backup"
+    cp -p -- "$file" "$backup"
   fi
-  install -o root -g root -m 0644 "$tmp" "$MAIL_VHOST"
+  install -o root -g root -m 0644 "$tmp" "$file"
   rm -f -- "$tmp"
-  ln -sfn -- "$MAIL_VHOST" "$MAIL_VHOST_LINK"
+  ln -sfn -- "$file" "$link"
   if ! nginx -t -q 2>/dev/null; then
     nginx -t 2>&1 | tail -n 5 >&2 || true
     if [[ -n $backup ]]; then
-      install -o root -g root -m 0644 "$backup" "$MAIL_VHOST"
+      install -o root -g root -m 0644 "$backup" "$file"
     else
-      rm -f -- "$MAIL_VHOST" "$MAIL_VHOST_LINK"
+      rm -f -- "$file" "$link"
     fi
     rm -f -- "$backup"
-    die "posta sunucusu nginx yapılandırması reddedildi; önceki hali geri yüklendi"
+    die "${what} nginx yapılandırması reddedildi; önceki hali geri yüklendi"
   fi
   rm -f -- "$backup"
   systemctl reload nginx
+}
+
+# write_mail_vhost HOST — install it (with port 443 once the certificate exists).
+write_mail_vhost() {
+  local tmp
+  tmp=$(mktemp)
+  if [[ -s /etc/letsencrypt/live/$MAIL_CERT_NAME/fullchain.pem ]]; then
+    render_mail_vhost "$1" tls >"$tmp"
+  else
+    render_mail_vhost "$1" >"$tmp"
+  fi
+  install_vhost "$tmp" "$MAIL_VHOST" "$MAIL_VHOST_LINK" "posta sunucusu"
+}
+
+# refresh_mail_vhost — re-render an existing mail vhost (panel update): the
+# host is read back from its server_name and validated again.
+refresh_mail_vhost() {
+  [[ -f $MAIL_VHOST && ! -L $MAIL_VHOST ]] || return 0
+  local host
+  host=$(sed -n 's/^    server_name \([^ ;]*\);$/\1/p' "$MAIL_VHOST" | head -n 1)
+  [[ -n $host ]] || return 0
+  write_mail_vhost "$host"
+}
+
+# Catch-all vhost: names that point here but have no vhost of their own
+# (a mail host, a removed site, a stray DNS record) would otherwise get the
+# first site's certificate and its redirect. Port 443 refuses the TLS
+# handshake, port 80 closes the connection (444).
+HP_DEFAULT_VHOST=/etc/nginx/sites-available/hostpanel-default.conf
+HP_DEFAULT_VHOST_LINK=/etc/nginx/sites-enabled/hostpanel-default.conf
+
+# render_default_vhost PORT... — 80 and/or 443.
+render_default_vhost() {
+  echo "# HostPanel catch-all (lib.sh ensure_default_vhost) — names without a vhost of their own; do not edit."
+  local p
+  for p in "$@"; do
+    case $p in
+      80)
+        cat <<'CONF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+CONF
+        ;;
+      443)
+        cat <<CONF
+server {
+    listen 443 ssl http2 default_server;
+    listen [::]:443 ssl http2 default_server;
+    server_name _;
+    ssl_reject_handshake on;
+${HP_TLS_PROFILE}
+}
+CONF
+        ;;
+      *) die "geçersiz port: $p" ;;
+    esac
+  done
+}
+
+# has_default_server PORT [DIR...] — another enabled config already declares
+# default_server on PORT (Ubuntu's "default" site on 80, an IP-mode panel on
+# 443): nginx refuses two, so that port is left alone.
+has_default_server() {
+  local port=$1 d f
+  shift
+  local dirs=("$@")
+  ((${#dirs[@]})) || dirs=(/etc/nginx/sites-enabled /etc/nginx/conf.d)
+  for d in "${dirs[@]}"; do
+    for f in "$d"/*; do
+      [[ -f $f && $(basename "$f") != "$(basename "$HP_DEFAULT_VHOST")" ]] || continue
+      grep -qE "^[[:space:]]*listen[[:space:]]+([^;[:space:]]*:)?${port}[[:space:]][^;]*default_server" -- "$f" && return 0
+    done
+  done
+  return 1
+}
+
+# ensure_default_vhost — install (or drop) the catch-all for the free ports.
+ensure_default_vhost() {
+  local ports=() p tmp
+  command -v nginx >/dev/null || return 0
+  for p in 80 443; do
+    has_default_server "$p" || ports+=("$p")
+  done
+  if ((${#ports[@]} == 0)); then
+    if [[ -e $HP_DEFAULT_VHOST_LINK || -e $HP_DEFAULT_VHOST ]]; then
+      rm -f -- "$HP_DEFAULT_VHOST_LINK" "$HP_DEFAULT_VHOST"
+      nginx -t -q && systemctl reload nginx
+    fi
+    return 0
+  fi
+  tmp=$(mktemp)
+  render_default_vhost "${ports[@]}" >"$tmp"
+  if [[ -f $HP_DEFAULT_VHOST ]] && cmp -s "$tmp" "$HP_DEFAULT_VHOST" && [[ -L $HP_DEFAULT_VHOST_LINK ]]; then
+    rm -f -- "$tmp"
+    return 0
+  fi
+  install_vhost "$tmp" "$HP_DEFAULT_VHOST" "$HP_DEFAULT_VHOST_LINK" "varsayılan (catch-all)"
 }

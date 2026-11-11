@@ -417,6 +417,36 @@ v=$( (source ./lib.sh; render_mail_vhost mail.ornek.com) )
 [[ $v == *"server_name mail.ornek.com;"* && $v == *"/.well-known/acme-challenge/"* && $v == *"return 404;"* && $v != *ssl* ]] ||
   { echo "FAIL mail vhost"; fail=1; }
 bad render_mail_vhost "mail.ornek.com; include /etc/passwd"
+v=$( (source ./lib.sh; render_mail_vhost mail.ornek.com tls) )
+for want in "listen 443 ssl http2;" "server_name mail.ornek.com;" "/etc/letsencrypt/live/hostpanel-mail/fullchain.pem" \
+  "/etc/letsencrypt/live/hostpanel-mail/privkey.pem" "ssl_protocols TLSv1.2 TLSv1.3;" 'return 200 "mail.ornek.com bir posta sunucusudur'; do
+  [[ $v == *"$want"* ]] || { echo "FAIL mail tls vhost misses: $want"; fail=1; }
+done
+[[ $v != *default_server* ]] || { echo "FAIL mail vhost must not be default_server"; fail=1; }
+bad render_mail_vhost mail.ornek.com other
+
+# catch-all: 443 refuses the handshake, 80 closes; only free ports.
+v=$( (source ./lib.sh; render_default_vhost 80 443) )
+for want in "listen 80 default_server;" "listen [::]:80 default_server;" "return 444;" "listen 443 ssl http2 default_server;" \
+  "listen [::]:443 ssl http2 default_server;" "ssl_reject_handshake on;" "ssl_protocols TLSv1.2 TLSv1.3;"; do
+  [[ $v == *"$want"* ]] || { echo "FAIL default vhost misses: $want"; fail=1; }
+done
+v=$( (source ./lib.sh; render_default_vhost 443) )
+[[ $v != *"listen 80"* && $v == *ssl_reject_handshake* ]] || { echo "FAIL default vhost 443 only"; fail=1; }
+bad render_default_vhost 8080
+td=$(mktemp -d)
+mkdir -p "$td/en" "$td/cd"
+printf 'server {\n    listen 80 default_server;\n    listen [::]:80 default_server;\n    # listen 443 ssl default_server;\n}\n' >"$td/en/default"
+printf 'server {\n    listen 8443 ssl http2 default_server;\n}\n' >"$td/en/hostpanel.conf"
+printf 'server {\n    listen 443 ssl http2 default_server;\n}\n' >"$td/en/hostpanel-default.conf"
+dflt() { ( source ./lib.sh; has_default_server "$@" ); }
+dflt 80 "$td/en" "$td/cd" || { echo "FAIL default_server on 80 not found (Ubuntu default site)"; fail=1; }
+! dflt 443 "$td/en" "$td/cd" || { echo "FAIL 443: comment, 8443 or own catch-all counted"; fail=1; }
+printf 'server {\n  listen [::]:443 ssl default_server;\n}\n' >"$td/cd/x.conf"
+dflt 443 "$td/en" "$td/cd" || { echo "FAIL [::]:443 default_server not found"; fail=1; }
+rm -rf "$td"
+v=$(vhost ip "" 443)
+[[ $v == *"listen 443 ssl http2 default_server;"* ]] || { echo "FAIL ip panel on 443 must be the default server"; fail=1; }
 
 if [[ $fail -eq 0 ]]; then echo "lib.sh: tüm testler geçti"; fi
 exit $fail

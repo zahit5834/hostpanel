@@ -393,6 +393,7 @@ setup_vhost() {
         warn "sertifika alınamadı (DNS ${DOMAIN} → bu sunucu mu, 80 açık mı?). Panel şimdilik IP üzerinden self-signed ile açılıyor; düzeltip install.sh'yi aynı --domain ile tekrar çalıştırın."
         panel_self_signed
         write_panel_vhost ip "" "$PORT"
+        ensure_default_vhost
         return
       fi
     fi
@@ -401,6 +402,7 @@ setup_vhost() {
     panel_self_signed
     write_panel_vhost ip "" "$PORT"
   fi
+  ensure_default_vhost
 }
 
 import_config() {

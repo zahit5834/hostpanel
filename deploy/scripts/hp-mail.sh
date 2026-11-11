@@ -227,7 +227,8 @@ case $action in
     command -v nginx >/dev/null || die "nginx kurulu değil"
     install -d -o root -g root -m 0755 "$WEBROOT"
     write_mail_vhost "$1"
-    log "nginx: ${MAIL_VHOST} (yalnızca 80. port, ACME)"
+    ensure_default_vhost
+    log "nginx: ${MAIL_VHOST} (80: ACME; 443: sertifika alındıktan sonra)"
     ;;
 
   cert)
@@ -242,6 +243,7 @@ case $action in
     ensure_dirs
     copy_tls
     install_hook
+    write_mail_vhost "$1" # now with port 443 and the mail certificate
     log "sertifika hazır: $(openssl x509 -noout -enddate -in "$TLS/fullchain.pem")"
     ;;
 

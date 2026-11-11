@@ -237,6 +237,8 @@ refresh_vhost() {
     write_panel_vhost ip "" "$port"
   fi
   log "panel vhost yenilendi"
+  refresh_mail_vhost
+  ensure_default_vhost
 }
 
 case $action in

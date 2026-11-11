@@ -319,6 +319,32 @@ func (s *Service) createContainer(ctx context.Context, l *jobs.Log, srv Server) 
 	return err
 }
 
+// vhostRev is the revision of the mail host's nginx vhost (lib.sh
+// render_mail_vhost). 2: port 443 with the mail certificate + catch-all.
+const (
+	vhostRev        = "2"
+	settingVhostRev = "mail_vhost_rev"
+)
+
+// EnsureVhost re-renders the mail host's vhost once per revision. A panel
+// update installs the new scripts but runs the previous hp-update.sh, so the
+// panel does this itself on its first start.
+func (s *Service) EnsureVhost(ctx context.Context) {
+	if store.GetSetting(ctx, s.DB, settingVhostRev, "") == vhostRev {
+		return
+	}
+	srv, err := s.Store.Server(ctx)
+	if err != nil || srv.Hostname == "" || srv.Status == StatusInstalling || srv.Status == StatusError {
+		return // an install (or its retry) writes the current vhost itself
+	}
+	if _, err := s.helper(ctx, nil, nil, nil, time.Minute, "vhost", srv.Hostname); err != nil {
+		s.Log.Warn("mail vhost refresh failed", "err", err)
+		return
+	}
+	store.SetSetting(ctx, s.DB, settingVhostRev, vhostRev)
+	s.Log.Info("mail vhost refreshed", "host", srv.Hostname, "rev", vhostRev)
+}
+
 // PublicResolver is the subset of *pubdns.Resolver used (fakeable in tests).
 type PublicResolver interface {
 	LookupA(ctx context.Context, host string) ([]netip.Addr, error)

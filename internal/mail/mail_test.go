@@ -515,3 +515,25 @@ func TestImageUpdate(t *testing.T) {
 		t.Fatalf("pull failure touched the container: %+v", j)
 	}
 }
+
+func TestEnsureVhost(t *testing.T) {
+	ctx := context.Background()
+	s, rr, _ := testService(t)
+	s.EnsureVhost(ctx) // not installed: nothing to do
+	if len(rr.find("vhost")) != 0 {
+		t.Fatal("vhost without a server")
+	}
+	store.SetSetting(ctx, s.DB, settingDockerInstalled, "1")
+	id, err := s.StartInstall(ctx, InstallInput{Hostname: "mail.ornek.com", Domain: "ornek.com", LEEmail: "a@ornek.com", MemoryMB: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitJob(t, s, id)
+	n := len(rr.find("vhost"))
+	s.EnsureVhost(ctx)
+	s.EnsureVhost(ctx) // once per revision
+	v := rr.find("vhost")
+	if len(v) != n+1 || v[len(v)-1].args[1] != "mail.ornek.com" {
+		t.Fatalf("vhost calls %+v", v)
+	}
+}

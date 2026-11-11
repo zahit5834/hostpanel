@@ -315,6 +315,7 @@ func serve(args []string) error {
 	go bkSvc.RunScheduler(jobCtx)
 	go notifySvc.Run(jobCtx)
 	go monSvc.Run(jobCtx)
+	go mailSvc.EnsureVhost(jobCtx) // one-shot: a panel update runs the old hp-update.sh
 	cronDone := make(chan struct{})
 	go func() { cronSvc.Run(jobCtx); close(cronDone) }()
 	srv.BaseCtx = jobCtx
