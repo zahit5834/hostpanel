@@ -3,6 +3,26 @@
 {{with .Data}}
 <p class="muted small">Tanımlar <code>{{.Dir}}</code> altındaki YAML dosyalarından okunur; yeni bir altyapı eklemek için oraya dosya bırakıp paneli yeniden başlatın.</p>
 {{range .LoadErrors}}<div class="alert err">{{.}}</div>{{end}}
+{{if .Patches}}
+<section class="card stack">
+  <h2>Yama güncellemeleri</h2>
+  <table class="table">
+    <thead><tr><th>Altyapı</th><th>Kurulu</th><th>Yeni yama</th><th class="right">Taşınacak site</th><th></th></tr></thead>
+    <tbody>
+    {{range .Patches}}<tr>
+      <td>{{.Name}}</td><td><code>{{.From}}</code></td><td><code>{{.To}}</code>{{if .ToInstalled}} <span class="muted small">(kurulu)</span>{{end}}</td>
+      <td class="right">{{len .Sites}}</td>
+      <td class="right">{{if or .Sites (not .ToInstalled)}}
+        <form method="post" action="/runtimes/{{.Runtime}}/patch" class="inline-form">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="from" value="{{.From}}"><input type="hidden" name="to" value="{{.To}}">
+          <button type="submit" class="primary" data-confirm="{{.Name}} {{.To}} kurulacak ve {{len .Sites}} site tek tek yeni sürüme alınacak (her biri yeniden başlatılıp sağlık kontrolünden geçer; başarısız olan {{.From}} sürümünde kalır). Devam edilsin mi?">{{if .ToInstalled}}Siteleri taşı{{else}}Kur ve siteleri taşı{{end}}</button>
+        </form>{{else}}<span class="muted small">{{.From}} kullanılmıyor, aşağıdan kaldırılabilir</span>{{end}}</td>
+    </tr>{{end}}
+    </tbody>
+  </table>
+  <p class="muted small">Yalnızca aynı sürüm hattındaki yamalar önerilir (.NET 10.0.x, Node 24.x); ana sürüm değişikliği hiçbir zaman otomatik yapılmaz. Taşıma bittikten sonra eski sürüm kullanılmıyorsa "Kaldır" ile silebilirsiniz.</p>
+</section>
+{{end}}
 {{range .Rows}}{{$def := .Def}}
 <section class="card">
   <div class="card-head"><h2>{{$def.DisplayName}}</h2><span class="tag">{{$def.Type}}</span></div>

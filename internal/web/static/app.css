@@ -211,6 +211,15 @@ svg.upstrip .up-warn { fill: var(--warn); }
 svg.upstrip .up-bad { fill: var(--err); }
 svg.upstrip .up-none { fill: var(--border); }
 .chart-axis { display: flex; justify-content: space-between; }
+svg.lines { width: 100%; height: 120px; display: block; background: var(--surface-2); border-radius: 6px; }
+svg.lines polyline { fill: none; stroke-width: 1.5; stroke-linejoin: round; }
+svg.lines .s1 { stroke: var(--accent); }
+svg.lines .s2 { stroke: var(--warn); }
+svg.lines .grid-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 4 4; }
+.legend { display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin-right: 4px; }
+.legend.s1 { background: var(--accent); }
+.legend.s2 { background: var(--warn); }
+.metric-chart h3 { margin: 0; }
 .uptime-pct.up-ok { color: var(--ok); }
 .uptime-pct.up-warn { color: var(--warn); }
 .uptime-pct.up-bad { color: var(--err); }

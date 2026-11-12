@@ -232,6 +232,14 @@ func (c *fakeConn) Drop(_ context.Context, db, backupPath string) error {
 	return nil
 }
 
+func (c *fakeConn) VerifyBackup(_ context.Context, path string) error {
+	if !ValidBackupPath(path) {
+		return fmt.Errorf("geçersiz yedek yolu: %s", path)
+	}
+	c.echo("RESTORE VERIFYONLY FROM DISK = '%s'", path)
+	return nil
+}
+
 func (c *fakeConn) Backup(_ context.Context, db, path string) error {
 	c.echo("BACKUP DATABASE [%s] TO DISK = '%s' WITH COPY_ONLY", db, path)
 	return nil

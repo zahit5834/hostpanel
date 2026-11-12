@@ -69,6 +69,20 @@
 </section>
 {{end}}
 
+{{if .Domains}}
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Alan adı kayıtları</h2><a class="small" href="/domains">Alan adları →</a></div>
+  <table class="table">
+    <thead><tr><th>Alan adı</th><th>Bitiş</th><th>Kayıt firması</th></tr></thead>
+    <tbody>
+    {{range .Domains}}<tr><td>{{.Entry.Name}}</td>
+      <td>{{if .Entry.ExpiresAt.IsZero}}<span class="muted">bilinmiyor</span>{{else}}{{.Entry.ExpiresAt.Format "02.01.2006"}} <span class="badge {{.Class}}">{{if lt .Days 0}}süresi doldu{{else}}{{.Days}} gün{{end}}</span>{{end}}</td>
+      <td class="small">{{.Entry.Registrar}}</td></tr>{{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
+
 {{if .Zones}}
 <section class="card table-wrap">
   <div class="card-head pad"><h2>DNS zone'ları</h2><a class="small" href="/dns">DNS →</a></div>

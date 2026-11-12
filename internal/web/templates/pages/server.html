@@ -3,12 +3,19 @@
 <div class="tabs">
   <a href="/server?tab=general" class="{{if eq $d.Tab "general"}}active{{end}}">Genel</a>
   <a href="/server?tab=updates" class="{{if eq $d.Tab "updates"}}active{{end}}">Güncellemeler</a>
+  <a href="/server?tab=metrics" class="{{if eq $d.Tab "metrics"}}active{{end}}">Metrikler</a>
+  <a href="/server?tab=clean" class="{{if eq $d.Tab "clean"}}active{{end}}">Disk temizliği</a>
   <a href="/server?tab=ssh" class="{{if eq $d.Tab "ssh"}}active{{end}}">SSH</a>
   <a href="/server?tab=fail2ban" class="{{if eq $d.Tab "fail2ban"}}active{{end}}">fail2ban</a>
   <a href="/server?tab=ufw" class="{{if eq $d.Tab "ufw"}}active{{end}}">Güvenlik duvarı</a>
 </div>
 {{if eq $d.Tab "general"}}{{template "srv-general" $}}
 {{else if eq $d.Tab "updates"}}{{template "srv-updates" $}}
+{{else if eq $d.Tab "metrics"}}{{template "srv-metrics" $}}
+{{else if eq $d.Tab "clean"}}{{template "flash" $}}
+<section class="card" id="server-clean" hx-get="/server/part/clean" hx-trigger="load" hx-swap="outerHTML">
+  <h2>Disk temizliği</h2><p class="muted">Hesaplanıyor (yedek ve veritabanı dizinleri taranıyor)…</p>
+</section>
 {{else if eq $d.Tab "ssh"}}{{template "ssh" $}}
 {{else if eq $d.Tab "fail2ban"}}{{template "f2b" $}}
 {{else}}{{template "ufw" $}}{{end}}
@@ -326,3 +333,66 @@ sudo ufw enable</pre>
   {{end}}
 </section>
 {{end}}{{end}}
+
+{{define "srv-metrics"}}{{$d := .Data}}{{$m := $d.Metrics}}
+{{template "flash" .}}
+<section class="card stack">
+  <div class="card-head">
+    <div class="tabs small">
+      <a href="/server?tab=metrics&amp;range=24h" class="{{if eq $m.Range "24h"}}active{{end}}">24 saat</a>
+      <a href="/server?tab=metrics&amp;range=7d" class="{{if eq $m.Range "7d"}}active{{end}}">7 gün</a>
+      <a href="/server?tab=metrics&amp;range=30d" class="{{if eq $m.Range "30d"}}active{{end}}">30 gün</a>
+    </div>
+    <form method="post" action="/server/metrics" class="row-form">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      {{if $m.Enabled}}<input type="hidden" name="enabled" value="0"><button type="submit" class="link-btn">Kaydı durdur</button>
+      {{else}}<input type="hidden" name="enabled" value="1"><button type="submit" class="primary">Kaydı başlat</button>{{end}}
+    </form>
+  </div>
+  <p class="muted small">{{if $m.Enabled}}5 dakikada bir örnek alınır, 30 gün saklanır{{else}}Metrik kaydı kapalı; mevcut veriler saklama süresi dolana kadar görünür{{end}}. Her nokta {{$m.Interval}} ortalamasıdır; panelin kapalı olduğu aralıklar boş kalır.</p>
+  {{if not $m.Charts}}<p class="muted">Bu aralıkta örnek yok{{if $m.Enabled}} — ilk örnekler birkaç dakika içinde gelir{{end}}.</p>{{end}}
+  <div class="grid two">
+  {{range $m.Charts}}
+    <div class="metric-chart">
+      <div class="card-head"><h3>{{.Title}}</h3><span class="muted small">üst sınır {{.Max}}</span></div>
+      <svg class="lines" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="{{.Title}}">
+        <line class="grid-line" x1="0" y1="60" x2="600" y2="60" vector-effect="non-scaling-stroke"/>
+        {{range .Lines}}<polyline class="{{.Class}}" points="{{.Points}}" vector-effect="non-scaling-stroke"/>{{end}}
+      </svg>
+      <div class="chart-axis small muted"><span>{{$m.From}}</span><span>{{$m.Mid}}</span><span>{{$m.To}}</span></div>
+      <p class="small">{{range .Legend}}<span class="legend {{.Class}}"></span>{{.Label}} {{end}}<span class="muted">· son: {{.Now}}</span></p>
+    </div>
+  {{end}}
+  </div>
+</section>
+{{end}}
+
+{{define "server-clean"}}{{$d := .Data}}
+<section class="card stack" id="server-clean">
+  <div class="card-head"><h2>Disk temizliği</h2><span class="muted small">silinebilir toplam: {{size $d.CleanTotal}}</span></div>
+  <p class="muted small">Hiçbir şey otomatik silinmez; her öğe ayrı onayla silinir ve İşlem Geçmişi'ne yazılır. Posta arşivleri müşteri e-postası olduğu için yalnızca listelenir.</p>
+  {{if $d.CleanErr}}<div class="alert err">Liste alınamadı: {{$d.CleanErr}}</div>{{end}}
+  {{range $d.Clean}}{{$c := .}}
+  <div class="table-wrap">
+    <h3>{{.Label}} <span class="muted small">{{if .Items}}{{len .Items}} öğe · {{size .Bytes}}{{else}}boş{{end}}</span></h3>
+    <p class="muted small">{{.Hint}}</p>
+    {{if .Items}}
+    <table class="table compact">
+      <tbody>
+      {{range .Items}}<tr>
+        <td><code class="small">{{if .Label}}{{.Label}}{{else}}{{.ID}}{{end}}</code></td>
+        <td class="nowrap muted small">{{datetime .Time}}</td>
+        <td class="right nowrap">{{size .Bytes}}</td>
+        <td class="right">{{if $c.Deletable}}
+          <form method="post" action="/server/clean" class="inline-form">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="cat" value="{{.Cat}}"><input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" class="danger" data-confirm="{{if .Label}}{{.Label}}{{else}}{{.ID}}{{end}} silinsin mi? Geri alınamaz.">Sil</button>
+          </form>{{else}}<span class="muted small">yalnızca bilgi</span>{{end}}</td>
+      </tr>{{end}}
+      </tbody>
+    </table>
+    {{end}}
+  </div>
+  {{end}}
+</section>
+{{end}}

@@ -1,0 +1,35 @@
+{{define "content"}}{{$d := .Data}}
+<div class="card-head">
+  <h1>Alan adları</h1>
+  <div class="actions"><a class="button" href="/dns">DNS →</a></div>
+</div>
+<p class="muted small">Panelin sunduğu adların (siteler ve alias'ları, DNS zone'ları, posta alan adları, posta sunucusu ve panel adresi) kayıt bitiş tarihleri. Tarihler günde bir kez RDAP ile sorgulanır; 30/15/7 gün kala bildirim gider. <code>.tr</code> uzantılarının RDAP servisi yoktur: tarihi elle girin.</p>
+<section class="card table-wrap">
+  <div class="card-head pad">
+    <h2>Kayıt bitişleri</h2>
+    <form method="post" action="/domains/refresh"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">Şimdi sorgula</button></form>
+  </div>
+  <table class="table">
+    <thead><tr><th>Alan adı</th><th>Bitiş</th><th>Kaynak</th><th>Kayıt firması</th><th>Kullanım</th><th>Elle tarih</th></tr></thead>
+    <tbody>
+    {{range $d.Rows}}<tr>
+      <td><strong>{{.Entry.Name}}</strong>{{if .Customer}}<div class="muted small">{{.Customer}}</div>{{end}}</td>
+      <td class="nowrap">{{if .Entry.ExpiresAt.IsZero}}<span class="muted">bilinmiyor</span>{{else}}{{.Entry.ExpiresAt.Format "02.01.2006"}} <span class="badge {{.Class}}">{{if lt .Days 0}}süresi doldu{{else}}{{.Days}} gün{{end}}</span>{{end}}
+        {{if .Entry.Error}}<div class="small err-text">{{.Entry.Error}}</div>{{end}}</td>
+      <td class="small">{{if eq .Entry.Source "manual"}}elle{{else}}RDAP{{if not .Entry.CheckedAt.IsZero}} <span class="muted">({{.Entry.CheckedAt.Format "02.01 15:04"}})</span>{{end}}{{end}}</td>
+      <td class="small">{{.Entry.Registrar}}</td>
+      <td class="small">{{range $i, $u := .Uses}}{{if $i}}, {{end}}{{$u}}{{end}}</td>
+      <td>
+        <form method="post" action="/domains/manual" class="row-form">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Entry.Name}}">
+          <input type="date" name="date" value="{{if eq .Entry.Source "manual"}}{{.Entry.ExpiresAt.Format "2006-01-02"}}{{end}}">
+          <button type="submit" class="link-btn">Kaydet</button>
+        </form>
+        {{if eq .Entry.Source "manual"}}<span class="muted small">boş bırakıp kaydedin → RDAP'a döner</span>{{end}}
+      </td>
+    </tr>{{end}}
+    </tbody>
+  </table>
+  {{if not $d.Rows}}<p class="muted pad">Henüz alan adı yok.</p>{{end}}
+</section>
+{{end}}

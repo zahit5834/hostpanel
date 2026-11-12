@@ -170,6 +170,21 @@ func (s *Server) dashboardAlerts(ctx context.Context, snap system.Snapshot, rows
 	if store.GetSetting(ctx, s.DB, setIntegrityKey, "") != "" {
 		out = append(out, alert{Text: "Kurulu root script'leri bu sürümden farklı", Link: "/security"})
 	}
+	for _, d := range s.infraDown(ctx) {
+		out = append(out, alert{Text: d.Name + " çalışmıyor", Link: "/server?tab=general", Detail: d.Why})
+	}
+	if s.Domains != nil {
+		for _, e := range s.Domains.Expiring(ctx, 15) {
+			d := fmt.Sprintf("%d gün kaldı (%s)", e.DaysLeft(time.Now()), e.ExpiresAt.Format("2006-01-02"))
+			if e.DaysLeft(time.Now()) < 0 {
+				d = "süresi doldu (" + e.ExpiresAt.Format("2006-01-02") + ")"
+			}
+			out = append(out, alert{Text: e.Name + ": alan adı kaydı", Link: "/domains", Detail: d})
+		}
+	}
+	if v := s.lastVerifyFailed(ctx); v != nil {
+		out = append(out, alert{Text: "Son yedek doğrulaması başarısız: " + v.Domain + " / " + v.Name, Link: "/backups?tab=verify"})
+	}
 	return out
 }
 

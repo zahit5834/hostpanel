@@ -29,12 +29,14 @@ import (
 	"github.com/zahit5834/hostpanel/internal/customers"
 	"github.com/zahit5834/hostpanel/internal/databases"
 	"github.com/zahit5834/hostpanel/internal/dns"
+	"github.com/zahit5834/hostpanel/internal/domains"
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/hostsec"
 	"github.com/zahit5834/hostpanel/internal/images"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
 	"github.com/zahit5834/hostpanel/internal/mail"
+	"github.com/zahit5834/hostpanel/internal/metrics"
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
@@ -136,6 +138,8 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	s.F2B = &hostsec.Fail2ban{Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: true}
 	s.Sys = &sysmaint.Service{Runner: runner, Probe: runner, ScriptsDir: cfg.ScriptsDir, DryRun: true}
 	s.Traffic = &traffic.Service{DB: db, Sites: svc, Log: log}
+	s.Metrics = &metrics.Service{DB: db, Log: log}
+	s.Domains = &domains.Service{DB: db, Log: log, Client: &http.Client{Transport: noNetwork{}}}
 	// Container registries: local stand-ins (MCR tag list + Docker Hub tags).
 	reg2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/v2/mssql/") {

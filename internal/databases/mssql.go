@@ -274,6 +274,15 @@ func (m *MSSQL) Backup(ctx context.Context, db, path string) error {
 	return m.run(ctx, sqlBackup, sql.Named("db", db), sql.Named("path", path))
 }
 
+// VerifyBackup checks that the backup set is complete and readable (and its
+// page checksums, when it was taken WITH CHECKSUM).
+func (m *MSSQL) VerifyBackup(ctx context.Context, path string) error {
+	if !ValidBackupPath(path) {
+		return fmt.Errorf("geçersiz yedek yolu: %s", path)
+	}
+	return m.run(ctx, `RESTORE VERIFYONLY FROM DISK = @path`, sql.Named("path", path))
+}
+
 // restoreFile is one row of RESTORE FILELISTONLY.
 type restoreFile struct {
 	Logical string

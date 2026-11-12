@@ -85,6 +85,7 @@ var scrub = []string{
 	`DELETE FROM backups`, `DELETE FROM pg_databases`, `DELETE FROM pg_roles`, `DELETE FROM pg_servers`,
 	`DELETE FROM mail_domains`, `DELETE FROM mail_servers`,
 	`DELETE FROM traffic_daily`, `DELETE FROM uptime_daily`, `DELETE FROM uptime_incidents`,
+	`DELETE FROM metrics`, `DELETE FROM domain_expiry`, `DELETE FROM backup_verifications`,
 	`DELETE FROM databases`, `DELETE FROM db_logins`, `DELETE FROM db_servers`,
 	`DELETE FROM csrs`, `DELETE FROM certificates`, `DELETE FROM releases`, `DELETE FROM site_env`, `DELETE FROM sites`,
 	`DELETE FROM sessions`, `DELETE FROM login_attempts`, `DELETE FROM activity_log`, `DELETE FROM jobs`,
@@ -95,7 +96,8 @@ var scrub = []string{
 	`DELETE FROM settings WHERE key LIKE 'image\_%' ESCAPE '\'`,
 	// Faz 11: state of this server (boot ids, audit/integrity results, watches).
 	`DELETE FROM settings WHERE key LIKE 'security\_%' ESCAPE '\'`,
-	`DELETE FROM settings WHERE key IN ('last_boot_id','reboot_planned_boot_id','oom_checked_at','ssh_watch_since','transfer_exported_at')`,
+	`DELETE FROM settings WHERE key IN ('last_boot_id','reboot_planned_boot_id','oom_checked_at','ssh_watch_since','transfer_exported_at',
+		'infra_state','runtime_patch_notified','backup_verify_at','heartbeat_url')`,
 }
 
 // ExportOptions are the panel paths and identity for Export.

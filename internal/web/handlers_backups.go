@@ -60,9 +60,13 @@ type backupsPageData struct {
 	Rclone     string
 	DryRun     bool
 	MailReady  bool // mail server installed: plans may back it up
+
+	Verifications []backups.Verification
+	Candidates    []backups.Backup
+	VerifyWeekly  bool
 }
 
-var backupTabs = map[string]bool{"list": true, "plans": true, "settings": true}
+var backupTabs = map[string]bool{"list": true, "plans": true, "verify": true, "settings": true}
 
 func defaultPlanForm() planForm {
 	return planForm{Plan: backups.Plan{Scope: "all", Components: []string{backups.CompFiles, backups.CompDB, backups.CompConfig},
@@ -100,6 +104,10 @@ func (s *Server) renderBackups(w http.ResponseWriter, r *http.Request, status in
 		d.LocalSize = s.Backups.Store.LocalSize(ctx)
 	case "plans":
 		d.Plans, _ = s.Backups.Store.Plans(ctx)
+	case "verify":
+		d.Verifications, _ = s.Backups.Store.Verifications(ctx, 30)
+		d.Candidates, _ = s.Backups.VerifyCandidates(ctx)
+		d.VerifyWeekly = s.Backups.VerifyWeeklyOn(ctx)
 	}
 	s.render(w, r, status, "backups", "layout", Page{Title: "Yedekler", Nav: "backups", Data: d, Error: errMsg, Notice: notice})
 }

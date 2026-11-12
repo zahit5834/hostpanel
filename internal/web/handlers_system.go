@@ -82,9 +82,14 @@ type serverData struct {
 
 	SSH sshData
 	F2B f2bData
+
+	Metrics    metricsView
+	Clean      []sysmaint.CleanCategory
+	CleanErr   string
+	CleanTotal int64
 }
 
-var serverTabs = []string{"general", "updates", "ssh", "fail2ban", "ufw"}
+var serverTabs = []string{"general", "updates", "metrics", "clean", "ssh", "fail2ban", "ufw"}
 
 func (s *Server) serviceRows(ctx context.Context) []serviceRow {
 	states := map[string]string{}
@@ -147,6 +152,8 @@ func (s *Server) serverDataFor(r *http.Request, tab string) serverData {
 	case "updates":
 		d.Auto = s.Sys.AutoStatus()
 		d.Reboot = s.Sys.Reboot(ctx)
+	case "metrics":
+		d.Metrics = s.metricsView(ctx, r.URL.Query().Get("range"))
 	case "ssh":
 		d.SSH = s.sshData(r)
 	case "fail2ban":

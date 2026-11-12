@@ -94,6 +94,7 @@ func (s *Service) Register() {
 	s.Jobs.Register("backup.import-db", s.jobImportDB)
 	s.Jobs.Register("backup.mail", s.jobMailBackup)
 	s.Jobs.Register("backup.mail.restore", s.jobMailRestore)
+	s.Jobs.Register("backup.verify", s.jobVerify)
 }
 
 // Recover marks backups left "running" by a crash as failed.

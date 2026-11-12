@@ -19,6 +19,8 @@ type Snapshot struct {
 	Load15     float64
 	MemTotal   uint64 // bytes
 	MemAvail   uint64
+	SwapTotal  uint64
+	SwapFree   uint64
 	DiskTotal  uint64
 	DiskFree   uint64
 	PanelRSS   uint64
@@ -57,6 +59,7 @@ func Read() Snapshot {
 	}
 	mem := readKV("/proc/meminfo")
 	s.MemTotal, s.MemAvail = mem["MemTotal"]*1024, mem["MemAvailable"]*1024
+	s.SwapTotal, s.SwapFree = mem["SwapTotal"]*1024, mem["SwapFree"]*1024
 	s.PanelRSS = readKV("/proc/self/status")["VmRSS"] * 1024
 	var st syscall.Statfs_t
 	if syscall.Statfs("/", &st) == nil {
@@ -89,4 +92,40 @@ func readKV(path string) map[string]uint64 {
 		}
 	}
 	return out
+}
+
+// ReadNet sums the received/transmitted bytes of the physical interfaces in
+// /proc/net/dev (loopback and Docker bridges/veths are left out: container
+// traffic is counted once, on the uplink).
+func ReadNet() (rx, tx uint64, ok bool) {
+	b, err := os.ReadFile("/proc/net/dev")
+	if err != nil {
+		return 0, 0, false
+	}
+	return ParseNetDev(string(b))
+}
+
+// ParseNetDev parses /proc/net/dev.
+func ParseNetDev(s string) (rx, tx uint64, ok bool) {
+	for _, line := range strings.Split(s, "\n") {
+		name, rest, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name == "lo" || strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "veth") || strings.HasPrefix(name, "br-") {
+			continue
+		}
+		f := strings.Fields(rest)
+		if len(f) < 9 {
+			continue
+		}
+		r, err1 := strconv.ParseUint(f[0], 10, 64)
+		t, err2 := strconv.ParseUint(f[8], 10, 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		rx, tx, ok = rx+r, tx+t, true
+	}
+	return rx, tx, ok
 }

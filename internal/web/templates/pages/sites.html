@@ -3,12 +3,25 @@
   <h1>Siteler</h1>
   <div class="actions"><a class="button" href="/sites/new?import=1">Mevcut siteyi taşı</a> <a class="button primary" href="/sites/new">Yeni site</a></div>
 </div>
-<div class="card table-wrap">
+<form method="post" action="/sites/bulk" class="card table-wrap" id="bulk-form">
+  <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+  {{if .Data.List}}
+  <div class="card-head pad row-form">
+    <span class="muted small">Seçilen sitelere:</span>
+    <select name="op">
+      {{range .Data.BulkOps}}<option value="{{.ID}}">{{.Label}}</option>{{end}}
+      <option value="backup">yedekle (tüm bileşenler)</option>
+    </select>
+    {{if .Data.Remote}}<label class="check small"><input type="checkbox" name="upload" value="1"> <span>yedeği Drive'a da gönder</span></label>{{end}}
+    <button type="submit" data-confirm="Seçilen siteler için işlem kuyruğa alınsın mı? Her site ayrı bir iş olarak çalışır.">Uygula</button>
+  </div>
+  {{end}}
   <table class="table">
-    <thead><tr><th>Domain</th><th>Müşteri</th><th>Altyapı</th><th class="right">Port</th><th>SSL</th><th>Durum</th><th>Oluşturma</th></tr></thead>
+    <thead><tr><th class="narrow"></th><th>Domain</th><th>Müşteri</th><th>Altyapı</th><th class="right">Port</th><th>SSL</th><th>Durum</th><th>Oluşturma</th></tr></thead>
     <tbody>
     {{range .Data.List}}
       <tr>
+        <td class="narrow"><input type="checkbox" name="site" value="{{.ID}}" aria-label="{{.Domain}} seç"></td>
         <td><a href="/sites/{{.ID}}">{{.Domain}}</a>{{range .Aliases}} <span class="tag">{{.}}</span>{{end}}</td>
         <td><a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a></td>
         <td>{{.RuntimeID}} {{.RuntimeVersion}}</td>
@@ -21,5 +34,5 @@
     </tbody>
   </table>
   {{if not .Data.List}}<p class="muted pad">Henüz site yok.</p>{{end}}
-</div>
+</form>
 {{end}}

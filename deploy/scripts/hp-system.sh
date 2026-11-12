@@ -16,9 +16,11 @@
 #   hp-system.sh service <reload|restart> <nginx|docker|named|fail2ban>
 #   hp-system.sh nginx-test | nginx-dump          nginx -t / nginx -T (≤ 1 MB)
 #   hp-system.sh sudoers-sum                      sha256 of /etc/sudoers.d/hostpanel (0440 root)
+#   hp-system.sh clean-list                       disk assistant: "<cat>\t<id>\t<bytes>\t<mtime>\t<label>" lines
+#   hp-system.sh clean-delete <cat> <id>          deletes one listed item (re-validated here; mail is list-only)
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
-[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") apt-refresh|apt-run|needrestart|unattended|reboot|swap-create|service|nginx-test|nginx-dump|sudoers-sum …"
+[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") apt-refresh|apt-run|needrestart|unattended|reboot|swap-create|service|nginx-test|nginx-dump|sudoers-sum|clean-list|clean-delete …"
 action=$1
 shift
 SELF=$(readlink -f "$0")
@@ -27,6 +29,28 @@ APT_UNIT=hostpanel-apt
 AUTO_UPGRADES=/etc/apt/apt.conf.d/20auto-upgrades
 HOLD_PKGS=(docker.io containerd runc)
 SUDOERS_FILE=/etc/sudoers.d/hostpanel
+MSSQL_SNAP_ROOT=$BACKUP_ROOT/_mssql
+DNS_ARCHIVE=$BACKUP_ROOT/dns
+MAIL_ARCHIVE=$BACKUP_ROOT/_mail
+APT_ARCHIVES=/var/cache/apt/archives
+JOURNAL_DIR=/var/log/journal
+JOURNAL_KEEP=30d
+
+# clean_file CAT FILE [ID] — one listing line for a regular file (symlinks are skipped).
+clean_file() {
+  local cat=$1 f=$2 id=${3:-$(basename "$2")}
+  [[ -f $f && ! -L $f ]] || return 0
+  printf '%s\t%s\t%s\t%s\t\n' "$cat" "$id" "$(stat -c %s "$f")" "$(stat -c %Y "$f")"
+}
+
+clean_dir() {
+  local cat=$1 d=$2 id=$3
+  [[ -d $d && ! -L $d ]] || return 0
+  printf '%s\t%s\t%s\t%s\t\n' "$cat" "$id" "$(nice -n 19 du -sb --one-file-system "$d" | cut -f1)" "$(stat -c %Y "$d")"
+}
+
+# real_dir DIR — DIR is a real directory (not a symlink) or does not exist.
+real_dir() { [[ ! -L $1 ]]; }
 
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1
 
@@ -204,6 +228,100 @@ case $action in
     else
       echo missing
     fi
+    ;;
+
+  clean-list)
+    [[ $# -eq 0 ]] || die "kullanım: clean-list"
+    check_db_dirs
+    shopt -s nullglob
+    if real_dir "$MSSQL_HOST_BACKUP"; then
+      for f in "$MSSQL_HOST_BACKUP"/pre-drop-*.bak; do clean_file predrop-mssql "$f"; done
+    fi
+    for f in "$PG_HOST_BACKUP"/pre-drop-*.dump; do clean_file predrop-pg "$f"; done
+    if real_dir "$BACKUP_ROOT"; then
+      for d in "$BACKUP_ROOT"/*/; do
+        dom=$(basename "$d")
+        [[ $dom == *.* && $dom != _* && ! -L ${d%/} ]] || continue
+        for f in "$d"pre-delete-*.tar.zst "$d"pre-delete-*.tar.gz; do clean_file predelete "$f" "$dom/$(basename "$f")"; done
+      done
+      if real_dir "$DNS_ARCHIVE"; then
+        for f in "$DNS_ARCHIVE"/*.tar.zst; do clean_file dnsarchive "$f"; done
+      fi
+      if real_dir "$MSSQL_SNAP_ROOT"; then
+        for d in "$MSSQL_SNAP_ROOT"/pre-update "$MSSQL_SNAP_ROOT"/failed-*; do clean_dir mssql-update "$d" "$(basename "$d")"; done
+      fi
+      if real_dir "$MAIL_ARCHIVE"; then
+        for f in "$MAIL_ARCHIVE"/pre-delete-*.tar.zst "$MAIL_ARCHIVE"/dkim-*.tar.zst; do clean_file mail "$f"; done
+      fi
+    fi
+    clean_dir mail "$MAIL_ROOT/pre-restore" pre-restore
+    if [[ -d $APT_ARCHIVES ]]; then
+      printf 'apt\tapt\t%s\t%s\t\n' "$(du -sb "$APT_ARCHIVES" | cut -f1)" "$(stat -c %Y "$APT_ARCHIVES")"
+    fi
+    if [[ -d $JOURNAL_DIR ]]; then
+      printf 'journal\tjournal\t%s\t%s\t\n' "$(du -sb "$JOURNAL_DIR" | cut -f1)" "$(stat -c %Y "$JOURNAL_DIR")"
+    fi
+    if command -v docker >/dev/null && systemctl is-active --quiet docker; then
+      used=$(docker ps -aq | xargs -r docker inspect -f '{{.Image}}' 2>/dev/null || true)
+      while IFS=$'\t' read -r id size created tags; do
+        [[ $id =~ ^sha256:[0-9a-f]{64}$ ]] || continue
+        [[ $'\n'$used$'\n' == *$'\n'$id$'\n'* ]] && continue
+        ts=$(date -d "$created" +%s 2>/dev/null || echo 0)
+        printf 'docker-image\t%s\t%s\t%s\t%s\n' "$id" "$size" "$ts" "${tags//[^A-Za-z0-9.:\/@ _-]/}"
+      done < <(docker images -q --no-trunc | sort -u | xargs -r docker image inspect -f $'{{.Id}}\t{{.Size}}\t{{.Created}}\t{{join .RepoTags " "}}')
+    fi
+    ;;
+
+  clean-delete)
+    [[ $# -eq 2 ]] || die "kullanım: clean-delete <cat> <id>"
+    cat=$1 id=$2
+    check_db_dirs
+    rm_file() { # rm_file DIR NAME — a regular file directly in DIR
+      real_dir "$1" || die "$1 symlink olamaz"
+      [[ -f $1/$2 && ! -L $1/$2 ]] || die "dosya bulunamadı: $2"
+      rm -f -- "${1:?}/$2"
+      log "silindi: $1/$2"
+    }
+    case $cat in
+      predrop-mssql)
+        [[ $id =~ ^pre-drop-[A-Za-z0-9._-]+\.bak$ && $id != *..* ]] || die "geçersiz ad"
+        rm_file "$MSSQL_HOST_BACKUP" "$id" ;;
+      predrop-pg)
+        [[ $id =~ ^pre-drop-[A-Za-z0-9._-]+\.dump$ && $id != *..* ]] || die "geçersiz ad"
+        rm_file "$PG_HOST_BACKUP" "$id" ;;
+      predelete)
+        [[ $id =~ ^([a-z0-9.-]+)/(pre-delete-[0-9A-Za-z_-]+\.tar\.(zst|gz))$ && $id != *..* ]] || die "geçersiz ad"
+        dom=${BASH_REMATCH[1]} f=${BASH_REMATCH[2]}
+        validate_domain "$dom"
+        real_dir "$BACKUP_ROOT" || die "yedek dizini symlink olamaz"
+        rm_file "$BACKUP_ROOT/$dom" "$f"
+        rmdir --ignore-fail-on-non-empty "$BACKUP_ROOT/$dom" 2>/dev/null || true ;;
+      dnsarchive)
+        [[ $id =~ ^[a-z0-9.-]+-[0-9]{8}-[0-9]{6}\.tar\.zst$ && $id != *..* ]] || die "geçersiz ad"
+        rm_file "$DNS_ARCHIVE" "$id" ;;
+      mssql-update)
+        [[ $id =~ ^(pre-update|failed-[0-9]{8}-[0-9]{6})$ ]] || die "geçersiz ad"
+        real_dir "$MSSQL_SNAP_ROOT" || die "symlink olamaz"
+        d=$MSSQL_SNAP_ROOT/$id
+        [[ -d $d && ! -L $d ]] || die "bulunamadı: $id"
+        rm -rf --one-file-system -- "$d"
+        log "silindi: $d" ;;
+      docker-image)
+        [[ $id =~ ^sha256:[0-9a-f]{64}$ ]] || die "geçersiz imaj"
+        command -v docker >/dev/null || die "Docker kurulu değil"
+        docker rmi "$id" ;; # no -f: refuses an image a container uses
+      apt)
+        [[ $id == apt ]] || die "geçersiz"
+        apt-get clean
+        log "apt önbelleği temizlendi" ;;
+      journal)
+        [[ $id == journal ]] || die "geçersiz"
+        journalctl --vacuum-time="$JOURNAL_KEEP" ;;
+      mail)
+        die "posta arşivleri panelden silinmez (müşteri postası)" ;;
+      *)
+        die "bilinmeyen kategori: $cat" ;;
+    esac
     ;;
 
   *)

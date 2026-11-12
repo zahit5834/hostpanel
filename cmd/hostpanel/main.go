@@ -30,12 +30,14 @@ import (
 	"github.com/zahit5834/hostpanel/internal/customers"
 	"github.com/zahit5834/hostpanel/internal/databases"
 	"github.com/zahit5834/hostpanel/internal/dns"
+	"github.com/zahit5834/hostpanel/internal/domains"
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/hostsec"
 	"github.com/zahit5834/hostpanel/internal/images"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
 	"github.com/zahit5834/hostpanel/internal/mail"
+	"github.com/zahit5834/hostpanel/internal/metrics"
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
@@ -286,8 +288,14 @@ func serve(args []string) error {
 		SSH: &hostsec.SSH{Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun},
 		F2B: &hostsec.Fail2ban{Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun},
 		Sys: &sysmaint.Service{Runner: runner, Probe: probe, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun}}
+	metricsSvc := &metrics.Service{DB: a.db, Log: log, AfterTick: idle.Touch}
+	metricsSvc.Init()
+	srv.Metrics = metricsSvc
+	srv.Domains = &domains.Service{DB: a.db, Log: log, Notify: func(ctx context.Context, title, text, key string) {
+		notifySvc.Send(ctx, notify.Event{Kind: notify.KindDomain, Key: key, Title: title, Text: text})
+	}}
 	// Cheap checks that ride on the monitor's 10-minute step (no new timer).
-	monSvc.Periodic = []func(context.Context){srv.OOMCheck, srv.SSHWatch, srv.CLIWatch}
+	monSvc.Periodic = []func(context.Context){srv.OOMCheck, srv.SSHWatch, srv.CLIWatch, srv.InfraCheck}
 	srv.ExportConfig = func(ctx context.Context, pass string, w io.Writer) (panelcfg.Manifest, error) {
 		server := store.GetSetting(ctx, a.db, "backup_server_name", "")
 		if server == "" {
@@ -321,7 +329,8 @@ func serve(args []string) error {
 	if !cfg.Dev { // dev reads deploy/ straight from the repo (test files, no unit)
 		daily = append(daily, func(ctx context.Context) { srv.IntegrityCheck(ctx) })
 	}
-	daily = append(daily, srv.AuditNotify,
+	daily = append(daily, srv.AuditNotify, srv.DomainsMaintain, srv.RuntimePatchCheck, bkSvc.MaintainVerify,
+		func(ctx context.Context) { metricsSvc.Purge(ctx, time.Now()) },
 		// Maintenance is neither a request nor a job: hand its garbage back too.
 		func(context.Context) { idle.Touch() })
 	// The boot report waits until sites and containers had time to come up.
@@ -331,7 +340,10 @@ func serve(args []string) error {
 	go bkSvc.RunScheduler(jobCtx)
 	go notifySvc.Run(jobCtx)
 	go monSvc.Run(jobCtx)
-	go mailSvc.EnsureVhost(jobCtx) // one-shot: a panel update runs the old hp-update.sh
+	go metricsSvc.Run(jobCtx)                   // 5-minute samples / heartbeat (sleeps without a timer when both are off)
+	go srv.RunSummary(jobCtx)                   // daily/weekly digest (no timer while off)
+	go notifySvc.RunBot(jobCtx, srv.BotCommand) // Telegram commands (no connection while off)
+	go mailSvc.EnsureVhost(jobCtx)              // one-shot: a panel update runs the old hp-update.sh
 	cronDone := make(chan struct{})
 	go func() { cronSvc.Run(jobCtx); close(cronDone) }()
 	srv.BaseCtx = jobCtx

@@ -48,6 +48,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /customers/{id}/delete", s.requireRecent(s.customerDelete))
 
 	mux.Handle("GET /sites", s.requireAuth(s.siteList))
+	mux.Handle("POST /sites/bulk", s.requireAuth(s.siteBulk))
 	mux.Handle("GET /sites/new", s.requireAuth(s.siteNew))
 	mux.Handle("GET /sites/runtime-fields", s.requireAuth(s.siteRuntimeFields))
 	mux.Handle("POST /sites", s.requireAuth(s.siteCreate))
@@ -135,6 +136,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /backups/remote/test", s.requireAuth(s.backupRemoteTest))
 	mux.Handle("POST /backups/remote/scan", s.requireAuth(s.backupRemoteScan))
 	mux.Handle("POST /backups/remote/keys", s.requireRecent(s.backupCryptReveal))
+	mux.Handle("POST /backups/verify", s.requireAuth(s.backupVerify))
+	mux.Handle("POST /backups/verify/settings", s.requireAuth(s.backupVerifySettings))
 	mux.Handle("POST /backups/plans", s.requireAuth(s.backupPlanSave))
 	mux.Handle("POST /backups/plans/{id}/delete", s.requireRecent(s.backupPlanDelete))
 	mux.Handle("POST /backups/plans/{id}/run", s.requireAuth(s.backupPlanRun))
@@ -148,6 +151,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /sites/{id}/import/env", s.requireAuth(s.siteImportEnv))
 
 	mux.Handle("GET /runtimes", s.requireAuth(s.runtimesPage))
+	mux.Handle("POST /runtimes/{id}/patch", s.requireAuth(s.runtimePatch))
 	mux.Handle("POST /runtimes/{id}/{action}", s.requireAuth(s.runtimeAction))
 
 	mux.Handle("GET /settings", http.RedirectHandler("/settings/security", http.StatusSeeOther))
@@ -163,6 +167,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("GET /settings/notify", s.requireAuth(s.notifyPage))
 	mux.Handle("POST /settings/notify", s.requireAuth(s.notifySave))
 	mux.Handle("POST /settings/notify/test", s.requireAuth(s.notifyTest))
+	mux.Handle("POST /settings/notify/summary", s.requireAuth(s.summaryTest))
+	mux.Handle("POST /settings/notify/heartbeat", s.requireAuth(s.heartbeatTest))
 	mux.Handle("GET /settings/update", s.requireAuth(s.updatePage))
 	mux.Handle("GET /settings/update/status", s.requireAuth(s.updateStatus))
 	mux.Handle("POST /settings/update/check", s.requireAuth(s.updateCheck))
@@ -172,6 +178,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /settings/transfer/export", s.requireRecent(s.transferExport))
 
 	mux.Handle("GET /dns", s.requireAuth(s.dnsIndex))
+	mux.Handle("GET /domains", s.requireAuth(s.domainsPage))
+	mux.Handle("POST /domains/manual", s.requireAuth(s.domainManual))
+	mux.Handle("POST /domains/refresh", s.requireAuth(s.domainRefresh))
 	mux.Handle("POST /dns/settings", s.requireAuth(s.dnsSaveSettings))
 	mux.Handle("POST /dns/install", s.requireAuth(s.dnsInstall))
 	mux.Handle("POST /dns/zones", s.requireAuth(s.dnsZoneCreate))
@@ -202,6 +211,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /server/service", s.requireRecent(s.serviceAction))
 	mux.Handle("POST /server/nginx/test", s.requireAuth(s.nginxTest))
 	mux.Handle("GET /server/nginx/dump", s.requireAuth(s.nginxDump))
+	mux.Handle("POST /server/metrics", s.requireAuth(s.metricsToggle))
+	mux.Handle("POST /server/clean", s.requireRecent(s.cleanDelete))
 	mux.Handle("GET /security", s.requireAuth(s.auditPage))
 	mux.Handle("GET /reauth", s.requireAuth(s.reauthPage))
 	mux.Handle("POST /reauth", s.requireAuth(s.reauthSubmit))

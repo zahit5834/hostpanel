@@ -410,7 +410,7 @@ validate_shared_id() {
 
 # validate_staged_bak NAME — file name in the MSSQL backup volume.
 validate_staged_bak() {
-  [[ ${1:-} =~ ^hp(rs|im)-[A-Za-z0-9._-]{1,200}\.bak$ && ${1:-} != *..* ]] || die "geçersiz dosya adı: '${1:-}'"
+  [[ ${1:-} =~ ^hp(rs|im|vf)-[A-Za-z0-9._-]{1,200}\.bak$ && ${1:-} != *..* ]] || die "geçersiz dosya adı: '${1:-}'"
 }
 
 # validate_backup_file NAME — files allowed inside a backup directory.

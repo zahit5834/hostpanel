@@ -9,14 +9,16 @@ Ubuntu 24.04 için tek yöneticili, ultra hafif hosting kontrol paneli: Go, tek 
 - **MSSQL 2025 (Docker):** müşteri başına login, izole veritabanları, dış erişim için IP allowlist + UFW.
 - **PostgreSQL 18 (Docker):** müşteri başına rol, sahibine ait veritabanları, site env'ine connection string, `pg_dump -Fc` dökümüyle taşıma, yedek/geri yükleme, dış erişim için IP allowlist + UFW.
 - **E-posta (docker-mailserver):** müşteri alan adları için posta kutuları, kota, yönlendirmeler; DKIM/SPF/DMARC/MX kayıtları panelin DNS'ine otomatik; Let's Encrypt sertifikası, kuyruk, engellenen IP'ler, yedek/geri yükleme. Webmail yoktur (Outlook, Thunderbird, telefon).
-- **Yedekleme:** yerel + Google Drive (rclone, isteğe bağlı şifreleme). Planlar, saklama kuralları, geri yükleme/klon ve taşıma sihirbazı.
+- **Yedekleme:** yerel + Google Drive (rclone, isteğe bağlı şifreleme). Planlar, saklama kuralları, geri yükleme/klon ve taşıma sihirbazı. Haftalık yedek doğrulama (Drive'dan indirip sağlama, arşiv ve veritabanı kontrolü; hiçbir şey geri yüklenmez).
 - **DNS (kendi nameserver'larınız):** BIND 9 (yalnızca yetkili sunucu), zone ve kayıt yönetimi (A, AAAA, CNAME, MX, TXT, SRV, CAA, NS), sitelerin A/AAAA kayıtları otomatik, yetki devri kontrolü, isteğe bağlı DNSSEC.
-- **İzleme:** CPU/RAM/disk, site başına RAM/CPU, health check, çökme döngüsü tespiti, Telegram/e-posta bildirimleri.
+- **İzleme:** CPU/RAM/disk, site başına RAM/CPU, health check, çökme döngüsü tespiti, altyapı izleme (nginx, Docker, BIND, fail2ban, certbot, veritabanı ve posta container'ları), 30 günlük sunucu metrik grafikleri, dış heartbeat (healthchecks.io / Uptime Kuma), Telegram/e-posta bildirimleri, günlük/haftalık özet raporu, Telegram komutları (`/durum`, `/siteler`, `/disk`, `/yedekler`, 2FA kodlu `/yeniden_baslat`).
+- **Alan adları:** sitelerin, zone'ların ve posta alan adlarının kayıt bitiş tarihleri (RDAP; `.tr` gibi RDAP'sız uzantılarda elle), 30/15/7 gün kala bildirim.
 - **İstatistikler:** site bazlı günlük trafik (istek, ziyaretçi, bant genişliği, 4xx/5xx, bot, en çok açılan sayfalar; nginx loglarından) ve uptime geçmişi (günlük erişilebilirlik, ortalama yanıt süresi, kesinti kayıtları).
 - **Container güncellemeleri:** MSSQL ve posta sunucusu imajları her gün kontrol edilir, yeni sürümde bildirim gelir; tek tıkla güncelleme (başarısız olursa eski sürüme otomatik dönüş).
 - **Log Merkezi:** işlem geçmişi, iş logları (canlı), sistem logları (nginx, journal, certbot, fail2ban, auth.log…).
-- **Site cron'ları.**
-- **Sunucu yönetimi:** servisleri yeniden yükleme/başlatma, `nginx -t`, sistem güncellemeleri (yalnızca güvenlik ya da tümü, otomatik güncellemeler, yeniden başlatılması gereken servisler), planlı yeniden başlatma + açılış raporu, bellek planı, swap, bellek yetersizliği (OOM) uyarısı, disk dağılımı, UFW.
+- **Site cron'ları; toplu işlemler** (seçili sitelerde yeniden başlatma, bakım modu, nginx yeniden uygulama, yedek).
+- **.NET/Node yama güncellemeleri:** aynı ana sürümdeki yeni yama kurulur, siteler tek tek taşınır; health check geçmeyen site eski sürümde kalır.
+- **Sunucu yönetimi:** servisleri yeniden yükleme/başlatma, `nginx -t`, sistem güncellemeleri (yalnızca güvenlik ya da tümü, otomatik güncellemeler, yeniden başlatılması gereken servisler), planlı yeniden başlatma + açılış raporu, bellek planı, swap, bellek yetersizliği (OOM) uyarısı, disk dağılımı, disk temizliği asistanı (eski arşivler, kullanılmayan Docker imajları, apt önbelleği, eski journal; müşteri e-postaları silinmez), UFW.
 - **Güvenlik:** 2FA (TOTP + kurtarma kodları), IP allowlist, kritik işlemlerde yeniden doğrulama, açık oturumlar ve giriş geçmişi, SSH ayarları (parola/root girişi; onaylanmazsa 3 dakikada kendiliğinden geri alınır) ve yönetici anahtarları, fail2ban (engelliler, süreler, muaf IP'ler), güvenlik denetimi sayfası, kritik değişiklik bildirimleri, root script bütünlük kontrolü.
 - **Panel yönetimi:** panelden tek tıkla güncelleme (otomatik geri dönüşlü), yapılandırmayı dışa/içe aktarma.
 
@@ -144,6 +146,11 @@ Kaba kuvvet denemelerini container içindeki fail2ban engeller (yalnızca posta 
 - **Yeniden başlatma:** `YENIDEN-BASLAT` yazarak planlanır, iptal edilebilir; açıldıktan birkaç dakika sonra panel ne geri geldi/gelmedi raporunu bildirim olarak gönderir.
 - **Güvenlik** menüsü: SSH, UFW, beklenmeyen açık portlar, fail2ban, güncellemeler, 2FA, yedekler, SSL ve script bütünlüğü için tek sayfada denetim.
 - Silme, gizli bilgi gösterme, geri yükleme ve sunucu ayarları gibi işlemler son 10 dakikada kimlik doğrulaması ister (şifre ya da 2FA kodu).
+
+## İşletme ve izleme
+- **Ayarlar → Bildirimler:** "Özet raporu" (her gün / her hafta, saat), "Dış izleme (heartbeat)" — panel 5 dakikada bir adrese istek atar; sunucu tamamen kapanırsa dış servis sizi uyarır. "Telegram komutlarına yanıt ver" açıkken bot yalnızca kayıtlı chat ID'den gelen **özel** mesajlara yanıt verir; `/yeniden_baslat <site> <2FA kodu>` için panelde 2FA açık olmalı.
+- **Alan adları** menüsü: bitiş tarihleri her gün sorgulanır; RDAP'ı olmayan uzantılar için tarihi elle girin.
+- **Sunucu → Metrikler / Disk temizliği**, **Yedekler → Doğrulama**, **Altyapılar → Yama güncellemeleri**, **Siteler** listesinde onay kutularıyla toplu işlemler.
 
 ## Güncelleme
 - **Panelden:** Ayarlar → Güncelleme → "vX.Y.Z sürümüne güncelle".

@@ -1192,6 +1192,15 @@ func (s *Service) BackupTo(ctx context.Context, w io.Writer, db, path string) er
 	return p.Backup(ctx, db, path)
 }
 
+// VerifyBackup runs RESTORE VERIFYONLY as sa on a staged .bak.
+func (s *Service) VerifyBackup(ctx context.Context, w io.Writer, path string) error {
+	p, err := s.admin(ctx, w)
+	if err != nil {
+		return err
+	}
+	return p.VerifyBackup(ctx, path)
+}
+
 // RestoreFrom restores the server-side .bak at path as in.Name. An existing
 // panel database of the same name is replaced (it must belong to the same
 // customer); otherwise a new one is created, owned by the customer's login.

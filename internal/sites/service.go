@@ -73,6 +73,8 @@ func (s *Service) Register() {
 	s.Jobs.Register("runtime.remove", s.jobRuntime("remove"))
 	s.Jobs.Register("runtime.install-sdk", s.jobRuntime("install-sdk"))
 	s.Jobs.Register("runtime.remove-sdk", s.jobRuntime("remove-sdk"))
+	s.Jobs.Register("runtime.patch", s.jobPatch)
+	s.Jobs.Register("site.op", s.jobOp)
 }
 
 // Lock serialises mutating operations on one site (also used by the ssl package).

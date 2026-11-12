@@ -26,6 +26,13 @@
 #   stage-db <domain> <name> <db> <staged.bak>   copy into the MSSQL volume
 #   stage-upload <upload.bak> <staged.bak>       uploaded .bak into the MSSQL volume
 #   unstage <staged.bak>
+#   verify-deep <server|-> <domain> <name>
+#       restore drill: (download into _verify/ when a server is given) →
+#       SHA256SUMS → every *.tar.zst decompresses and lists → PostgreSQL dumps
+#       list with pg_restore -l (inside the running container, from stdin) →
+#       MSSQL .bak files are staged as hpvf-*.bak for the panel's RESTORE
+#       VERIFYONLY ("mssql=<db> <staged>" lines). Prints "check=<what> ok|skip …".
+#       The download is removed at the end; nothing is restored anywhere.
 #
 # rclone runs as root with /etc/hostpanel/rclone.conf (0600): backups are
 # root-only and the Drive token never becomes readable by the panel user.
@@ -392,6 +399,55 @@ case $action in
     [[ $# -eq 1 ]] || die "kullanım: unstage <staged.bak>"
     validate_staged_bak "$1"
     rm -f -- "$MSSQL_HOST_BACKUP/$1"
+    ;;
+
+  verify-deep)
+    [[ $# -eq 3 ]] || die "kullanım: verify-deep <server|-> <domain> <name>"
+    src=$(backup_dir "$2" "$3")
+    if [[ $1 == - ]]; then
+      dir=$src
+      [[ -d $dir && ! -L $dir ]] || die "yerel yedek bulunamadı: ${dir}"
+    else
+      validate_server_name "$1"
+      install -d -o root -g root -m 0700 "$BACKUP_ROOT" "$BACKUP_ROOT/_verify"
+      dir=$BACKUP_ROOT/_verify/$2--$3
+      rm -rf --one-file-system -- "$dir"
+      install -d -o root -g root -m 0700 "$dir"
+      trap 'rm -rf --one-file-system -- "$dir"' EXIT
+      log "Drive'dan indiriliyor: hp:$1/$2/$3"
+      rclone_ copy "hp:$1/$2/$3" "$dir" --max-depth 1 --stats 30s --stats-one-line -v
+    fi
+    check_sums "$dir"
+    echo "check=sums ok $(find "$dir" -maxdepth 1 -type f | wc -l) dosya"
+    shopt -s nullglob
+    for f in "$dir"/*.tar.zst; do
+      # tar reads (and zstd checks) the whole stream; pipefail carries tar's status.
+      n=$("${LOW[@]}" tar --zstd -tf "$f" | wc -l) || die "arşiv bozuk: $(basename "$f")"
+      echo "check=archive $(basename "$f") ok ${n} öğe"
+    done
+    for f in "$dir"/db-pg-*.dump; do
+      db=$(basename "$f" .dump)
+      db=${db#db-pg-}
+      [[ $(head -c 5 -- "$f") == PGDMP ]] || die "PostgreSQL dökümü bozuk: ${db}"
+      if command -v docker >/dev/null && [[ $(docker inspect -f '{{.State.Running}}' hostpanel-postgres 2>/dev/null) == true ]]; then
+        out=$(docker exec -i -u postgres hostpanel-postgres pg_restore -l <"$f") || die "PostgreSQL dökümü okunamadı: ${db}"
+        echo "check=pg ${db} ok $(grep -c '^[0-9]' <<<"$out") nesne"
+      else
+        echo "check=pg ${db} skip PostgreSQL çalışmıyor (yalnızca başlık sınandı)"
+      fi
+    done
+    for f in "$dir"/db-*.bak; do
+      db=$(basename "$f" .bak)
+      db=${db#db-}
+      validate_name "$db" 63
+      if [[ -d $MSSQL_HOST_BACKUP && ! -L $MSSQL_HOST_BACKUP ]]; then
+        staged=hpvf-$3-$db.bak
+        install -o "$MSSQL_UID" -g root -m 0600 "$f" "$MSSQL_HOST_BACKUP/$staged"
+        echo "mssql=${db} ${staged}"
+      else
+        echo "check=mssql ${db} skip MSSQL kurulu değil"
+      fi
+    done
     ;;
 
   *)

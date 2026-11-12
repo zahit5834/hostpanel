@@ -38,6 +38,10 @@ const (
 	KindUpdate      = "panel.update"
 	KindSecurity    = "security" // SSH/UFW/fail2ban changes, script integrity, audit findings
 	KindSystem      = "system"   // reboot, OOM, memory, OS updates
+	KindInfra       = "infra"    // nginx/docker/named/fail2ban, DB and mail containers, certbot timer down/up
+	KindDomain      = "domain.expiring"
+	KindVerify      = "backup.verify" // weekly restore drill result
+	KindSummary     = "summary"       // daily/weekly digest (sent only when scheduled)
 	KindTest        = "test"
 )
 
@@ -49,7 +53,11 @@ var Kinds = []struct{ ID, Label string }{
 	{KindBackup, "Yedek başarısız"},
 	{KindDisk, "Disk %85 üzeri"},
 	{KindCron, "Site cron görevi başarısız"},
-	{KindUpdate, "Panel ve container güncellemeleri (yeni sürüm / sonuç)"},
+	{KindUpdate, "Panel, container ve .NET/Node güncellemeleri (yeni sürüm / sonuç)"},
+	{KindInfra, "Altyapı: nginx, Docker, DNS, fail2ban, veritabanı ve posta container'ları düştü / düzeldi"},
+	{KindDomain, "Alan adının kayıt süresi doluyor (30/15/7 gün)"},
+	{KindVerify, "Yedek doğrulama sonucu (haftalık kurtarma provası)"},
+	{KindSummary, "Günlük / haftalık özet (Ayarlar → Bildirimler'de zamanlanınca)"},
 	{KindSecurity, "Güvenlik: SSH/UFW/fail2ban değişiklikleri, script bütünlüğü, denetim bulguları"},
 	{KindSystem, "Sunucu: yeniden başlatma, bellek yetersizliği (OOM), sistem güncellemeleri"},
 	{KindLoginFailed, "Başarısız panel girişi"},
@@ -58,7 +66,7 @@ var Kinds = []struct{ ID, Label string }{
 
 // DefaultKinds are enabled until the admin changes the selection.
 var DefaultKinds = []string{KindSiteStatus, KindRestarting, KindSSLExpiring, KindBackup, KindDisk, KindCron, KindUpdate, KindLoginNewIP,
-	KindSecurity, KindSystem}
+	KindSecurity, KindSystem, KindInfra, KindDomain, KindVerify, KindSummary}
 
 // legacyKnown are the kinds that existed before setKnown was stored (Faz 11):
 // a saved selection that predates a default kind gets it switched on.
@@ -111,6 +119,7 @@ type Config struct {
 	SMTPFrom      string
 	SMTPTo        string
 	Kinds         []string
+	Commands      bool // Telegram commands are answered
 }
 
 // Enabled reports whether events of kind are sent.
@@ -129,15 +138,17 @@ type Service struct {
 	// SMTPAddr overrides host:port for dialing (tests); TLS still verifies SMTPHost.
 	SMTPAddr string
 
-	once  sync.Once
-	queue chan Event
-	mu    sync.Mutex
-	last  map[string]time.Time
+	once    sync.Once
+	queue   chan Event
+	botWake chan struct{}
+	mu      sync.Mutex
+	last    map[string]time.Time
 }
 
 func (s *Service) init() {
 	s.once.Do(func() {
 		s.queue = make(chan Event, queueCapacity)
+		s.botWake = make(chan struct{}, 1)
 		s.last = map[string]time.Time{}
 		if s.Client == nil {
 			s.Client = &http.Client{Timeout: sendTimeout}
@@ -158,6 +169,7 @@ func (s *Service) Load(ctx context.Context) Config {
 		TelegramOn: s.get(ctx, setTGEnabled, "") == "1", TelegramChat: s.get(ctx, setTGChat, ""),
 		SMTPOn: s.get(ctx, setSMEnabled, "") == "1", SMTPHost: s.get(ctx, setSMHost, ""), SMTPUser: s.get(ctx, setSMUser, ""),
 		SMTPFrom: s.get(ctx, setSMFrom, ""), SMTPTo: s.get(ctx, setSMTo, ""),
+		Commands: s.get(ctx, setTGCommands, "") == "1",
 	}
 	c.SMTPPort, _ = strconv.Atoi(s.get(ctx, setSMPort, "587"))
 	if v := s.get(ctx, setTGToken, ""); v != "" {
@@ -203,6 +215,7 @@ type Input struct {
 	SMTPFrom      string
 	SMTPTo        string
 	Kinds         []string
+	Commands      bool // answer Telegram commands (I5)
 }
 
 // Save validates and stores the settings.
@@ -223,6 +236,14 @@ func (s *Service) Save(ctx context.Context, in Input) error {
 	}
 	if in.TelegramOn && (token == "" || in.TelegramChat == "") {
 		return errors.New("bildirim için Telegram bot token'ı ve chat ID gerekli")
+	}
+	if in.Commands {
+		if !in.TelegramOn {
+			return errors.New("komutlar için Telegram kanalı etkin olmalı")
+		}
+		if _, err := strconv.ParseInt(in.TelegramChat, 10, 64); err != nil {
+			return errors.New("komutlar için sayısal bir Telegram chat ID (botla özel sohbetiniz) gerekir; @kanal adı olmaz")
+		}
 	}
 	if in.SMTPHost != "" && !hostRe.MatchString(in.SMTPHost) {
 		return errors.New("geçersiz SMTP sunucusu")
@@ -265,6 +286,7 @@ func (s *Service) Save(ctx context.Context, in Input) error {
 		setTGEnabled: b01(in.TelegramOn), setTGChat: in.TelegramChat,
 		setSMEnabled: b01(in.SMTPOn), setSMHost: in.SMTPHost, setSMPort: strconv.Itoa(in.SMTPPort), setSMUser: in.SMTPUser,
 		setSMFrom: in.SMTPFrom, setSMTo: in.SMTPTo, setKinds: string(kj), setKnown: string(known),
+		setTGCommands: b01(in.Commands),
 	}
 	if in.TelegramToken != "" {
 		v, err := s.Box.SealString(in.TelegramToken)
@@ -285,6 +307,7 @@ func (s *Service) Save(ctx context.Context, in Input) error {
 			return err
 		}
 	}
+	s.WakeBot()
 	return nil
 }
 

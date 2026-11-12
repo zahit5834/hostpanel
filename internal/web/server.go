@@ -5,11 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"embed"
-	"github.com/zahit5834/hostpanel/internal/hostsec"
-	"github.com/zahit5834/hostpanel/internal/images"
-	"github.com/zahit5834/hostpanel/internal/sysmaint"
-	"github.com/zahit5834/hostpanel/internal/system"
-	"github.com/zahit5834/hostpanel/internal/traffic"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -28,10 +23,14 @@ import (
 	"github.com/zahit5834/hostpanel/internal/customers"
 	"github.com/zahit5834/hostpanel/internal/databases"
 	"github.com/zahit5834/hostpanel/internal/dns"
+	"github.com/zahit5834/hostpanel/internal/domains"
 	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/hostsec"
+	"github.com/zahit5834/hostpanel/internal/images"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
 	"github.com/zahit5834/hostpanel/internal/mail"
+	"github.com/zahit5834/hostpanel/internal/metrics"
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
@@ -40,6 +39,9 @@ import (
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
 	"github.com/zahit5834/hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/sysmaint"
+	"github.com/zahit5834/hostpanel/internal/system"
+	"github.com/zahit5834/hostpanel/internal/traffic"
 	"github.com/zahit5834/hostpanel/internal/update"
 )
 
@@ -76,6 +78,8 @@ type Server struct {
 	SSH       *hostsec.SSH      // Faz 11: SSH login settings + admin keys
 	F2B       *hostsec.Fail2ban // host fail2ban jails
 	Sys       *sysmaint.Service // OS updates, reboot, memory, services
+	Metrics   *metrics.Service  // Faz 12: metric history + heartbeat
+	Domains   *domains.Service  // registration expiry
 	// ExportConfig writes the encrypted panel configuration (main wires it:
 	// it needs the master key, which the web layer never holds otherwise).
 	ExportConfig func(ctx context.Context, passphrase string, w io.Writer) (panelcfg.Manifest, error)
@@ -84,8 +88,10 @@ type Server struct {
 	// started from a handler (cron "run now") uses it.
 	BaseCtx context.Context
 
-	metrics metricsState
-	srvInfo serverCache
+	metrics     metricsState
+	domainBusy  atomic.Bool
+	summaryWake chan struct{}
+	srvInfo     serverCache
 
 	tpl       *renderer
 	allowlist atomic.Pointer[[]netip.Prefix]
@@ -107,6 +113,7 @@ func (s *Server) Init(ctx context.Context) error {
 		return err
 	}
 	s.tpl = r
+	s.summaryWake = make(chan struct{}, 1)
 	if err := s.loadAllowlist(store.GetSetting(ctx, s.DB, "ip_allowlist", "")); err != nil {
 		s.Log.Warn("invalid ip_allowlist setting ignored", "err", err)
 	}

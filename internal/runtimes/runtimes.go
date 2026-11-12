@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/goccy/go-yaml"
 
@@ -366,6 +367,15 @@ type Registry struct {
 	providers map[string]Provider
 	order     []string
 	errs      []error
+	rc        *remoteCache
+}
+
+// SeedAvailable fills the official version list of a source as if it had
+// just been fetched (tests and dry-run fixtures).
+func (r *Registry) SeedAvailable(source string, list []Available) {
+	r.rc.mu.Lock()
+	r.rc.entries[source] = remoteEntry{at: time.Now(), list: list}
+	r.rc.mu.Unlock()
 }
 
 // Load reads every *.yaml in dir. Invalid files are reported via Errors and skipped.
@@ -374,8 +384,8 @@ func Load(dir string, runner exec.Runner, fake bool) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &Registry{providers: map[string]Provider{}}
 	rc := newRemoteCache()
+	r := &Registry{providers: map[string]Provider{}, rc: rc}
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {

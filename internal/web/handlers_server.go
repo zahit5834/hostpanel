@@ -185,6 +185,12 @@ func (s *Server) serverPart(w http.ResponseWriter, r *http.Request) {
 	case "ssh":
 		s.renderSSH(w, r, http.StatusOK, "", "")
 		return
+	case "clean":
+		cats, err := s.Sys.Clean(r.Context(), s.Sites.UploadDir)
+		d.Clean, d.CleanTotal, block = cats, cleanTotal(cats), "server-clean"
+		if err != nil {
+			d.CleanErr = helperErr(err)
+		}
 	default:
 		http.NotFound(w, r)
 		return

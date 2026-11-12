@@ -6,6 +6,7 @@
 <div class="tabs">
   <a href="/backups" class="{{if eq .Tab "list"}}active{{end}}">Yedekler</a>
   <a href="/backups?tab=plans" class="{{if eq .Tab "plans"}}active{{end}}">Planlar</a>
+  <a href="/backups?tab=verify" class="{{if eq .Tab "verify"}}active{{end}}">Doğrulama</a>
   <a href="/backups?tab=settings" class="{{if eq .Tab "settings"}}active{{end}}">Ayarlar</a>
 </div>
 
@@ -13,6 +14,7 @@
 
 {{if eq .Tab "list"}}{{template "backups-list" $}}
 {{else if eq .Tab "plans"}}{{template "backups-plans" $}}
+{{else if eq .Tab "verify"}}{{template "backups-verify" $}}
 {{else}}{{template "backups-settings" $}}{{end}}
 {{end}}
 {{end}}
@@ -192,4 +194,40 @@
   {{end}}
 </section>
 </div>
+{{end}}
+
+{{define "backups-verify"}}{{$d := .Data}}
+<section class="card stack">
+  <h2>Kurtarma provası</h2>
+  <p class="muted small">Bir yedek (Drive yapılandırıldıysa Drive'dan indirilerek) baştan sona sınanır: SHA-256 sağlama toplamları, her arşivin açılabilmesi, MSSQL yedekleri için <code>RESTORE VERIFYONLY</code>, PostgreSQL dökümleri için <code>pg_restore --list</code>. Hiçbir siteye ya da veritabanına geri yükleme yapılmaz; indirilen kopya iş bitince silinir. Sonuç bildirim olarak da gelir.</p>
+  <form method="post" action="/backups/verify/settings" class="row-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label class="check"><input type="checkbox" name="weekly" value="1" {{if $d.VerifyWeekly}}checked{{end}}> <span>Haftada bir rastgele bir yedeği otomatik doğrula</span></label>
+    <button type="submit">Kaydet</button>
+  </form>
+  <form method="post" action="/backups/verify" class="row-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <select name="backup_id">
+      <option value="0">Rastgele (her sitenin en yeni yedeği arasından)</option>
+      {{range $d.Candidates}}<option value="{{.ID}}">{{if eq .Domain "_mail"}}Posta sunucusu{{else}}{{.Domain}}{{end}} · {{.Name}}{{if .Remote}} · Drive{{end}}</option>{{end}}
+    </select>
+    <button type="submit" class="primary" {{if not $d.Candidates}}disabled{{end}}>Şimdi doğrula</button>
+  </form>
+</section>
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Son doğrulamalar</h2></div>
+  <table class="table">
+    <thead><tr><th>Zaman</th><th>Yedek</th><th>Kaynak</th><th>Sonuç</th><th>Kontroller</th></tr></thead>
+    <tbody>
+    {{range $d.Verifications}}<tr>
+      <td class="nowrap">{{datetime .CreatedAt}}{{if .JobID}} <a class="small" href="/logs/jobs/{{.JobID}}">log</a>{{end}}</td>
+      <td>{{if eq .Domain "_mail"}}Posta sunucusu{{else}}{{.Domain}}{{end}}<div class="muted small">{{.Name}}</div></td>
+      <td>{{if eq .Source "remote"}}Drive{{else}}yerel{{end}}</td>
+      <td><span class="badge {{.Status}}">{{if eq .Status "success"}}geçti{{else}}başarısız{{end}}</span></td>
+      <td class="small">{{range .Lines}}<div>{{.}}</div>{{end}}</td>
+    </tr>{{end}}
+    </tbody>
+  </table>
+  {{if not $d.Verifications}}<p class="muted pad">Henüz doğrulama yapılmadı.</p>{{end}}
+</section>
 {{end}}

@@ -15,6 +15,10 @@
         <input name="telegram_chat" value="{{.C.TelegramChat}}" autocomplete="off" spellcheck="false" placeholder="123456789 veya -100…">
         <span class="muted small">Bota bir mesaj yazın, sonra <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code> çıktısındaki <code>chat.id</code>.</span></label>
     </div>
+    <label class="check"><input type="checkbox" name="telegram_commands" value="1" {{if .C.Commands}}checked{{end}}> <span>Telegram komutlarına yanıt ver</span></label>
+    <p class="muted small">Bota özel sohbetten <code>/durum</code>, <code>/siteler</code>, <code>/disk</code>, <code>/yedekler</code> yazabilirsiniz; yalnızca yukarıdaki (sayısal) chat ID'den gelen özel mesajlar yanıtlanır, gruplar yok sayılır.
+      <code>/yeniden_baslat &lt;site&gt; &lt;2FA kodu&gt;</code> yalnızca panelde 2FA açıksa çalışır; hatalı kodlar giriş deneme sınırına sayılır.
+      Açıkken panel Telegram'a sürekli bir bağlantı (50 sn'lik uzun sorgu) tutar; kapalıyken bağlantı yoktur.</p>
   </section>
   <section class="card stack">
     <h2>E-posta (SMTP)</h2>
@@ -36,8 +40,35 @@
     </div>
     <p class="muted small">Aynı olay (ör. aynı sitenin sertifikası) en fazla saatte bir gönderilir; site kapandı/açıldı bildirimleri her durum değişiminde gider. Her gönderim İşlem Geçmişi'ne <code>notify.sent</code> / <code>notify.failed</code> olarak düşer.</p>
   </section>
+  <section class="card stack">
+    <h2>Özet raporu</h2>
+    <div class="form-grid">
+      <label>Sıklık
+        <select name="summary_mode">
+          <option value="off" {{if eq .Summary.Mode "off"}}selected{{end}}>Kapalı</option>
+          <option value="daily" {{if eq .Summary.Mode "daily"}}selected{{end}}>Her gün</option>
+          <option value="weekly" {{if eq .Summary.Mode "weekly"}}selected{{end}}>Her hafta</option>
+        </select></label>
+      <label>Saat
+        <select name="summary_hour">{{range $h := seq 0 23}}<option value="{{$h}}" {{if eq $h $.Data.Summary.Hour}}selected{{end}}>{{printf "%02d:00" $h}}</option>{{end}}</select></label>
+      <label>Gün (haftalıkta)
+        <select name="summary_weekday">{{range $i, $n := .Weekdays}}<option value="{{$i}}" {{if eq $i $.Data.Summary.Weekday}}selected{{end}}>{{$n}}</option>{{end}}</select></label>
+    </div>
+    <p class="muted small">Disk/RAM, siteler, erişilebilirlik, yedek sonuçları, yaklaşan SSL ve alan adı bitişleri, en çok trafik alan siteler, engellenen IP sayısı ve bekleyen güncellemeler. Olaylar listesinde "Özet raporu" seçili olmalı.
+      {{if not .NextSum.IsZero}}Sonraki gönderim: {{.NextSum.Format "02.01.2006 15:04"}}.{{end}}</p>
+  </section>
+  <section class="card stack">
+    <h2>Dış izleme (heartbeat)</h2>
+    <label>Heartbeat adresi
+      <input name="heartbeat_url" value="{{.Heartbeat}}" autocomplete="off" spellcheck="false" placeholder="https://hc-ping.com/… ya da Uptime Kuma push adresi">
+      <span class="muted small">Panel bu adrese 5 dakikada bir istek gönderir; istek gelmezse dış servis (healthchecks.io, Uptime Kuma "Push") sizi uyarır — sunucu tamamen kapandığında panelin kendisi bildirim gönderemez. Boş = kapalı.
+      Alternatif: UptimeRobot gibi bir servise panelin <code>/healthz</code> adresini izletin.</span></label>
+    {{if .Heartbeat}}<p class="small">{{if .PingErr}}<span class="badge failed">son deneme: {{.PingErr}}</span>{{else if not .PingAt.IsZero}}<span class="badge success">son başarılı: {{.PingAt.Format "15:04:05"}}</span>{{else}}<span class="muted">henüz gönderilmedi</span>{{end}}</p>{{end}}
+  </section>
   <div class="ops"><button type="submit" class="primary">Kaydet</button>
-    <button type="submit" formaction="/settings/notify/test">Test bildirimi gönder</button></div>
+    <button type="submit" formaction="/settings/notify/test">Test bildirimi gönder</button>
+    <button type="submit" formaction="/settings/notify/summary">Özeti şimdi gönder</button>
+    {{if .Heartbeat}}<button type="submit" formaction="/settings/notify/heartbeat">Heartbeat'i sına</button>{{end}}</div>
   <p class="muted small">Test, kayıtlı ayarlarla gönderilir; önce kaydedin.</p>
 </form>
 {{end}}

@@ -4,7 +4,7 @@ package hostsec
 
 // releaseManifest is the SHA-256 of every installed file of this release.
 var releaseManifest = Manifest{
-	"scripts/hp-backup.sh":                        "f32a135b7b4d5b77dfeb132eace325a853eebb1a826cb8482b2d42c5f13d219f",
+	"scripts/hp-backup.sh":                        "077edceaaa72e2e42a82a292291385407d5924f795d99658f316ec062b8231bb",
 	"scripts/hp-dns.sh":                           "324e0e107546636f4bf14ae420b2819a959a0da7ceaffd50cd66b3e0d523437b",
 	"scripts/hp-mail.sh":                          "df2a9fd8e4e9e9b1d9e010963faba83f6633cf263cbf21625a50ce5b9b7f8d04",
 	"scripts/hp-mssql.sh":                         "e62d518c817ab688d747ccba3a85b1ba9c2a9e2d3737409a36a231a0eac2ac22",
@@ -25,9 +25,9 @@ var releaseManifest = Manifest{
 	"scripts/hp-site-user.sh":                     "e203087b54695f478dc2f834ed42f170b01d1c0b9d638874cd38d0a2bc6ca977",
 	"scripts/hp-ssh.sh":                           "e2cef028389eff551bab0042429385418aa7f2c33f34eddd8408bb9ec587c9ec",
 	"scripts/hp-ssl.sh":                           "0112530174c4db54db2da6c4cb485508cb4fd0e1bb583588aa2048f92869149f",
-	"scripts/hp-system.sh":                        "281ba87a6b6e9bf56dba0ed30fd12e85df16f6351123042fa9c5ec4dbf076b22",
+	"scripts/hp-system.sh":                        "3554595ac16c64b0dce0cb068520dc91351a611abd95a0d542e39b1949417aa8",
 	"scripts/hp-update.sh":                        "f4b2f75dc547e54f09a993ecb6eb6ff8722bc5fd14e64cf5ff6045d97f9af900",
-	"scripts/lib.sh":                              "d30526183b009b757862a1203d4b89a04e3cf66e2bbbe918ee38841e2e699a27",
+	"scripts/lib.sh":                              "95e80be00ee1d18aec5c486fce52a1d6f76577d290175a8d58bcc1585953b047",
 	"scripts/runtimes/dotnet.sh":                  "bd2adf05038b8295e662cb3fffc0e08cf6bf6f0ad3c450c90fed385ac719bac2",
 	"scripts/runtimes/node.sh":                    "78ccfd55e34f4325298bff5c195f5ca50ed579354a55ab19759aefbc7e705384",
 	"scripts/runtimes/php.sh":                     "09670e49ec311ec00656dffe659d0a1c5a1e641e30b48f145d3bfec12a078c95",

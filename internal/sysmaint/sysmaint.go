@@ -32,9 +32,10 @@ type Service struct {
 	mu  sync.Mutex
 	apt AptInfo
 
-	fakeReboot time.Time // dry-run planned reboot
-	fakeAuto   *bool
-	fakeSwap   int // MB, dry-run
+	fakeReboot  time.Time // dry-run planned reboot
+	fakeAuto    *bool
+	fakeSwap    int // MB, dry-run
+	fakeCleaned map[string]bool
 }
 
 func (s *Service) path(p string) string { return s.Root + p }

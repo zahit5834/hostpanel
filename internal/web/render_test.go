@@ -26,12 +26,14 @@ func TestRendererCacheBounded(t *testing.T) {
 		t.Fatal("least recently used page not evicted")
 	}
 	// A hit moves the page to the end, so it survives the next eviction.
-	r.get("server")
+	// Cache now holds [settings_transfer login]; touching the older entry
+	// keeps it while the next miss evicts the other one.
+	r.get("settings_transfer")
 	r.get("dashboard")
-	if _, ok := r.cache["server"]; !ok {
+	if _, ok := r.cache["settings_transfer"]; !ok {
 		t.Fatalf("recently used page evicted: %v", r.order)
 	}
-	if got := fmt.Sprint(r.order); got != "[login server dashboard]" {
+	if got := fmt.Sprint(r.order); got != "[settings_transfer dashboard]" {
 		t.Fatal(got)
 	}
 }

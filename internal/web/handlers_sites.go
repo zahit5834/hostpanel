@@ -30,12 +30,22 @@ import (
 const MaxUploadBytes = 1 << 30
 
 func (s *Server) siteList(w http.ResponseWriter, r *http.Request) {
+	s.renderSiteList(w, r, http.StatusOK, "", "")
+}
+
+func (s *Server) renderSiteList(w http.ResponseWriter, r *http.Request, status int, errMsg, notice string) {
 	list, err := s.Sites.Store.List(r.Context(), 0)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.render(w, r, http.StatusOK, "sites", "layout", Page{Title: "Siteler", Nav: "sites", Data: map[string]any{"List": list, "Certs": s.SSL.ActiveBySite(r.Context())}})
+	ops := []struct{ ID, Label string }{}
+	for _, op := range sites.BulkOps {
+		ops = append(ops, struct{ ID, Label string }{op, sites.BulkOpLabel(op)})
+	}
+	s.render(w, r, status, "sites", "layout", Page{Title: "Siteler", Nav: "sites", Error: errMsg, Notice: notice,
+		Data: map[string]any{"List": list, "Certs": s.SSL.ActiveBySite(r.Context()), "BulkOps": ops,
+			"Remote": s.Backups.Remote(r.Context()).Configured()}})
 }
 
 type runtimeOption struct {
@@ -667,7 +677,7 @@ func (s *Server) runtimesPage(w http.ResponseWriter, r *http.Request) {
 		loadErrs = append(loadErrs, e.Error())
 	}
 	s.render(w, r, http.StatusOK, "runtimes", "layout", Page{Title: "Altyapılar", Nav: "runtimes",
-		Data: map[string]any{"Rows": rows, "LoadErrors": loadErrs, "Dir": s.Cfg.RuntimesDir}})
+		Data: map[string]any{"Rows": rows, "LoadErrors": loadErrs, "Dir": s.Cfg.RuntimesDir, "Patches": s.Sites.PatchOffers(r.Context())}})
 }
 
 func (s *Server) runtimeAction(w http.ResponseWriter, r *http.Request) {
