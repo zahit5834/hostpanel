@@ -258,6 +258,7 @@ type sslCheckData struct {
 	ServerIP string
 	AnyBad   bool
 	DNSErr   string // why DNS-01 is unavailable ("" = usable)
+	DNSWarn  string // zones not delegated here yet
 }
 
 func (s *Server) siteSSLCheck(w http.ResponseWriter, r *http.Request) {
@@ -268,6 +269,8 @@ func (s *Server) siteSSLCheck(w http.ResponseWriter, r *http.Request) {
 	d := sslCheckData{Site: site, Checks: s.SSL.Precheck(r.Context(), site)}
 	if err := s.SSL.DNSReady(r.Context(), ssl.SiteNames(site)); err != nil {
 		d.DNSErr = err.Error()
+	} else {
+		d.DNSWarn = s.SSL.DelegationWarning(r.Context(), ssl.SiteNames(site))
 	}
 	for _, ip := range s.SSL.ServerIPs(r.Context()) {
 		if ip.Is4() && !ip.IsPrivate() {

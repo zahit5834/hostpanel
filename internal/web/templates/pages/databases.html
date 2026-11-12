@@ -39,7 +39,7 @@
         <label>Bellek sınırı (MB) <input type="number" name="memory_mb" min="{{.MinMem}}" step="256" value="{{.DefaultMem}}">
           <span class="muted small">En az {{.MinMem}} MB{{if .MemTotalMB}}; sunucuda toplam {{.MemTotalMB}} MB RAM var{{end}}.</span></label>
       </div>
-      <p class="muted small">SQL Server yalnızca <code>127.0.0.1:1433</code> üzerinde dinler; veriler <code>/var/lib/hostpanel/mssql/</code> altında kalıcıdır. Kurulumdan sonra sa şifresi panel tarafından hemen değiştirilir ve şifreli saklanır.</p>
+      <p class="muted small">SQL Server yalnızca <code>127.0.0.1:1433</code> üzerinde dinler; veriler <code>{{mssqlDir}}/</code> altında kalıcıdır. Kurulumdan sonra sa şifresi panel tarafından hemen değiştirilir ve şifreli saklanır.</p>
       <label class="check"><input type="checkbox" name="accept_eula" value="1" required> <span><a href="https://go.microsoft.com/fwlink/?LinkId=746388" target="_blank" rel="noopener">Microsoft SQL Server lisans koşullarını</a> kabul ediyorum</span></label>
       <div><button type="submit" class="primary">MSSQL'i kur</button> <span class="muted small">İmaj ~1.5 GB; kurulum birkaç dakika sürebilir.</span></div>
     </form>
@@ -54,7 +54,7 @@
     <dt>Sürüm</dt><dd>{{if eq $srv.Edition "key"}}Ürün anahtarı{{else}}{{$srv.Edition}}{{end}}</dd>
     <dt>Bellek</dt><dd>{{$srv.MemoryMB}} MB</dd>
     <dt>Dinleme</dt><dd>{{if $srv.External}}0.0.0.0:1433 <span class="tag">UFW: {{range $i, $ip := $srv.AllowIPs}}{{if $i}}, {{end}}{{$ip}}{{end}}</span>{{else}}127.0.0.1:1433 <span class="muted small">(yalnızca yerel)</span>{{end}}</dd>
-    <dt>Veri</dt><dd><code>/var/lib/hostpanel/mssql/</code></dd>
+    <dt>Veri</dt><dd><code>{{mssqlDir}}/</code></dd>
   </dl>
   {{if $srv.LastError}}<div class="alert err small">{{$srv.LastError}}</div>{{end}}
   <div hx-get="/databases/status" hx-trigger="load" hx-swap="outerHTML"><p class="muted small">Container durumu okunuyor…</p></div>
@@ -146,7 +146,7 @@
           <details class="inline-details"><summary class="button danger">Sil</summary>
             <form method="post" action="/databases/{{.ID}}/delete" class="stack pad">
               <input type="hidden" name="_csrf" value="{{$.CSRF}}">
-              <span class="small">Silmeden önce yedek alınır (<code>/var/lib/hostpanel/mssql/backup/</code>). Onay için adı yazın: <strong>{{.Name}}</strong></span>
+              <span class="small">Silmeden önce yedek alınır (<code>{{mssqlDir}}/backup/</code>). Onay için adı yazın: <strong>{{.Name}}</strong></span>
               <input name="confirm" autocomplete="off" spellcheck="false" required>
               <button type="submit" class="danger">Kalıcı olarak sil</button>
             </form>

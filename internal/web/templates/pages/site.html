@@ -344,6 +344,7 @@ DNS henüz bu sunucuyu göstermiyorsa siteyi kendi bilgisayarınızda denemek i�
       <option value="dns"{{if $d.DNSErr}} disabled{{else if $d.Site.Wildcard}} selected{{end}}>DNS (panelin DNS sunucusu)</option>
     </select>
     <span class="muted small">{{if $d.DNSErr}}DNS doğrulaması kullanılamıyor: {{$d.DNSErr}}{{else}}DNS doğrulaması <code>*.</code> (wildcard) adlar için zorunludur, CDN arkasındaki sitelerde de çalışır; zone'un NS kayıtları bu sunucuyu göstermeli. Yenileme aynı yöntemle otomatik.{{end}}</span>
+    {{if $d.DNSWarn}}<span class="err-text small">{{$d.DNSWarn}}</span>{{end}}
   </label>
   <div><button type="button" class="small" hx-get="/sites/{{$d.Site.ID}}/ssl/check" hx-target="#ssl-check" hx-swap="outerHTML">Tekrar kontrol et</button></div>
 </div>

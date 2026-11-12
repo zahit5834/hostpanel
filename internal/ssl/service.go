@@ -62,6 +62,22 @@ type Service struct {
 	// ACMEReady reports why DNS-01 can't be used for names (nil: it can);
 	// injected by the dns package, nil = DNS validation unavailable.
 	ACMEReady func(ctx context.Context, names []string) error
+	// ACMEDelegation lists zones whose public delegation does not point at
+	// this server (warning only: the lookup may lag behind the registrar).
+	ACMEDelegation func(ctx context.Context, names []string) []string
+}
+
+// DelegationWarning is a warning for DNS-01 when some zones are not (yet)
+// delegated to this server ("" = none).
+func (s *Service) DelegationWarning(ctx context.Context, names []string) string {
+	if s.ACMEDelegation == nil {
+		return ""
+	}
+	if bad := s.ACMEDelegation(ctx, names); len(bad) > 0 {
+		return "Zone'un nameserver'ları henüz bu sunucuyu göstermiyor (" + strings.Join(bad, ", ") +
+			"); Let's Encrypt doğrulama kaydını göremez. Registrar'da NS'leri değiştirin ve DNS sayfasında yetki devrini kontrol edin."
+	}
+	return ""
 }
 
 // Let's Encrypt validation methods.
@@ -278,6 +294,9 @@ func (s *Service) jobLE(ctx context.Context, l *jobs.Log, p map[string]any) erro
 			return err
 		}
 		l.Printf("DNS doğrulaması: certbot _acme-challenge TXT kayıtlarını panelin DNS sunucusuna yazar (zone'un NS kayıtları bu sunucuyu göstermeli).")
+		if w := s.DelegationWarning(ctx, names); w != "" {
+			l.Printf("UYARI: %s", w)
+		}
 	}
 	l.Printf("DNS / HTTP ön kontrolü…")
 	for _, c := range s.checker(ctx).Check(ctx, names) {

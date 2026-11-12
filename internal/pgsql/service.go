@@ -302,7 +302,7 @@ func (s *Service) jobInstall(ctx context.Context, l *jobs.Log, p map[string]any)
 	s.recordVersion(ctx, srv)
 	s.Store.SetServerStatus(ctx, srv.ID, StatusRunning, "")
 	l.Progress(100)
-	l.Printf("PostgreSQL hazır: %s:%d (yalnızca yerel). Veri: %s", Host, Port, DataDir)
+	l.Printf("PostgreSQL hazır: %s:%d (yalnızca yerel). Veri: %s", Host, Port, HostDataDir())
 	l.Printf("Süper kullanıcının (postgres) şifresi yok ve TCP ile bağlanamaz; yönetim yalnızca root helper'ı üzerinden.")
 	return nil
 }
@@ -420,7 +420,7 @@ func (s *Service) jobRecreate(ctx context.Context, l *jobs.Log, p map[string]any
 		}
 	}
 	l.Progress(20)
-	l.Printf("Container yeniden oluşturuluyor (veri dizini %s korunur)…", DataDir)
+	l.Printf("Container yeniden oluşturuluyor (veri dizini %s korunur)…", HostDataDir())
 	if _, err := s.helper(ctx, l, nil, nil, 3*time.Minute, "remove-container"); err != nil {
 		return s.failServer(ctx, srv.ID, err)
 	}

@@ -360,6 +360,8 @@ relocate)
   need_docker
   ! exists || die "önce container kaldırılmalı"
   db_relocate "$1" postgres postgres-backup
+  # Never let a later "create" initialize an empty cluster: the data must be there.
+  [[ -d $(db_path postgres) ]] || die "veri dizini hiçbir konumda yok"
   ;;
 
 firewall-clear)

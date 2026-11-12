@@ -242,7 +242,7 @@ func serve(args []string) error {
 	mailSvc.Register()
 	siteSvc.MailHost = mailSvc.Host
 	dnsSvc.Mail = mailSvc.ZoneInfo
-	sslSvc.ACMEReady = dnsSvc.ACMEReady
+	sslSvc.ACMEReady, sslSvc.ACMEDelegation = dnsSvc.ACMEReady, dnsSvc.ACMEDelegation
 	bkSvc := &backups.Service{Store: backups.NewStore(a.db), DB: a.db, Box: a.box, Runner: runner, Probe: probe, Jobs: jm,
 		Activity: activity, Log: log, Sites: siteSvc, DBs: dbSvc, PG: pgSvc, ScriptsDir: cfg.ScriptsDir,
 		UploadDir: siteSvc.UploadDir, DryRun: cfg.DryRun, Mail: mailSvc}

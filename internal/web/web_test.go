@@ -121,7 +121,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	svc.MailHost = mailSvc.Host
 	bkSvc.Mail = mailSvc
 	dnsSvc.Mail = mailSvc.ZoneInfo
-	sslSvc.ACMEReady = dnsSvc.ACMEReady
+	sslSvc.ACMEReady, sslSvc.ACMEDelegation = dnsSvc.ACMEReady, dnsSvc.ACMEDelegation
 	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
 		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, PG: pgSvc, Backups: bkSvc,
 		Monitor: monSvc, Notify: notifySvc, DNS: dnsSvc, Mail: mailSvc,

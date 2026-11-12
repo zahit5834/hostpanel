@@ -45,6 +45,15 @@ func (s *Service) AtOldLocation(ctx context.Context) bool {
 	return pathPresent(DataDir) && !pathPresent(NewDataDir)
 }
 
+// HostDataDir is where the data directory is now (lib.sh db_path): the new
+// location unless only the old one exists. Used for the paths shown in logs.
+func HostDataDir() string {
+	if pathPresent(NewDataDir) || !pathPresent(DataDir) {
+		return NewDataDir
+	}
+	return DataDir
+}
+
 // pathPresent reports whether p exists (without following a final symlink;
 // the panel may not be able to enter the directory itself).
 func pathPresent(p string) bool { _, err := os.Lstat(p); return err == nil }
@@ -65,7 +74,10 @@ func (s *Service) StartRelocate(ctx context.Context) (int64, error) {
 		return 0, errors.New("veri dizini zaten güvenli konumda")
 	}
 	return s.Jobs.Submit(ctx, jobs.Spec{Kind: "db.server.relocate", TargetType: "db_server", TargetID: "mssql",
-		Summary: "MSSQL veri dizini " + NewDataDir + " konumuna taşınıyor", Params: map[string]any{"server_id": srv.ID}})
+		Summary: "MSSQL veri dizini " + NewDataDir + " konumuna taşınıyor", Params: map[string]any{"server_id": srv.ID},
+		// Every step is idempotent (a moved directory is skipped), so a retry
+		// also recovers a server left in "error" by a failed move.
+		Retryable: true})
 }
 
 // jobRelocate: remove the container, move the directory, create the container

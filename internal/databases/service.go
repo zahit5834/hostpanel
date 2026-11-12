@@ -531,7 +531,7 @@ func (s *Service) jobInstall(ctx context.Context, l *jobs.Log, p map[string]any)
 	}
 	s.Store.SetServerStatus(ctx, srv.ID, StatusRunning, "")
 	l.Progress(100)
-	l.Printf("MSSQL hazır: 127.0.0.1:%d (yalnızca yerel). Veri: %s", Port, DataDir)
+	l.Printf("MSSQL hazır: 127.0.0.1:%d (yalnızca yerel). Veri: %s", Port, HostDataDir())
 	return nil
 }
 
@@ -706,7 +706,7 @@ func (s *Service) jobRecreate(ctx context.Context, l *jobs.Log, p map[string]any
 	if err != nil {
 		return err
 	}
-	l.Printf("Container yeniden oluşturuluyor (veri dizini %s korunur)…", DataDir)
+	l.Printf("Container yeniden oluşturuluyor (veri dizini %s korunur)…", HostDataDir())
 	if _, err := s.helper(ctx, l, nil, nil, 2*time.Minute, "remove-container"); err != nil {
 		return s.failServer(ctx, srv.ID, err)
 	}
@@ -1059,7 +1059,7 @@ func (s *Service) dropOne(ctx context.Context, l *jobs.Log, prov DatabaseProvide
 	path := ""
 	if d.Status != DBError && d.Status != DBCreating {
 		path = backupPath(d.Name)
-		l.Printf("Son yedek: %s%s", DataDir, strings.TrimPrefix(path, "/var/opt/mssql"))
+		l.Printf("Son yedek: %s%s", HostDataDir(), strings.TrimPrefix(path, "/var/opt/mssql"))
 	}
 	if err := prov.Drop(ctx, d.Name, path); err != nil {
 		return err

@@ -307,7 +307,7 @@ func (s *Service) Watch(ctx context.Context) []Alarm {
 				break
 			}
 			out = append(out, Alarm{Key: "mail.heavy:" + x.Address, Title: "Olağan dışı posta gönderimi: " + x.Address,
-				Text: fmt.Sprintf("%s son %d dakikada %d ileti gönderdi (saatlik sınır %s). Hesap ele geçirilmiş olabilir: E-posta → Teslim edilebilirlik → Gönderimi durdur.",
+				Text: fmt.Sprintf("%s son %d dakikada %d ileti gönderdi (saatlik sınır %s). Hesap ele geçirilmiş olabilir: E-posta → alan adı → Erişim → Gönderimi durdur.",
 					x.Address, heavyWindow, x.Count, rateText(srv.RatePerHour))})
 		}
 	}

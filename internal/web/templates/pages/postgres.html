@@ -32,7 +32,7 @@
           <span class="muted small">{{if .MemTotalMB}}Sunucuda toplam {{.MemTotalMB}} MB RAM var. {{end}}<code>shared_buffers</code> bunun %25'i, <code>effective_cache_size</code> %75'i olarak ayarlanır.</span></label>
       </div>
       <ul class="small muted">
-        <li>Yalnızca <code>127.0.0.1:5432</code> üzerinde dinler; veriler <code>/var/lib/hostpanel/postgres/</code> altında kalıcıdır.</li>
+        <li>Yalnızca <code>127.0.0.1:5432</code> üzerinde dinler; veriler <code>{{pgDir}}/</code> altında kalıcıdır.</li>
         <li>Süper kullanıcının (<code>postgres</code>) şifresi yoktur ve TCP ile bağlanamaz; panel PostgreSQL'e hiç bağlanmaz, tüm işler root helper'ı ile yapılır.</li>
         <li>Her müşteri kendi rolüyle (<code>c_…</code>) yalnızca kendi veritabanlarına bağlanabilir.</li>
       </ul>
@@ -49,7 +49,7 @@
     {{if $srv.Version}}<dt>Sürüm</dt><dd>{{$srv.Version}}</dd>{{end}}
     <dt>Bellek</dt><dd>{{$srv.MemoryMB}} MB</dd>
     <dt>Dinleme</dt><dd>{{if $srv.External}}*:5432 <span class="tag">izinli: {{range $i, $ip := $srv.AllowIPs}}{{if $i}}, {{end}}{{$ip}}{{end}}</span>{{else}}127.0.0.1:5432 <span class="muted small">(yalnızca yerel)</span>{{end}}</dd>
-    <dt>Veri</dt><dd><code>/var/lib/hostpanel/postgres/</code></dd>
+    <dt>Veri</dt><dd><code>{{pgDir}}/</code></dd>
   </dl>
   {{if $srv.LastError}}<div class="alert err small">{{$srv.LastError}}</div>{{end}}
   <div hx-get="/postgres/status" hx-trigger="load" hx-swap="outerHTML"><p class="muted small">Container durumu okunuyor…</p></div>
@@ -140,7 +140,7 @@
           <details class="inline-details"><summary class="button danger">Sil</summary>
             <form method="post" action="/postgres/{{.ID}}/delete" class="stack pad">
               <input type="hidden" name="_csrf" value="{{$.CSRF}}">
-              <span class="small">Silmeden önce <code>pg_dump</code> yedeği alınır (<code>/var/lib/hostpanel/postgres-backup/</code>). Onay için adı yazın: <strong>{{.Name}}</strong></span>
+              <span class="small">Silmeden önce <code>pg_dump</code> yedeği alınır (<code>{{pgBackupDir}}/</code>). Onay için adı yazın: <strong>{{.Name}}</strong></span>
               <input name="confirm" autocomplete="off" spellcheck="false" required>
               <button type="submit" class="danger">Kalıcı olarak sil</button>
             </form>

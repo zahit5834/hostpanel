@@ -35,6 +35,23 @@ func (s *Service) AtOldLocation(ctx context.Context) bool {
 	return oldErr == nil && newErr != nil
 }
 
+// HostDataDir is where the data directory is now (lib.sh db_path).
+func HostDataDir() string {
+	_, oldErr := os.Lstat(DataDir)
+	if _, newErr := os.Lstat(NewDataDir); newErr == nil || oldErr != nil {
+		return NewDataDir
+	}
+	return DataDir
+}
+
+// HostBackupDir is where root writes the host-side dumps (pre-drop, staging).
+func HostBackupDir() string {
+	if HostDataDir() == NewDataDir {
+		return databases.NewDBRoot + "postgres-backup"
+	}
+	return BackupDir
+}
+
 // StartRelocate queues the move of the PostgreSQL data directories.
 func (s *Service) StartRelocate(ctx context.Context) (int64, error) {
 	srv, err := s.Store.Server(ctx)
@@ -51,7 +68,9 @@ func (s *Service) StartRelocate(ctx context.Context) (int64, error) {
 		return 0, errors.New("veri dizini zaten güvenli konumda")
 	}
 	return s.Jobs.Submit(ctx, jobs.Spec{Kind: "pg.server.relocate", TargetType: "pg_server", TargetID: "postgres",
-		Summary: "PostgreSQL veri dizini " + NewDataDir + " konumuna taşınıyor", Params: map[string]any{"server_id": srv.ID}})
+		Summary: "PostgreSQL veri dizini " + NewDataDir + " konumuna taşınıyor", Params: map[string]any{"server_id": srv.ID},
+		Retryable: true, // idempotent steps: a retry also recovers an "error" state
+	})
 }
 
 // jobRelocate mirrors the MSSQL job: remove the container, move, create on

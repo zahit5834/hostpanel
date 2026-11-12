@@ -109,7 +109,7 @@ Sunucu kapalıyken bu domain'ler çözülmez. E-posta gibi kritik hizmetler içi
 
 Not: PostgreSQL'de veritabanı **adları** tüm rollere görünür; içerik görünmez. Bir müşteri başka bir müşterinin veritabanına bağlanamaz, okuyamaz ve yazamaz. "İzolasyon testi" bunu iki yönde doğrular.
 
-**Veri dizinini güvenli konuma taşıma (v0.8.0 öncesi kurulumlar):** MSSQL ve PostgreSQL verisi eskiden panel kullanıcısına ait `/var/lib/hostpanel` altındaydı. Veritabanları ve PostgreSQL sayfalarındaki "Veri dizinini güvenli konuma taşı" (`TASI` yazarak) container'ı kaldırır, dizini root'a ait `/var/lib/hostpanel-db/`'ye taşır (aynı disk; kopya değil, anlık) ve container'ı yeniden açar. Birkaç dakikalık kesinti olur; açılmazsa eski konuma otomatik dönülür. Güvenlik sayfası eski konumdaki kurulumları uyarır.
+**Veri dizinini güvenli konuma taşıma (v0.8.0 öncesi kurulumlar):** MSSQL ve PostgreSQL verisi eskiden panel kullanıcısına ait `/var/lib/hostpanel` altındaydı. Veritabanları ve PostgreSQL sayfalarındaki "Veri dizinini güvenli konuma taşı" (`TASI` yazarak) container'ı kaldırır, dizini root'a ait `/var/lib/hostpanel-db/`'ye taşır (aynı disk; kopya değil, anlık) ve container'ı yeniden açar. Birkaç dakikalık kesinti olur; açılmazsa eski konuma otomatik dönülür. Güvenlik sayfası eski konumdaki kurulumları uyarır. Ayrıntılı adımlar, doğrulama komutları ve hata durumunda yapılacaklar: [docs/mssql-veri-tasima.md](docs/mssql-veri-tasima.md).
 
 ## E-posta
 1. **Ön koşullar:**

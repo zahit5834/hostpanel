@@ -613,6 +613,9 @@ chmod 0711 "$dd/new"
 dbt db_relocate to-new mssql >/dev/null 2>&1 || { echo "FAIL db_relocate to-new"; fail=1; }
 [[ -d $dd/new/mssql/backup && ! -e $dd/old/mssql ]] || { echo "FAIL relocate result"; fail=1; }
 [[ $(dbt db_path mssql) == "$dd/new/mssql" ]] || { echo "FAIL db_path after move"; fail=1; }
+# A retried job moves again: already moved = no-op, data stays.
+dbt db_relocate to-new mssql >/dev/null 2>&1 || { echo "FAIL repeated to-new"; fail=1; }
+[[ -d $dd/new/mssql/backup && ! -e $dd/old/mssql ]] || { echo "FAIL repeated to-new moved data"; fail=1; }
 mkdir "$dd/old/mssql"
 if dbt db_relocate to-old mssql >/dev/null 2>&1; then echo "FAIL relocate over existing target"; fail=1; fi
 rmdir "$dd/old/mssql"

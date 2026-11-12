@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -583,6 +584,27 @@ func (s *Service) ACMEReady(ctx context.Context, names []string) error {
 		}
 	}
 	return nil
+}
+
+// ACMEDelegation lists the zones of names whose public NS records do not (yet)
+// point at ns1/ns2: Let's Encrypt asks the delegated servers, so a DNS-01
+// challenge there would fail. Cached lookups (10 minutes).
+func (s *Service) ACMEDelegation(ctx context.Context, names []string) []string {
+	zones, err := s.Store.ZoneNames(ctx)
+	if err != nil {
+		return nil
+	}
+	var bad []string
+	for _, n := range names {
+		z := ZoneFor(strings.TrimPrefix(n, "*."), zones)
+		if z == "" || slices.Contains(bad, z) {
+			continue
+		}
+		if !s.CheckDelegation(ctx, z, false).OK {
+			bad = append(bad, z)
+		}
+	}
+	return bad
 }
 
 // WildcardReady is the sites.Service hook: *.<domain> needs DNS-01.

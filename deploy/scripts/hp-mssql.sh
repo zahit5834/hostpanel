@@ -247,6 +247,8 @@ relocate)
   need_docker
   ! exists || die "önce container kaldırılmalı"
   db_relocate "$1" mssql
+  # Never let a later "create" start an empty server: the data must be there.
+  [[ -d $(db_path mssql) ]] || die "veri dizini hiçbir konumda yok"
   ;;
 
 firewall-clear)
