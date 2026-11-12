@@ -1,19 +1,70 @@
-{{define "content"}}
-<h1>Sunucu <span class="muted small">{{.Data.Hostname}}</span></h1>
-{{with .Data}}
+{{define "content"}}{{$d := .Data}}
+<h1>Sunucu <span class="muted small">{{$d.Hostname}}</span></h1>
+<div class="tabs">
+  <a href="/server?tab=general" class="{{if eq $d.Tab "general"}}active{{end}}">Genel</a>
+  <a href="/server?tab=updates" class="{{if eq $d.Tab "updates"}}active{{end}}">Güncellemeler</a>
+  <a href="/server?tab=ssh" class="{{if eq $d.Tab "ssh"}}active{{end}}">SSH</a>
+  <a href="/server?tab=fail2ban" class="{{if eq $d.Tab "fail2ban"}}active{{end}}">fail2ban</a>
+  <a href="/server?tab=ufw" class="{{if eq $d.Tab "ufw"}}active{{end}}">Güvenlik duvarı</a>
+</div>
+{{if eq $d.Tab "general"}}{{template "srv-general" $}}
+{{else if eq $d.Tab "updates"}}{{template "srv-updates" $}}
+{{else if eq $d.Tab "ssh"}}{{template "ssh" $}}
+{{else if eq $d.Tab "fail2ban"}}{{template "f2b" $}}
+{{else}}{{template "ufw" $}}{{end}}
+{{end}}
+
+{{define "flash"}}{{if .Error}}<div class="alert err">{{.Error}}</div>{{end}}{{if .Notice}}<div class="alert ok">{{.Notice}}</div>{{end}}{{end}}
+
+{{define "srv-general"}}{{$d := .Data}}
+{{template "flash" .}}
 <div class="grid two">
 <section class="card">
   <h2>Servisler</h2>
   <table class="table compact">
     <tbody>
-    {{range .Units}}<tr><td>{{.Label}}</td><td><code class="small">{{.Unit}}</code></td><td class="right"><span class="badge {{unitClass .State}}">{{.State}}</span></td></tr>{{end}}
+    {{range $d.Units}}<tr><td>{{.Label}}</td><td><code class="small">{{.Unit}}</code></td><td class="right"><span class="badge {{unitClass .State}}">{{.State}}</span></td></tr>{{end}}
     </tbody>
   </table>
-  <p class="muted small">Durumlar <code>systemctl is-active</code> ile okunur; servis yönetimi ilgili sayfalardan yapılır.</p>
+  <form method="post" action="/server/service" class="row-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <select name="name">{{range $d.Services}}<option value="{{.Name}}">{{.Label}}{{if ne .State "active"}} ({{.State}}){{end}}</option>{{end}}</select>
+    <select name="action"><option value="reload">Yeniden yükle (reload)</option><option value="restart">Yeniden başlat (restart)</option></select>
+    <label class="check small"><input type="checkbox" name="docker_ok" value="1"> <span>Docker restart'ında container'lar da yeniden başlar, onaylıyorum</span></label>
+    <button type="submit">Uygula</button>
+  </form>
+  <p class="muted small">nginx için önce <code>nginx -t</code> çalışır; hata varsa işlem yapılmaz. SSH ve panelin kendisi buradan yeniden başlatılmaz.</p>
+  <div class="row-form">
+    <form method="post" action="/server/nginx/test"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" class="link-btn">nginx yapılandırmasını sına</button></form>
+    <a class="small" href="/server/nginx/dump" target="_blank" rel="noopener">Tüm nginx yapılandırmasını görüntüle (nginx -T)</a>
+  </div>
+  {{with $d.Output}}<pre class="output small">{{.}}</pre>{{end}}
 </section>
-<section class="card" id="server-apt" hx-get="/server/part/apt" hx-trigger="load" hx-swap="outerHTML">
-  <h2>Güncellemeler</h2>
-  <p class="muted">Kontrol ediliyor…</p>
+
+<section class="card">
+  <h2>Bellek planı</h2>
+  {{with $d.Plan}}
+  <p>Fiziksel RAM: <strong>{{.TotalMB}} MB</strong> · ayrılabilecek en fazla: <strong class="{{if .Over}}err-text{{end}}">{{.ReservedMB}} MB (%{{.Pct}})</strong></p>
+  <meter min="0" max="100" low="80" high="100" optimum="0" value="{{.Pct}}"></meter>
+  <table class="table compact">
+    <tbody>{{range .Items}}<tr><td>{{if .Link}}<a href="{{.Link}}">{{.Label}}</a>{{else}}{{.Label}}{{end}}</td><td class="right nowrap">{{.MB}} MB</td></tr>{{end}}</tbody>
+  </table>
+  {{if .Over}}<p class="err-text small">Sınırların toplamı fiziksel belleği aşıyor: hepsi aynı anda sınırına yaklaşırsa çekirdek süreç öldürür (OOM). Bellek sınırlarını düşürün{{if not .SwapMB}} ya da swap ekleyin{{end}}.</p>
+  {{else}}<p class="muted small">Değerler üst sınırlardır (container/servis <code>MemoryMax</code>); gerçek kullanım genelde daha düşüktür.</p>{{end}}
+  {{end}}
+  <p>Kullanılabilir: {{bytes $d.Mem.Available}} / {{bytes $d.Mem.Total}} · Swap: {{if $d.Mem.SwapTotal}}{{bytes $d.Mem.SwapTotal}} ({{bytes $d.Mem.SwapFree}} boş){{else}}<span class="err-text">yok</span>{{end}}</p>
+  {{if not $d.Mem.SwapTotal}}
+  <form method="post" action="/server/swap" class="row-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <select name="mb"><option value="1024">1 GB</option><option value="2048" selected>2 GB</option><option value="4096">4 GB</option><option value="8192">8 GB</option></select>
+    <button type="submit">Swap dosyası oluştur</button>
+  </form>
+  <p class="muted small">Ani bellek sıçramalarında süreç öldürülmesini önler; <code>/swapfile</code> oluşturulur ve <code>/etc/fstab</code>'a eklenir.</p>
+  {{end}}
+  {{with $d.OOM}}
+  <h3>Son 24 saatte bellek yetersizliği</h3>
+  <ul class="small">{{range .}}<li>{{datetime .TS}} — {{.Summary}}</li>{{end}}</ul>
+  {{end}}
 </section>
 </div>
 
@@ -21,26 +72,202 @@
   <h2>Disk dağılımı</h2>
   <p class="muted">Hesaplanıyor… (büyük dizinlerde bir dakika sürebilir)</p>
 </section>
-
-{{template "ufw" $}}
-{{end}}
 {{end}}
 
-{{define "server-apt"}}{{with .Data.Apt}}
-<section class="card" id="server-apt">
-  <div class="card-head"><h2>Güncellemeler</h2>
-    <button class="link-btn small" hx-get="/server/part/apt?refresh=1" hx-target="#server-apt" hx-swap="outerHTML">Yenile</button></div>
-  {{if .Err}}<p class="err-text">{{.Err}}</p>
-  {{else}}
-  <div class="grid two">
-    <div class="stat"><div class="label">Güvenlik güncellemesi</div><div class="value">{{if .Security}}<span class="err-text">{{.Security}}</span>{{else}}0{{end}}</div></div>
-    <div class="stat"><div class="label">Toplam bekleyen paket</div><div class="value">{{.Total}}</div></div>
-  </div>
-  {{if .Security}}<p class="small">Uygulamak için SSH ile: <code>sudo apt update &amp;&amp; sudo apt upgrade</code> (Ubuntu'nun <code>unattended-upgrades</code> servisi güvenlik güncellemelerini genelde kendisi kurar).</p>{{end}}
+{{define "srv-updates"}}{{$d := .Data}}
+{{template "flash" .}}
+<section class="card" id="server-upd" hx-get="/server/part/upd" hx-trigger="load" hx-swap="outerHTML">
+  <h2>Bekleyen paketler</h2><p class="muted">Kontrol ediliyor…</p>
+</section>
+<div class="grid two">
+<section class="card">
+  <h2>Otomatik güvenlik güncellemeleri</h2>
+  {{with $d.Auto}}
+  <p>Durum: {{if not .Known}}<span class="badge">bilinmiyor</span>{{else if .On}}<span class="badge success">açık</span>{{else}}<span class="badge warn">kapalı</span>{{end}}
+    {{if not .LastRun.IsZero}}<span class="muted small">· son çalışma {{datetime .LastRun}}</span>{{end}}</p>
+  <form method="post" action="/server/apt/auto" class="row-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    {{if .On}}<input type="hidden" name="on" value="0"><button type="submit">Kapat</button>{{else}}<input type="hidden" name="on" value="1"><button type="submit" class="primary">Aç</button>{{end}}
+  </form>
+  <p class="muted small">Ubuntu'nun <code>unattended-upgrades</code> servisi güvenlik yamalarını her gün kendisi kurar (yeniden başlatma yapmaz).</p>
   {{end}}
-  <p class="muted small">Son kontrol: {{datetime .At}} · apt önbelleğine göre (<code>apt update</code> zamanlanmış olarak çalışır). Panel paket kurmaz/güncellemez.</p>
+</section>
+<section class="card">
+  <h2>Yeniden başlatma</h2>
+  {{with $d.Reboot}}
+  {{if .Required}}<p><span class="badge warn">gerekli</span> {{range $i, $p := .Pkgs}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</p>{{else}}<p><span class="badge success">gerekmiyor</span></p>{{end}}
+  {{if not .BootedAt.IsZero}}<p class="muted small">Son açılış: {{datetime .BootedAt}}</p>{{end}}
+  {{if not .Scheduled.IsZero}}
+    <div class="notice-box">Planlı yeniden başlatma: <strong>{{datetime .Scheduled}}</strong>
+    <form method="post" action="/server/reboot/cancel" class="row-form"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">İptal et</button></form></div>
+  {{else}}
+  <form method="post" action="/server/reboot" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Ne zaman
+      <select name="when"><option value="now">1 dakika sonra</option><option value="+10">10 dakika sonra</option><option value="03:30">Bu gece 03:30</option><option value="04:30">Bu gece 04:30</option></select></label>
+    <label>Onay için <code>YENIDEN-BASLAT</code> yazın <input name="confirm" autocomplete="off" required spellcheck="false"></label>
+    <button type="submit" class="danger">Yeniden başlatmayı planla</button>
+  </form>
+  <p class="muted small">Siteler, veritabanları ve posta birkaç dakika erişilemez. Açıldıktan sonra panel bir açılış raporu gönderir (çalışmayan servis/site).</p>
+  {{end}}
+  {{end}}
+</section>
+</div>
+<section class="card" id="server-restart" hx-get="/server/part/restart" hx-trigger="load" hx-swap="outerHTML">
+  <h2>Yeniden başlatılması gereken servisler</h2><p class="muted">Kontrol ediliyor…</p>
+</section>
+{{end}}
+
+{{define "server-upd"}}{{with .Data.Upd}}
+<section class="card table-wrap" id="server-upd">
+  <div class="card-head pad"><h2>Bekleyen paketler <span class="muted small">{{len .Pkgs}} paket{{if .Security}}, {{.Security}} güvenlik{{end}}</span></h2>
+    <button class="link-btn small" hx-get="/server/part/upd?refresh=1" hx-target="#server-upd" hx-swap="outerHTML">Yenile</button></div>
+  {{if .Err}}<p class="err-text pad">{{.Err}}</p>{{end}}
+  {{if .Pkgs}}
+  <table class="table compact">
+    <thead><tr><th>Paket</th><th>Mevcut</th><th>Yeni</th><th></th></tr></thead>
+    <tbody>{{range .Pkgs}}<tr><td><code>{{.Name}}</code></td><td class="muted small">{{.Old}}</td><td class="small">{{.New}}</td><td class="right">{{if .Security}}<span class="badge warn">güvenlik</span>{{end}}</td></tr>{{end}}</tbody>
+  </table>
+  <form method="post" action="/server/apt/run" class="inline-form pad">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <select name="mode">{{if .Security}}<option value="security">Yalnızca güvenlik güncellemeleri</option>{{end}}<option value="all">Tüm güncellemeler (apt upgrade)</option></select>
+    {{if .Held}}<label class="check small"><input type="checkbox" name="docker" value="1"> <span>Docker paketlerini de güncelle ({{range $i, $p := .Held}}{{if $i}}, {{end}}{{$p}}{{end}}) — tüm container'lar yeniden başlar</span></label>{{end}}
+    <button type="submit" class="primary">Güncellemeleri uygula</button>
+  </form>
+  <p class="muted small pad">Paket kaldırılmaz, dağıtım yükseltmesi yapılmaz, değiştirdiğiniz ayar dosyaları korunur. İşlem panelden bağımsız bir systemd biriminde çalışır; çıktı iş logunda ve <code>/var/log/hostpanel-root/apt.log</code>'da.</p>
+  {{else if not .Err}}<p class="muted pad">Sistem güncel.</p>{{end}}
+  <p class="muted small pad">Kontrol: {{datetime .At}} (1 sa önbellek; apt listesi zamanlanmış <code>apt update</code> ile tazelenir).</p>
 </section>
 {{end}}{{end}}
+
+{{define "server-restart"}}{{with .Data}}
+<section class="card" id="server-restart">
+  <div class="card-head"><h2>Yeniden başlatılması gereken servisler</h2>
+    <button class="link-btn small" hx-get="/server/part/restart" hx-target="#server-restart" hx-swap="outerHTML">Yenile</button></div>
+  {{if .RErr}}<p class="err-text">{{.RErr}}</p>
+  {{else if .Restart.Missing}}<p class="muted">needrestart kurulu değil.</p>
+  {{else}}
+    {{if .Restart.KernelPending}}<p><span class="badge warn">çekirdek</span> Çalışan {{.Restart.KCur}}, kurulu {{.Restart.KExp}}: yeniden başlatma gerekiyor.</p>{{end}}
+    {{with .Restart.Services}}<p>Eski kütüphaneleri kullanan servisler:</p><ul class="small">{{range .}}<li><code>{{.}}</code></li>{{end}}</ul>
+      <p class="muted small">nginx/docker/fail2ban için Genel sekmesindeki servis yönetimini, siteler için site sayfasındaki "Yeniden başlat"ı kullanın.</p>
+    {{else}}{{if not .Restart.KernelPending}}<p class="muted">Yok.</p>{{end}}{{end}}
+  {{end}}
+</section>
+{{end}}{{end}}
+
+{{define "ssh"}}{{$d := .Data.SSH}}
+<div id="ssh" {{if $d.St.Pending}}hx-get="/server/part/ssh" hx-trigger="every 5s" hx-swap="outerHTML"{{end}}>
+<section class="card">
+  <h2>SSH girişi</h2>
+  {{template "flash" .}}
+  {{if $d.Err}}<p class="err-text">{{$d.Err}}</p>{{else}}{{$st := $d.St}}
+  {{if $st.Pending}}
+  <div class="notice-box stack">
+    <p><strong>Değişiklik onay bekliyor.</strong> Onaylanmazsa <span x-data="countdown" data-deadline="{{$st.Deadline.Unix}}"><span class="countdown" x-text="text"></span></span> sonra kendiliğinden geri alınır (açık SSH oturumları hiç kesilmez).</p>
+    <p>Bu oturumu kapatmadan <strong>yeni bir terminalde</strong> SSH ile bağlanmayı deneyin.
+      {{with $d.NewSession}}<span class="badge success">yeni giriş görüldü: {{.User}} · {{.IP}} · {{datetime .Time}}</span>{{else}}<span class="badge">yeni anahtar girişi henüz görülmedi</span>{{end}}</p>
+    <div class="row-form">
+      <form hx-post="/server/ssh/confirm" hx-target="#ssh" hx-swap="outerHTML"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" class="primary">Çalışıyor, onayla</button></form>
+      <form hx-post="/server/ssh/revert" hx-target="#ssh" hx-swap="outerHTML"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">Hemen geri al</button></form>
+    </div>
+  </div>
+  {{end}}
+  <table class="table compact">
+    <tbody>
+      <tr><td>Parola ile giriş</td><td class="right">{{if $st.PasswordOff}}<span class="badge success">kapalı</span>{{else}}<span class="badge failed">açık</span>{{end}}</td></tr>
+      <tr><td>root ile giriş</td><td class="right"><span class="badge {{if eq $st.RootLogin "yes"}}failed{{else}}success{{end}}">{{rootLabel $st.RootLogin}}</span></td></tr>
+      <tr><td>Port</td><td class="right">{{range $i, $p := $st.Ports}}{{if $i}}, {{end}}{{$p}}{{end}}</td></tr>
+      <tr><td>Son anahtarla giriş</td><td class="right small">{{with $d.LastKey.User}}{{$d.LastKey.User}} · {{$d.LastKey.IP}} · {{datetime $d.LastKey.Time}}{{else}}<span class="muted">görülmedi (auth.log)</span>{{end}}</td></tr>
+    </tbody>
+  </table>
+  {{if not $st.Pending}}
+  <form hx-post="/server/ssh/apply" hx-target="#ssh" hx-swap="outerHTML" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Parola ile giriş
+      <select name="password"><option value="yes" {{if not $st.PasswordOff}}selected{{end}}>Açık</option><option value="no" {{if $st.PasswordOff}}selected{{end}}>Kapalı (yalnızca anahtar)</option></select></label>
+    <label>root ile giriş
+      <select name="root">{{$rm := $st.RootMode}}
+        <option value="no" {{if eq $rm "no"}}selected{{end}}>Kapalı</option>
+        <option value="prohibit-password" {{if eq $rm "prohibit-password"}}selected{{end}}>Yalnızca anahtarla</option>
+        <option value="yes" {{if eq $rm "yes"}}selected{{end}}>Açık (şifreyle de)</option></select></label>
+    {{if not $d.KeySeen}}<label class="check"><input type="checkbox" name="key_tested" value="1"> <span>Bu anahtarlardan biriyle SSH'a girebildiğimi doğruladım (auth.log'da anahtarla giriş görülmedi)</span></label>{{end}}
+    <button type="submit" class="primary">Uygula (180 sn içinde onay gerekir)</button>
+  </form>
+  <p class="muted small">Ayarlar <code>/etc/ssh/sshd_config.d/00-hostpanel.conf</code>'a yazılır, <code>sshd -t</code> ile sınanır ve etkin değerler doğrulanır. Onay gelmezse root'un zamanlayıcısı önceki hali geri yükler: panel çökse bile. SSH portu panelden değiştirilmez.</p>
+  {{end}}
+  {{end}}
+</section>
+{{if not $d.Err}}{{template "ssh-keys" $}}{{end}}
+</div>
+{{end}}
+
+{{define "ssh-keys"}}{{$d := .Data.SSH}}{{$st := $d.St}}
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Yönetici SSH anahtarları</h2></div>
+  {{if not $st.AKFDefault}}<p class="err-text pad">AuthorizedKeysFile özelleştirilmiş (<code>{{$st.AKF}}</code>); anahtarlar yalnızca gösterilir.</p>{{end}}
+  <table class="table">
+    <thead><tr><th>Kullanıcı</th><th>Anahtar</th><th>Açıklama</th><th></th></tr></thead>
+    <tbody>
+    {{range $u := $st.Users}}{{range $u.Keys}}<tr>
+      <td>{{$u.Name}}</td><td><code class="small">{{.Type}} {{.Bits}} {{.FP}}</code>{{if eq .FP $d.LastKey.FP}} <span class="badge success">son giriş</span>{{end}}</td><td class="muted small">{{.Comment}}</td>
+      <td class="right">{{if $st.AKFDefault}}<form hx-post="/server/ssh/keys/delete" hx-target="#ssh" hx-swap="outerHTML" hx-confirm="{{$u.Name}} kullanıcısının bu anahtarı silinsin mi? {{.FP}}">
+        <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="user" value="{{$u.Name}}"><input type="hidden" name="fp" value="{{.FP}}">
+        {{if eq .FP $d.LastKey.FP}}<input type="hidden" name="force" value="1">{{end}}
+        <button class="link-btn danger" type="submit">Sil</button></form>{{end}}</td>
+    </tr>{{end}}{{end}}
+    {{if not $st.KeyCount}}<tr><td colspan="4" class="muted">Hiç anahtar yok: parola girişi kapatılamaz.</td></tr>{{end}}
+    </tbody>
+  </table>
+  {{if $st.AKFDefault}}
+  <form hx-post="/server/ssh/keys" hx-target="#ssh" hx-swap="outerHTML" class="stack pad">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Kullanıcı <select name="user">{{range $st.Users}}<option value="{{.Name}}" {{if ne .Name "root"}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+    <label>Açık anahtar (<code>~/.ssh/id_ed25519.pub</code> içeriği, tek satır)
+      <textarea name="key" rows="3" spellcheck="false" required placeholder="ssh-ed25519 AAAA… ad@bilgisayar"></textarea></label>
+    <button type="submit">Anahtar ekle</button>
+  </form>
+  <p class="muted small pad">Yalnızca root ve <code>sudo</code> grubundaki kullanıcılar. Seçenekli satırlar (<code>command=</code>, <code>from=</code>) ve 2048 bitten kısa RSA kabul edilmez. Son anahtarla girişte kullanılan anahtarı silmek ek onay ister.</p>
+  {{end}}
+  {{with $d.Logins}}
+  <h3 class="pad">Son SSH girişleri</h3>
+  <table class="table compact"><tbody>{{range .}}<tr><td class="nowrap muted small">{{datetime .Time}}</td><td>{{.User}}</td><td>{{.IP}}</td><td class="small">{{.Method}}{{with .FP}} <code>{{.}}</code>{{end}}</td></tr>{{end}}</tbody></table>
+  {{end}}
+</section>
+{{end}}
+
+{{define "f2b"}}{{$d := .Data.F2B}}
+<section class="card table-wrap" id="f2b">
+  <div class="card-head pad"><h2>fail2ban (sunucu)</h2>
+    {{if $d.St.Installed}}{{if $d.St.Active}}<span class="badge success">çalışıyor</span>{{else}}<span class="badge failed">çalışmıyor</span>{{end}}{{end}}</div>
+  <div class="pad">{{template "flash" .}}</div>
+  {{if $d.Err}}<p class="err-text pad">{{$d.Err}}</p>
+  {{else if not $d.St.Installed}}<p class="muted pad">fail2ban kurulu değil (install.sh kurar).</p>
+  {{else}}
+  {{range $d.St.Jails}}{{$j := .Name}}
+  <h3 class="pad">{{if eq .Name "sshd"}}SSH{{else if eq .Name "hostpanel"}}Panel girişi{{else if eq .Name "recidive"}}Tekrar edenler (1 hafta, tüm portlar){{else}}{{.Name}}{{end}}
+    <span class="muted small">şu an {{.CurBanned}} engelli · toplam {{.TotalBanned}} · başarısız {{.TotalFailed}}</span></h3>
+  {{if .Banned}}<table class="table compact"><tbody>{{range .Banned}}<tr><td><code>{{.}}</code></td><td class="right">
+    <form hx-post="/server/f2b/unban" hx-target="#f2b" hx-swap="outerHTML"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="jail" value="{{$j}}"><input type="hidden" name="ip" value="{{.}}">
+      <button class="link-btn" type="submit">Engeli kaldır</button></form></td></tr>{{end}}</tbody></table>{{end}}
+  {{end}}
+  {{if not $d.St.Active}}<p class="muted pad">Servis çalışmadığı için engel listesi okunamadı.</p>{{end}}
+  <form hx-post="/server/f2b/config" hx-target="#f2b" hx-swap="outerHTML" class="stack pad">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <div class="grid two">
+      <label>Deneme sayısı (3–20) <input name="maxretry" type="number" min="3" max="20" value="{{$d.St.Config.MaxRetry}}" required></label>
+      <label>Bu süre içinde (dk, 5–1440) <input name="findtime" type="number" min="5" max="1440" value="{{$d.St.Config.FindMin}}" required></label>
+      <label>Engel süresi (dk, 10–10080) <input name="bantime" type="number" min="10" max="10080" value="{{$d.St.Config.BanMin}}" required></label>
+      <label class="check"><input type="checkbox" name="recidive" value="1" {{if $d.St.Config.Recidive}}checked{{end}}> <span>Tekrar edenleri 1 hafta tüm portlardan engelle (recidive)</span></label>
+    </div>
+    <label>Hiç engellenmeyecek IP / CIDR (satır başına bir; 127.0.0.1 her zaman muaf)
+      <textarea name="ignore" rows="4" spellcheck="false">{{$d.Ignore}}</textarea></label>
+    <p class="muted small">Şu anki IP adresiniz: <code>{{$d.ClientIP}}</code> — listede olmalı, yoksa kaydedilmez.</p>
+    <button type="submit">Kaydet ve uygula</button>
+  </form>
+  <p class="muted small pad">SSH ve panel girişleri için geçerlidir. Posta sunucusunun kendi fail2ban'ı E-posta sayfasındadır. Yeni yapılandırma <code>fail2ban-client -t</code>'den geçmezse eskisi kalır.</p>
+  {{end}}
+</section>
+{{end}}
 
 {{define "server-disk"}}{{with .Data.Disk}}
 <section class="card" id="server-disk">

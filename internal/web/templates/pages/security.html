@@ -1,0 +1,28 @@
+{{define "content"}}{{$d := .Data}}
+<h1>Güvenlik denetimi</h1>
+<p class="muted">Kontrol: {{datetime $d.At}} · <span class="badge success">{{$d.OK}} iyi</span> <span class="badge warn">{{$d.Warn}} uyarı</span> <span class="badge failed">{{$d.Bad}} sorun</span></p>
+<section class="card">
+  <ul class="audit-list">
+  {{range $d.Findings}}
+    <li>
+      <span class="badge {{if eq .Level "ok"}}success{{else if eq .Level "warn"}}warn{{else if eq .Level "bad"}}failed{{else}}info{{end}}">{{if eq .Level "ok"}}iyi{{else if eq .Level "warn"}}uyarı{{else if eq .Level "bad"}}sorun{{else}}bilgi{{end}}</span>
+      <div class="what"><strong>{{.Title}}</strong>{{with .Detail}}<div class="muted small">{{.}}</div>{{end}}</div>
+      {{if and .Link (ne .Level "ok")}}<a class="small nowrap" href="{{.Link}}">Düzelt →</a>{{end}}
+    </li>
+  {{end}}
+  </ul>
+  <p class="muted small">Denetim her gün bakımda tekrarlanır; yeni bir "sorun" çıkarsa bir kez güvenlik bildirimi gönderilir.</p>
+</section>
+
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Script bütünlüğü</h2></div>
+  {{if $d.Integrity}}
+  <table class="table compact">
+    <thead><tr><th>Dosya</th><th>Durum</th></tr></thead>
+    <tbody>{{range $d.Integrity}}<tr><td><code class="small">{{$d.Paths.HumanPath .Path}}</code></td><td><span class="badge {{if eq .Kind "extra"}}warn{{else}}failed{{end}}">{{.Label}}</span></td></tr>{{end}}</tbody>
+  </table>
+  <p class="muted small pad">Panel güncellemesi (ya da <code>install.sh</code>) bu sürümün dosyalarını yeniden kurar.</p>
+  {{else}}<p class="pad"><span class="badge success">uyumlu</span> Root script'leri, şablonlar, sudoers ve systemd birimi bu sürümle ({{.Version}}) birebir aynı.</p>{{end}}
+  <p class="muted small pad">Panel dışından ya da yanlışlıkla yapılan değişiklikleri yakalar; root yetkisi ele geçirilmiş bir sunucuda güvence değildir (root bu kontrolü de değiştirebilir).</p>
+</section>
+{{end}}

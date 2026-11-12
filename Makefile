@@ -4,21 +4,26 @@ LDFLAGS  := -s -w -X main.version=$(VERSION)
 BUILD    := CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)"
 BIN      := bin
 
-.PHONY: build build-amd64 build-arm64 dist test test-scripts lint fmt run-dev measure check-sudoers clean
+.PHONY: manifest build build-amd64 build-arm64 dist test test-scripts lint fmt run-dev measure check-sudoers clean
 
 build: build-amd64
 
-build-amd64:
+# SHA-256 of the installed scripts/templates/sudoers/unit, compiled into the
+# binary (script integrity check); TestManifestFresh fails when it is stale.
+manifest:
+	$(GO) run ./tools/genmanifest
+
+build-amd64: manifest
 	GOOS=linux GOARCH=amd64 $(BUILD) -o $(BIN)/hostpanel-linux-amd64 ./cmd/hostpanel
 	@ls -lh $(BIN)/hostpanel-linux-amd64 | awk '{print "binary size:", $$5}'
 
-build-arm64:
+build-arm64: manifest
 	GOOS=linux GOARCH=arm64 $(BUILD) -o $(BIN)/hostpanel-linux-arm64 ./cmd/hostpanel
 	@ls -lh $(BIN)/hostpanel-linux-arm64 | awk '{print "binary size:", $$5}'
 
 # Release artifacts (what .github/workflows/release.yml publishes):
 #   make dist VERSION=v0.1.0 → dist/hostpanel-v0.1.0-linux-{amd64,arm64}.tar.gz, install.sh, SHA256SUMS
-dist:
+dist: manifest
 	@[[ "$(VERSION)" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$$ ]] || { echo "VERSION=vX.Y.Z gerekli (şu an: $(VERSION))"; exit 1; }
 	rm -rf dist && mkdir -p dist
 	for a in amd64 arm64; do \

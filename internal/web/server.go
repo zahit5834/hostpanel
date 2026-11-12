@@ -5,7 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"github.com/zahit5834/hostpanel/internal/hostsec"
 	"github.com/zahit5834/hostpanel/internal/images"
+	"github.com/zahit5834/hostpanel/internal/sysmaint"
 	"github.com/zahit5834/hostpanel/internal/system"
 	"github.com/zahit5834/hostpanel/internal/traffic"
 	"io"
@@ -71,6 +73,9 @@ type Server struct {
 	Traffic   *traffic.Service
 	Idle      *system.IdleGC // returns memory to the OS after the last request
 	Images    *images.Service
+	SSH       *hostsec.SSH      // Faz 11: SSH login settings + admin keys
+	F2B       *hostsec.Fail2ban // host fail2ban jails
+	Sys       *sysmaint.Service // OS updates, reboot, memory, services
 	// ExportConfig writes the encrypted panel configuration (main wires it:
 	// it needs the master key, which the web layer never holds otherwise).
 	ExportConfig func(ctx context.Context, passphrase string, w io.Writer) (panelcfg.Manifest, error)

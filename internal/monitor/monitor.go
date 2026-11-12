@@ -218,6 +218,10 @@ type Service struct {
 	DiskFunc     func() int
 	Now          func() time.Time
 
+	// Periodic hooks run with the disk check (every 10 minutes) on the same
+	// timer: OOM kills, SSH revert watch, CLI security events (Faz 11).
+	Periodic []func(ctx context.Context)
+
 	once       sync.Once
 	runMu      sync.Mutex // RunDue and CheckNow update rows one at a time
 	wake       chan struct{}
@@ -322,6 +326,9 @@ func (s *Service) RunDue(ctx context.Context, now time.Time) time.Time {
 	}
 	if !now.Before(s.diskNext) {
 		s.checkDisk(ctx)
+		for _, f := range s.Periodic {
+			f(ctx)
+		}
 		s.diskNext = now.Add(diskEvery)
 	}
 	if s.diskNext.Before(next) {

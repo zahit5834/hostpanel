@@ -15,8 +15,9 @@ Ubuntu 24.04 için tek yöneticili, ultra hafif hosting kontrol paneli: Go, tek 
 - **İstatistikler:** site bazlı günlük trafik (istek, ziyaretçi, bant genişliği, 4xx/5xx, bot, en çok açılan sayfalar; nginx loglarından) ve uptime geçmişi (günlük erişilebilirlik, ortalama yanıt süresi, kesinti kayıtları).
 - **Container güncellemeleri:** MSSQL ve posta sunucusu imajları her gün kontrol edilir, yeni sürümde bildirim gelir; tek tıkla güncelleme (başarısız olursa eski sürüme otomatik dönüş).
 - **Log Merkezi:** işlem geçmişi, iş logları (canlı), sistem logları (nginx, journal, certbot, fail2ban, auth.log…).
-- **Site cron'ları,** Sunucu sayfası (servisler, güvenlik güncellemeleri, disk dağılımı, UFW).
-- **Güvenlik:** 2FA (TOTP + kurtarma kodları), IP allowlist, fail2ban entegrasyonu.
+- **Site cron'ları.**
+- **Sunucu yönetimi:** servisleri yeniden yükleme/başlatma, `nginx -t`, sistem güncellemeleri (yalnızca güvenlik ya da tümü, otomatik güncellemeler, yeniden başlatılması gereken servisler), planlı yeniden başlatma + açılış raporu, bellek planı, swap, bellek yetersizliği (OOM) uyarısı, disk dağılımı, UFW.
+- **Güvenlik:** 2FA (TOTP + kurtarma kodları), IP allowlist, kritik işlemlerde yeniden doğrulama, açık oturumlar ve giriş geçmişi, SSH ayarları (parola/root girişi; onaylanmazsa 3 dakikada kendiliğinden geri alınır) ve yönetici anahtarları, fail2ban (engelliler, süreler, muaf IP'ler), güvenlik denetimi sayfası, kritik değişiklik bildirimleri, root script bütünlük kontrolü.
 - **Panel yönetimi:** panelden tek tıkla güncelleme (otomatik geri dönüşlü), yapılandırmayı dışa/içe aktarma.
 
 ## Gereksinimler
@@ -135,6 +136,14 @@ Kaba kuvvet denemelerini container içindeki fail2ban engeller (yalnızca posta 
   - **MSSQL:** yalnızca aynı SQL Server sürümünün yeni CU/GDR'leri (ör. `2025-CU10` → `2025-CU10-GDR1`). Yeni imaj önce indirilir, sonra SQL Server durdurulup veri dizininin kopyası alınır (`/var/backups/hostpanel/_mssql/pre-update`; yeterli boş disk gerekir) ve yeni sürümle başlatılır. Açılmazsa kopya ve eski sürüm otomatik geri konur.
   - **Posta sunucusu:** aynı ana sürümün yeni sürüm/revizyonları. Postalar ve hesaplar korunur; açılmazsa eski sürüme dönülür.
 - Ana sürüm geçişleri (ör. SQL Server 2027, docker-mailserver 18) yalnızca bilgi olarak gösterilir.
+
+## Sunucu güvenliği ve bakım
+- **Sunucu → SSH:** parola ve root girişini kapatmak için önce bir yönetici anahtarınızın olması gerekir. "Uygula"dan sonra **bu oturumu kapatmadan** yeni bir terminalde bağlanmayı deneyin; girebiliyorsanız "Çalışıyor, onayla". 180 saniye içinde onaylanmazsa ayarlar root'un zamanlayıcısıyla geri alınır (panel çökse bile). SSH portu panelden değiştirilmez.
+- **Sunucu → fail2ban:** şu anki IP adresiniz muaf listede olmadan ayar kaydedilmez.
+- **Sunucu → Güncellemeler:** güncellemeler panelden bağımsız bir systemd biriminde çalışır (panel yeniden başlasa da yarıda kalmaz); paket kaldırılmaz, değiştirdiğiniz ayar dosyaları korunur. Docker paketleri ayrıca onaylanmadıkça güncellenmez (tüm container'lar yeniden başlar).
+- **Yeniden başlatma:** `YENIDEN-BASLAT` yazarak planlanır, iptal edilebilir; açıldıktan birkaç dakika sonra panel ne geri geldi/gelmedi raporunu bildirim olarak gönderir.
+- **Güvenlik** menüsü: SSH, UFW, beklenmeyen açık portlar, fail2ban, güncellemeler, 2FA, yedekler, SSL ve script bütünlüğü için tek sayfada denetim.
+- Silme, gizli bilgi gösterme, geri yükleme ve sunucu ayarları gibi işlemler son 10 dakikada kimlik doğrulaması ister (şifre ya da 2FA kodu).
 
 ## Güncelleme
 - **Panelden:** Ayarlar → Güncelleme → "vX.Y.Z sürümüne güncelle".

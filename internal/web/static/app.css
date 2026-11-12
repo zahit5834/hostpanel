@@ -215,3 +215,17 @@ svg.upstrip .up-none { fill: var(--border); }
 .uptime-pct.up-warn { color: var(--warn); }
 .uptime-pct.up-bad { color: var(--err); }
 .image-update { border-top: 1px solid var(--border); padding-top: 10px; }
+
+/* Faz 11: security audit / server tabs */
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+.badge.info { background: var(--run-bg); color: var(--run); }
+.audit-list { list-style: none; margin: 0; padding: 0; }
+.audit-list li { display: flex; gap: .75rem; align-items: baseline; padding: .55rem 0; border-bottom: 1px solid var(--border); }
+.audit-list li:last-child { border-bottom: 0; }
+.audit-list .what { flex: 1; min-width: 0; }
+.countdown { font-variant-numeric: tabular-nums; font-weight: 600; }
+pre.output { max-height: 24rem; overflow: auto; }
+.row-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.row-form select, .row-form input:not([type=checkbox]) { width: auto; }
+.notice-box { padding: 10px 14px; border-radius: 6px; margin-bottom: var(--gap); border: 1px solid var(--warn); background: var(--surface-2); }
+.narrow { max-width: 480px; }

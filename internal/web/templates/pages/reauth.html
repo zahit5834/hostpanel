@@ -1,0 +1,18 @@
+{{define "content"}}{{$d := .Data}}
+<section class="card narrow">
+<h1>Kimliğinizi doğrulayın</h1>
+{{if .Error}}<div class="alert err">{{.Error}}</div>{{end}}
+<p class="muted">Bu işlem kritik olduğu için son 10 dakika içinde kimlik doğrulaması gerekiyor.</p>
+<form method="post" action="/reauth" class="stack">
+  <input type="hidden" name="_csrf" value="{{.CSRF}}">
+  <input type="hidden" name="next" value="{{$d.Next}}">
+  {{if $d.TOTP}}
+  <label>Doğrulama kodu (ya da kurtarma kodu) <input name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus maxlength="11"></label>
+  {{else}}
+  <label>Şifre <input name="password" type="password" autocomplete="current-password" required autofocus></label>
+  {{end}}
+  <button type="submit" class="primary">Doğrula ve devam et</button>
+  <a href="{{$d.Next}}" class="muted small">Vazgeç</a>
+</form>
+</section>
+{{end}}

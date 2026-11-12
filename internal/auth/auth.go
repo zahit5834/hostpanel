@@ -33,6 +33,9 @@ const (
 	SessionIdle     = 12 * time.Hour
 	SessionAbsolute = 7 * 24 * time.Hour
 	MFAStageTTL     = 5 * time.Minute
+	// ElevatedFor is how long a login or a re-authentication unlocks critical
+	// actions (deletes, secret reveals, SSH/firewall changes …).
+	ElevatedFor = 10 * time.Minute
 )
 
 // Login rate limit: failures per IP inside the window.
@@ -61,12 +64,19 @@ type User struct {
 
 // Session is a logged-in browser.
 type Session struct {
-	UserID    int64
-	CSRF      string
-	Stage     string
-	IP        string
-	CreatedAt time.Time
+	IDHash        string // sha256 of the token: identifies the row, useless as a cookie
+	UserID        int64
+	CSRF          string
+	Stage         string
+	IP            string
+	UserAgent     string
+	CreatedAt     time.Time
+	LastSeen      time.Time
+	ElevatedUntil time.Time
 }
+
+// Elevated reports whether critical actions are unlocked right now.
+func (se *Session) Elevated(now time.Time) bool { return now.Before(se.ElevatedUntil) }
 
 // Service ties together users, sessions and 2FA.
 type Service struct {
@@ -187,8 +197,12 @@ func (s *Service) CreateSession(ctx context.Context, userID int64, stage, ip, ua
 	if len(ua) > 200 {
 		ua = ua[:200]
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(id_hash, user_id, csrf_token, stage, ip, user_agent, created_at, last_seen, expires_at)
-		VALUES(?,?,?,?,?,?,?,?,?)`, hashToken(tok), userID, RandomToken(32), stage, ip, ua, now.Unix(), now.Unix(), exp.Unix())
+	var elevated int64
+	if stage == StageFull {
+		elevated = now.Add(ElevatedFor).Unix() // the admin just proved who they are
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(id_hash, user_id, csrf_token, stage, ip, user_agent, created_at, last_seen, expires_at, elevated_until)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`, hashToken(tok), userID, RandomToken(32), stage, ip, ua, now.Unix(), now.Unix(), exp.Unix(), elevated)
 	return tok, err
 }
 
@@ -198,14 +212,15 @@ func (s *Service) LookupSession(ctx context.Context, tok string) (*Session, erro
 		return nil, sql.ErrNoRows
 	}
 	var se Session
-	var created, lastSeen, exp int64
-	err := s.db.QueryRowContext(ctx, `SELECT user_id, csrf_token, stage, ip, created_at, last_seen, expires_at FROM sessions WHERE id_hash=?`,
-		hashToken(tok)).Scan(&se.UserID, &se.CSRF, &se.Stage, &se.IP, &created, &lastSeen, &exp)
+	var created, lastSeen, exp, elevated int64
+	se.IDHash = hashToken(tok)
+	err := s.db.QueryRowContext(ctx, `SELECT user_id, csrf_token, stage, ip, user_agent, created_at, last_seen, expires_at, elevated_until
+		FROM sessions WHERE id_hash=?`, se.IDHash).Scan(&se.UserID, &se.CSRF, &se.Stage, &se.IP, &se.UserAgent, &created, &lastSeen, &exp, &elevated)
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now()
-	se.CreatedAt = time.Unix(created, 0)
+	se.CreatedAt, se.LastSeen, se.ElevatedUntil = time.Unix(created, 0), time.Unix(lastSeen, 0), time.Unix(elevated, 0)
 	if now.Unix() >= exp || now.Sub(se.CreatedAt) > SessionAbsolute {
 		s.DeleteSession(ctx, tok)
 		return nil, sql.ErrNoRows
@@ -228,6 +243,84 @@ func (s *Service) PromoteSession(ctx context.Context, oldTok string, se *Session
 // DeleteSession logs a session out.
 func (s *Service) DeleteSession(ctx context.Context, tok string) {
 	s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id_hash=?`, hashToken(tok))
+}
+
+// Elevate unlocks critical actions for ElevatedFor (after /reauth).
+func (s *Service) Elevate(ctx context.Context, idHash string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET elevated_until=? WHERE id_hash=? AND stage=?`,
+		time.Now().Add(ElevatedFor).Unix(), idHash, StageFull)
+	return err
+}
+
+// ListSessions returns the user's live full sessions, most recent first.
+func (s *Service) ListSessions(ctx context.Context, userID int64) ([]Session, error) {
+	now := time.Now()
+	rows, err := s.db.QueryContext(ctx, `SELECT id_hash, user_id, stage, ip, user_agent, created_at, last_seen, elevated_until
+		FROM sessions WHERE user_id=? AND stage=? AND expires_at>? AND created_at>? ORDER BY last_seen DESC`,
+		userID, StageFull, now.Unix(), now.Add(-SessionAbsolute).Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Session
+	for rows.Next() {
+		var se Session
+		var created, lastSeen, elevated int64
+		if err := rows.Scan(&se.IDHash, &se.UserID, &se.Stage, &se.IP, &se.UserAgent, &created, &lastSeen, &elevated); err != nil {
+			return nil, err
+		}
+		se.CreatedAt, se.LastSeen, se.ElevatedUntil = time.Unix(created, 0), time.Unix(lastSeen, 0), time.Unix(elevated, 0)
+		out = append(out, se)
+	}
+	return out, rows.Err()
+}
+
+// RevokeSession ends one session by its id hash; false when there was none.
+func (s *Service) RevokeSession(ctx context.Context, userID int64, idHash string) bool {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id_hash=? AND user_id=?`, idHash, userID)
+	if err != nil {
+		return false
+	}
+	n, _ := res.RowsAffected()
+	return n == 1
+}
+
+// RevokeOthers ends every session of the user except keep; returns how many.
+func (s *Service) RevokeOthers(ctx context.Context, userID int64, keep string) int {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=? AND id_hash<>?`, userID, keep)
+	if err != nil {
+		return 0
+	}
+	n, _ := res.RowsAffected()
+	return int(n)
+}
+
+// Attempt is one row of the login history.
+type Attempt struct {
+	TS      time.Time
+	IP      string
+	Success bool
+}
+
+// RecentAttempts returns the newest login attempts (failures are kept for a
+// day, successes for 180 days).
+func (s *Service) RecentAttempts(ctx context.Context, limit int) ([]Attempt, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT ts, ip, success FROM login_attempts ORDER BY ts DESC, id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Attempt
+	for rows.Next() {
+		var a Attempt
+		var ts int64
+		if err := rows.Scan(&ts, &a.IP, &a.Success); err != nil {
+			return nil, err
+		}
+		a.TS = time.Unix(ts, 0)
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 // PurgeExpired removes dead sessions and old login attempts.

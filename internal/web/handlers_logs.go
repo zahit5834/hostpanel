@@ -286,6 +286,7 @@ func (s *Server) selftestHandler(ctx context.Context, l *jobs.Log, _ map[string]
 // RegisterJobs binds job kinds owned by the web layer.
 func (s *Server) RegisterJobs() {
 	s.Jobs.Register("system.selftest", s.selftestHandler)
+	s.Jobs.Register("system.apt", s.aptJob)
 }
 
 func (s *Server) selftestStart(w http.ResponseWriter, r *http.Request) {

@@ -1130,3 +1130,178 @@ ensure_default_vhost() {
   fi
   install_vhost "$tmp" "$HP_DEFAULT_VHOST" "$HP_DEFAULT_VHOST_LINK" "varsayılan (catch-all)"
 }
+
+# ---------------------------------------------------------------------------
+# Server security (Faz 11): SSH, host fail2ban
+# ---------------------------------------------------------------------------
+
+# sshd uses the FIRST value it reads for most keywords and sshd_config includes
+# sshd_config.d/*.conf at its top: "00-" sorts before cloud-init's
+# 50-cloud-init.conf (which usually says PasswordAuthentication yes).
+SSH_DROPIN=${SSH_DROPIN:-/etc/ssh/sshd_config.d/00-hostpanel.conf}
+SSH_STATE_DIR=${SSH_STATE_DIR:-/var/lib/hostpanel-ssh}
+SSH_REVERT_UNIT=hostpanel-ssh-revert
+SSH_REVERT_SECS=180
+F2B_JAIL=${F2B_JAIL:-/etc/fail2ban/jail.d/hostpanel.conf}
+F2B_FILTER=${F2B_FILTER:-/etc/fail2ban/filter.d/hostpanel.conf}
+
+# render_sshd_dropin PASSWORD(yes|no) ROOT(no|prohibit-password|yes)
+render_sshd_dropin() {
+  validate_oneof "${1:-}" yes no
+  validate_oneof "${2:-}" no prohibit-password yes
+  cat <<CONF
+# HostPanel (hp-ssh.sh apply, Sunucu → SSH) — do not edit; the panel rewrites it.
+# sshd keeps the first value it reads, so this file sorts before 50-cloud-init.conf.
+PasswordAuthentication $1
+KbdInteractiveAuthentication no
+PermitRootLogin $2
+PubkeyAuthentication yes
+CONF
+}
+
+# validate_sys_user NAME — a login name (checked against the admin list by the caller).
+validate_sys_user() {
+  [[ ${1:-} =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "geçersiz kullanıcı adı: '${1:-}'"
+}
+
+# validate_fingerprint FP — OpenSSH SHA256 fingerprint.
+validate_fingerprint() {
+  [[ ${1:-} =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]] || die "geçersiz parmak izi: '${1:-}'"
+}
+
+# validate_pubkey LINE — prints the normalized "type base64 [comment]" line.
+# Lines with options (command=, from=, …) are refused: the panel adds plain keys only.
+validate_pubkey() {
+  local line=$1 t b c fp bits tmp
+  [[ ${#line} -le 16384 && $line != *$'\n'* && $line != *$'\r'* ]] || die "geçersiz anahtar satırı"
+  read -r t b c <<<"$line"
+  case $t in
+    ssh-ed25519 | ecdsa-sha2-nistp256 | ecdsa-sha2-nistp384 | ecdsa-sha2-nistp521 | ssh-rsa | \
+      sk-ssh-ed25519@openssh.com | sk-ecdsa-sha2-nistp256@openssh.com) ;;
+    *) die "desteklenmeyen anahtar türü (seçenekli satırlar kabul edilmez): '${t:0:40}'" ;;
+  esac
+  [[ ${#b} -ge 60 && $b =~ ^[A-Za-z0-9+/]+={0,3}$ ]] || die "geçersiz anahtar verisi"
+  [[ -z $c || $c =~ ^[A-Za-z0-9@._\ -]{1,100}$ ]] || die "geçersiz anahtar açıklaması (harf, rakam, @ . _ - ve boşluk)"
+  tmp=$(mktemp)
+  printf '%s %s\n' "$t" "$b" >"$tmp"
+  fp=$(ssh-keygen -lf "$tmp" 2>/dev/null) || {
+    rm -f -- "$tmp"
+    die "anahtar okunamadı (ssh-keygen)"
+  }
+  rm -f -- "$tmp"
+  bits=${fp%% *}
+  [[ $t != ssh-rsa ]] || ((bits >= 2048)) || die "RSA anahtarı en az 2048 bit olmalı"
+  printf '%s %s%s\n' "$t" "$b" "${c:+ $c}"
+}
+
+# key_fingerprint LINE — SHA256 fingerprint of one authorized_keys line ("" if not a key).
+key_fingerprint() {
+  local tmp fp
+  tmp=$(mktemp)
+  printf '%s\n' "$1" >"$tmp"
+  fp=$(ssh-keygen -lf "$tmp" 2>/dev/null | awk '{print $2}') || fp=""
+  rm -f -- "$tmp"
+  printf '%s' "$fp"
+}
+
+# render_f2b_jail ON MAXRETRY FINDTIME_MIN BANTIME_MIN RECIDIVE PORTS IGNORE...
+# The host jails: panel logins ([hostpanel], ON = its filter matched a sample
+# line), [sshd] and optionally [recidive] (repeat offenders, one week, all ports).
+render_f2b_jail() {
+  local on=$1 retry=$2 find=$3 ban=$4 rec=$5 ports=$6
+  shift 6
+  validate_oneof "$on" true false
+  validate_oneof "$rec" 0 1
+  [[ $retry =~ ^[0-9]{1,2}$ ]] && ((retry >= 3 && retry <= 20)) || die "geçersiz deneme sayısı: $retry"
+  [[ $find =~ ^[0-9]{1,4}$ ]] && ((find >= 5 && find <= 1440)) || die "geçersiz süre (findtime): $find"
+  [[ $ban =~ ^[0-9]{1,5}$ ]] && ((ban >= 10 && ban <= 10080)) || die "geçersiz ban süresi: $ban"
+  [[ $ports =~ ^[0-9]{1,5}(,[0-9]{1,5})*$ ]] || die "geçersiz port listesi: $ports"
+  local ign="127.0.0.1/8 ::1" ip
+  for ip in "$@"; do
+    validate_ip_or_cidr "$ip"
+    ign+=" $ip"
+  done
+  cat <<JAIL
+# HostPanel (install.sh / hp-ssh.sh f2b-config, Sunucu → fail2ban) — do not edit.
+# hp-config: maxretry=${retry} findtime=${find} bantime=${ban} recidive=${rec}
+[hostpanel]
+enabled  = ${on}
+filter   = hostpanel
+logpath  = /var/log/hostpanel/auth.log
+backend  = auto
+port     = ${ports}
+maxretry = ${retry}
+findtime = ${find}m
+bantime  = ${ban}m
+ignoreip = ${ign}
+
+[sshd]
+enabled  = true
+maxretry = ${retry}
+findtime = ${find}m
+bantime  = ${ban}m
+ignoreip = ${ign}
+JAIL
+  if [[ $rec == 1 ]]; then
+    cat <<JAIL
+
+[recidive]
+enabled  = true
+logpath  = /var/log/fail2ban.log
+banaction = %(banaction_allports)s
+findtime = 1d
+bantime  = 1w
+maxretry = 3
+ignoreip = ${ign}
+JAIL
+  fi
+}
+
+# write_f2b_filter — the panel-login filter; prints "true" when it matches a
+# sample line of /var/log/hostpanel/auth.log (otherwise the jail stays off).
+write_f2b_filter() {
+  install -d -m 0755 "$(dirname "$F2B_FILTER")" "$(dirname "$F2B_JAIL")"
+  cat >"$F2B_FILTER" <<'FILTER'
+# HostPanel panel logins (written by install.sh). Line format of
+# /var/log/hostpanel/auth.log: "<RFC3339> hostpanel: login failed ip=<IP> reason=<r>"
+[Definition]
+failregex = hostpanel: login failed ip=<HOST>(?:\s|$)
+ignoreregex =
+FILTER
+  local sample
+  sample="$(date -u +%Y-%m-%dT%H:%M:%SZ) hostpanel: login failed ip=192.0.2.10 reason=password"
+  if [[ $(fail2ban-regex "$sample" "$F2B_FILTER" 2>/dev/null) == *"Lines: 1 lines, 0 ignored, 1 matched"* ]]; then
+    echo true
+  else
+    echo false
+  fi
+}
+
+# f2b_ports — ports of the panel jail: 443 plus the configured panel port.
+f2b_ports() {
+  local p
+  p=$(config_value panel_port)
+  [[ $p =~ ^[0-9]{1,5}$ ]] || p=8443
+  if [[ $p == 443 ]]; then echo 443; else echo "${p},443"; fi
+}
+
+# f2b_current — "MAXRETRY FINDTIME BANTIME RECIDIVE" of the jail file (the
+# install.sh defaults 5 15 60 0 when the file predates the hp-config line).
+f2b_current() {
+  local line r=5 f=15 b=60 c=0
+  if [[ -f $F2B_JAIL ]]; then
+    line=$(grep -m1 '^# hp-config:' "$F2B_JAIL" || true)
+    [[ $line =~ maxretry=([0-9]+) ]] && r=${BASH_REMATCH[1]}
+    [[ $line =~ findtime=([0-9]+) ]] && f=${BASH_REMATCH[1]}
+    [[ $line =~ bantime=([0-9]+) ]] && b=${BASH_REMATCH[1]}
+    [[ $line =~ recidive=([01]) ]] && c=${BASH_REMATCH[1]}
+  fi
+  echo "$r $f $b $c"
+}
+
+# f2b_ignored — the extra ignoreip entries of the jail file (loopback left out), one per line.
+f2b_ignored() {
+  [[ -f $F2B_JAIL ]] || return 0
+  grep -m1 '^ignoreip' "$F2B_JAIL" | cut -d= -f2- | tr ' ' '\n' |
+    grep -vE '^(127\.0\.0\.1/8|::1|)$' || true
+}

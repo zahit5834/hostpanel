@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,20 +18,12 @@ import (
 	"github.com/zahit5834/hostpanel/internal/system"
 )
 
-// serverCache keeps slow, rarely changing server facts (apt-check takes a few
-// seconds, du can take minutes on a full disk).
+// serverCache keeps slow, rarely changing server facts (du can take minutes
+// on a full disk).
 type serverCache struct {
 	mu     sync.Mutex
-	apt    aptInfo
 	disk   diskInfo
 	diskMu sync.Mutex // one du at a time
-}
-
-type aptInfo struct {
-	At       time.Time
-	Total    int
-	Security int
-	Err      string
 }
 
 type diskInfo struct {
@@ -46,7 +39,6 @@ type diskPart struct {
 }
 
 const (
-	aptCacheTTL  = time.Hour
 	diskCacheTTL = 10 * time.Minute
 )
 
@@ -80,39 +72,6 @@ func (s *Server) unitStates(ctx context.Context) []unitState {
 		out[i] = unitState{u.Unit, u.Label, st}
 	}
 	return out
-}
-
-func (s *Server) aptStatus(ctx context.Context, refresh bool) aptInfo {
-	c := &s.srvInfo
-	c.mu.Lock()
-	cur := c.apt
-	c.mu.Unlock()
-	if !refresh && !cur.At.IsZero() && time.Since(cur.At) < aptCacheTTL {
-		return cur
-	}
-	// apt-check (update-notifier-common) reads the apt cache unprivileged and
-	// prints "<total>;<security>" on stderr.
-	res, err := s.Sites.Probe.Run(ctx, exec.Cmd{Name: "/usr/lib/update-notifier/apt-check", Timeout: time.Minute})
-	info := aptInfo{At: time.Now()}
-	raw := strings.TrimSpace(res.Stderr)
-	if i := strings.LastIndexByte(raw, '\n'); i >= 0 {
-		raw = raw[i+1:]
-	}
-	a, b, ok := strings.Cut(raw, ";")
-	t, e1 := strconv.Atoi(a)
-	sec, e2 := strconv.Atoi(b)
-	switch {
-	case ok && e1 == nil && e2 == nil:
-		info.Total, info.Security = t, sec
-	case err != nil:
-		info.Err = "apt-check çalıştırılamadı: " + err.Error()
-	default:
-		info.Err = "apt-check çıktısı anlaşılamadı"
-	}
-	c.mu.Lock()
-	c.apt = info
-	c.mu.Unlock()
-	return info
 }
 
 var diskLabels = []struct{ Key, Label string }{
@@ -199,31 +158,17 @@ func ufwText(st system.UFWStatus) string {
 	return b.String()
 }
 
-type serverData struct {
-	Units    []unitState
-	UFW      system.UFWStatus
-	UFWErr   string
-	Apt      aptInfo
-	Disk     diskInfo
-	DryRun   bool
-	Hostname string
-}
-
+// renderServer re-renders the UFW tab (its forms swap #ufw).
 func (s *Server) renderServer(w http.ResponseWriter, r *http.Request, status int, errMsg, notice string) {
-	d := serverData{Units: s.unitStates(r.Context()), DryRun: s.Cfg.DryRun, Hostname: system.Read().Hostname}
-	var err error
-	if d.UFW, err = s.ufwStatus(r.Context()); err != nil {
-		d.UFWErr = err.Error()
-	}
-	if isHX(r) && r.Header.Get("HX-Target") == "ufw" {
-		s.render(w, r, status, "server", "ufw", Page{Data: d, Error: errMsg, Notice: notice})
-		return
-	}
-	s.render(w, r, status, "server", "layout", Page{Title: "Sunucu", Nav: "server", Data: d, Error: errMsg, Notice: notice})
+	s.renderServerTab(w, r, status, "ufw", "ufw", errMsg, notice, nil)
 }
 
 func (s *Server) serverPage(w http.ResponseWriter, r *http.Request) {
-	s.renderServer(w, r, http.StatusOK, "", "")
+	tab := r.URL.Query().Get("tab")
+	if !slices.Contains(serverTabs, tab) {
+		tab = "general"
+	}
+	s.renderServerTab(w, r, http.StatusOK, tab, "", "", "", nil)
 }
 
 // serverPart renders the lazily loaded cards (hx-trigger="load").
@@ -231,11 +176,15 @@ func (s *Server) serverPart(w http.ResponseWriter, r *http.Request) {
 	refresh := r.URL.Query().Get("refresh") == "1"
 	var d serverData
 	block := ""
-	switch r.PathValue("part") {
-	case "apt":
-		d.Apt, block = s.aptStatus(r.Context(), refresh), "server-apt"
+	switch part := r.PathValue("part"); part {
 	case "disk":
 		d.Disk, block = s.diskUsage(r.Context(), refresh), "server-disk"
+	case "upd", "restart":
+		s.serverUpdatesPart(w, r, part)
+		return
+	case "ssh":
+		s.renderSSH(w, r, http.StatusOK, "", "")
+		return
 	default:
 		http.NotFound(w, r)
 		return
@@ -279,6 +228,7 @@ func (s *Server) ufwAdd(w http.ResponseWriter, r *http.Request) {
 		s.renderServer(w, r, http.StatusBadGateway, "Kural eklenemedi: "+helperErr(err), "")
 		return
 	}
+	s.securityAlert(r, "UFW kuralı eklendi", summary)
 	s.renderServer(w, r, http.StatusOK, "", "Kural eklendi.")
 }
 
@@ -313,6 +263,7 @@ func (s *Server) ufwDelete(w http.ResponseWriter, r *http.Request) {
 		s.renderServer(w, r, http.StatusBadGateway, "Kural silinemedi: "+helperErr(err), "")
 		return
 	}
+	s.securityAlert(r, "UFW kuralı silindi", rule.Line)
 	s.renderServer(w, r, http.StatusOK, "", "Kural silindi.")
 }
 

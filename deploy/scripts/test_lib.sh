@@ -448,5 +448,62 @@ rm -rf "$td"
 v=$(vhost ip "" 443)
 [[ $v == *"listen 443 ssl http2 default_server;"* ]] || { echo "FAIL ip panel on 443 must be the default server"; fail=1; }
 
+# --- Faz 11: SSH drop-in, keys, fail2ban jail
+v=$( (source ./lib.sh; render_sshd_dropin no prohibit-password) )
+for want in "PasswordAuthentication no" "KbdInteractiveAuthentication no" "PermitRootLogin prohibit-password" "PubkeyAuthentication yes"; do
+  [[ $v == *"$want"* ]] || { echo "FAIL sshd dropin misses: $want"; fail=1; }
+done
+bad render_sshd_dropin maybe no
+bad render_sshd_dropin no without-password
+ok  validate_sys_user ubuntu
+bad validate_sys_user "Ubuntu"
+bad validate_sys_user "a;b"
+ok  validate_fingerprint "SHA256:$(printf 'A%.0s' {1..43})"
+bad validate_fingerprint "SHA256:short"
+bad validate_fingerprint "MD5:aa:bb"
+kd=$(mktemp -d)
+ssh-keygen -q -t ed25519 -N '' -C 'admin@laptop' -f "$kd/k" >/dev/null
+ssh-keygen -q -t rsa -b 1024 -N '' -f "$kd/r" >/dev/null 2>&1 || true
+key=$(cat "$kd/k.pub")
+ok  validate_pubkey "$key"
+got=$( (source ./lib.sh; validate_pubkey "$key  ") )
+[[ $got == "$key" ]] || { echo "FAIL pubkey normalize: $got"; fail=1; }
+bad validate_pubkey "command=\"/bin/sh\" $key"
+bad validate_pubkey "from=\"1.2.3.4\" $key"
+bad validate_pubkey "ssh-dss AAAAB3NzaC1kc3MAAACBAP$(printf 'A%.0s' {1..80})"
+bad validate_pubkey "${key% *} bad\$comment"
+bad validate_pubkey "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI$(printf 'B%.0s' {1..60})"
+bad validate_pubkey "$key"$'\n'"$key"
+[[ -f $kd/r.pub ]] && bad validate_pubkey "$(cat "$kd/r.pub")"
+fp=$( (source ./lib.sh; key_fingerprint "$key") )
+[[ $fp == "$(ssh-keygen -lf "$kd/k.pub" | awk '{print $2}')" && $fp == SHA256:* ]] || { echo "FAIL key_fingerprint: $fp"; fail=1; }
+fp=$( (source ./lib.sh; key_fingerprint "# not a key") )
+[[ -z $fp ]] || { echo "FAIL key_fingerprint comment: $fp"; fail=1; }
+rm -rf "$kd"
+
+v=$( (source ./lib.sh; render_f2b_jail true 5 15 60 1 8443,443 203.0.113.5 10.0.0.0/8) )
+for want in "# hp-config: maxretry=5 findtime=15 bantime=60 recidive=1" "[hostpanel]" "enabled  = true" "port     = 8443,443" \
+  "[sshd]" "findtime = 15m" "bantime  = 60m" "ignoreip = 127.0.0.1/8 ::1 203.0.113.5 10.0.0.0/8" "[recidive]" "bantime  = 1w"; do
+  [[ $v == *"$want"* ]] || { echo "FAIL f2b jail misses: $want"; fail=1; }
+done
+v=$( (source ./lib.sh; render_f2b_jail false 3 5 10 0 443) )
+[[ $v != *recidive]* && $v == *"ignoreip = 127.0.0.1/8 ::1"$'\n'* ]] || { echo "FAIL f2b jail without recidive/ignore"; fail=1; }
+bad render_f2b_jail true 2 15 60 0 443
+bad render_f2b_jail true 5 4 60 0 443
+bad render_f2b_jail true 5 15 20000 0 443
+bad render_f2b_jail true 5 15 60 2 443
+bad render_f2b_jail true 5 15 60 0 "443;x"
+bad render_f2b_jail true 5 15 60 0 443 0.0.0.0/0
+bad render_f2b_jail true 5 15 60 0 443 "1.2.3.4 5.6.7.8"
+jd=$(mktemp -d)
+(source ./lib.sh; render_f2b_jail true 7 30 120 1 443 198.51.100.9) >"$jd/j.conf"
+cur=$( (F2B_JAIL=$jd/j.conf; source ./lib.sh; F2B_JAIL=$jd/j.conf; f2b_current) )
+[[ $cur == "7 30 120 1" ]] || { echo "FAIL f2b_current: $cur"; fail=1; }
+ign=$( (source ./lib.sh; F2B_JAIL=$jd/j.conf; f2b_ignored) )
+[[ $ign == 198.51.100.9 ]] || { echo "FAIL f2b_ignored: $ign"; fail=1; }
+cur=$( (source ./lib.sh; F2B_JAIL=$jd/none; f2b_current) )
+[[ $cur == "5 15 60 0" ]] || { echo "FAIL f2b_current default: $cur"; fail=1; }
+rm -rf "$jd"
+
 if [[ $fail -eq 0 ]]; then echo "lib.sh: tüm testler geçti"; fi
 exit $fail

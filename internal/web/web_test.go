@@ -30,6 +30,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/databases"
 	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/hostsec"
 	"github.com/zahit5834/hostpanel/internal/images"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
@@ -42,6 +43,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
 	"github.com/zahit5834/hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/sysmaint"
 	"github.com/zahit5834/hostpanel/internal/traffic"
 	"github.com/zahit5834/hostpanel/internal/update"
 )
@@ -130,6 +132,9 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 		Crons: &crons.Service{Store: crons.NewStore(db), Sites: svc, Runner: runner, Activity: act, Log: log,
 			ScriptsDir: cfg.ScriptsDir, DryRun: true, Notify: notifySvc.Send}, BaseCtx: ctx}
 	bkSvc.Crons = s.Crons
+	s.SSH = &hostsec.SSH{Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: true, AuthLog: filepath.Join(dir, "auth.log")}
+	s.F2B = &hostsec.Fail2ban{Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: true}
+	s.Sys = &sysmaint.Service{Runner: runner, Probe: runner, ScriptsDir: cfg.ScriptsDir, DryRun: true}
 	s.Traffic = &traffic.Service{DB: db, Sites: svc, Log: log}
 	// Container registries: local stand-ins (MCR tag list + Docker Hub tags).
 	reg2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

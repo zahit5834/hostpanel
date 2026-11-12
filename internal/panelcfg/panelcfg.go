@@ -93,6 +93,9 @@ var scrub = []string{
 	`UPDATE backup_plans SET enabled=0 WHERE scope='mail'`, // the mail server is installed again from the panel
 	`DELETE FROM settings WHERE key LIKE 'update\_%' ESCAPE '\'`,
 	`DELETE FROM settings WHERE key LIKE 'image\_%' ESCAPE '\'`,
+	// Faz 11: state of this server (boot ids, audit/integrity results, watches).
+	`DELETE FROM settings WHERE key LIKE 'security\_%' ESCAPE '\'`,
+	`DELETE FROM settings WHERE key IN ('last_boot_id','reboot_planned_boot_id','oom_checked_at','ssh_watch_since','transfer_exported_at')`,
 }
 
 // ExportOptions are the panel paths and identity for Export.

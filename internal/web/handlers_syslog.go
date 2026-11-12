@@ -41,6 +41,7 @@ var systemSources = []sysSource{
 	{ID: "ssl-renewals", Label: "SSL yenileme kayıtları"},
 	{ID: "rclone", Label: "rclone (Drive aktarımları)"},
 	{ID: "update", Label: "Panel güncelleme"},
+	{ID: "apt", Label: "Sistem güncellemeleri (apt)"},
 	{ID: "docker", Label: "Docker servisi", Unit: "docker.service"},
 	{ID: "mssql", Label: "MSSQL container"},
 	{ID: "postgres", Label: "PostgreSQL container"},
@@ -112,6 +113,8 @@ func (s *Server) parseSysQuery(ctx context.Context, q url.Values) sysQuery {
 		sq.Path = s.Cfg.RcloneLogPath()
 	case "update":
 		sq.Path = s.Cfg.UpdateLogPath()
+	case "apt":
+		sq.Path = s.Cfg.AptLogPath()
 	case "fail2ban":
 		sq.Path = "/var/log/fail2ban.log"
 	case "sshauth":

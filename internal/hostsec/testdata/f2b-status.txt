@@ -1,0 +1,34 @@
+installed=1
+active=1
+config=5 15 60 1
+ignore=198.51.100.7
+--- jail hostpanel
+Status for the jail: hostpanel
+|- Filter
+|  |- Currently failed:	0
+|  |- Total failed:	0
+|  `- File list:	/var/log/hostpanel/auth.log
+`- Actions
+   |- Currently banned:	2
+   |- Total banned:	2
+   `- Banned IP list:	2001:db8::5 192.0.2.44
+--- jail recidive
+Status for the jail: recidive
+|- Filter
+|  |- Currently failed:	3
+|  |- Total failed:	3
+|  `- File list:	/var/log/fail2ban.log
+`- Actions
+   |- Currently banned:	0
+   |- Total banned:	0
+   `- Banned IP list:	
+--- jail sshd
+Status for the jail: sshd
+|- Filter
+|  |- Currently failed:	0
+|  |- Total failed:	0
+|  `- File list:	/var/log/auth.log
+`- Actions
+   |- Currently banned:	1
+   |- Total banned:	1
+   `- Banned IP list:	203.0.113.9

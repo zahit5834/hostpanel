@@ -69,5 +69,31 @@
   </form>
 </section>
 </div>
+
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Açık oturumlar</h2>
+    {{if gt (len .Sessions) 1}}<form method="post" action="/settings/sessions/others/revoke"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" class="link-btn danger">Diğer tüm oturumları kapat</button></form>{{end}}</div>
+  <table class="table compact">
+    <thead><tr><th>Cihaz</th><th>IP</th><th>Açıldı</th><th>Son etkinlik</th><th></th></tr></thead>
+    <tbody>{{range .Sessions}}<tr>
+      <td>{{.Browser}}{{if .Current}} <span class="badge success">bu cihaz</span>{{end}}</td><td><code>{{.IP}}</code></td>
+      <td class="small nowrap">{{datetime .CreatedAt}}</td><td class="small nowrap">{{ago .LastSeen}}</td>
+      <td class="right">{{if not .Current}}<form method="post" action="/settings/sessions/{{.IDHash}}/revoke"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit" class="link-btn danger">Kapat</button></form>{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table>
+</section>
+
+<section class="card table-wrap">
+  <div class="card-head pad"><h2>Giriş geçmişi <span class="muted small">son 50 deneme</span></h2></div>
+  <table class="table compact">
+    <thead><tr><th>Zaman</th><th>IP</th><th>Sonuç</th></tr></thead>
+    <tbody>{{range .Attempts}}<tr>
+      <td class="small nowrap">{{datetime .TS}}</td>
+      <td><code>{{.IP}}</code>{{if not .Known}} <span class="badge warn">yeni IP</span>{{end}}</td>
+      <td>{{if .Success}}<span class="badge success">başarılı</span>{{else}}<span class="badge failed">başarısız</span>{{end}}</td>
+    </tr>{{else}}<tr><td colspan="3" class="muted">Kayıt yok.</td></tr>{{end}}</tbody>
+  </table>
+  <p class="muted small pad">"yeni IP": başarılı girişlerin son 20 IP'si arasında olmayan adres. Başarısız denemeler fail2ban'ın <code>hostpanel</code> jail'ine de düşer.</p>
+</section>
 {{end}}
 {{end}}

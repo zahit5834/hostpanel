@@ -305,49 +305,26 @@ setup_firewall() {
 }
 
 setup_fail2ban() {
-  local ign="127.0.0.1/8 ::1" ip
+  local ip on cur ign=() x
   ip=$(client_ip)
-  [[ -n $ip ]] && ign+=" $ip"
-  install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
-  cat >/etc/fail2ban/filter.d/hostpanel.conf <<'FILTER'
-# HostPanel panel logins (written by install.sh). Line format of
-# /var/log/hostpanel/auth.log: "<RFC3339> hostpanel: login failed ip=<IP> reason=<r>"
-[Definition]
-failregex = hostpanel: login failed ip=<HOST>(?:\s|$)
-ignoreregex =
-FILTER
-  # The filter must match a real line before the jail is trusted.
-  local sample on=true
-  sample="$(date -u +%Y-%m-%dT%H:%M:%SZ) hostpanel: login failed ip=192.0.2.10 reason=password"
-  if [[ $(fail2ban-regex "$sample" /etc/fail2ban/filter.d/hostpanel.conf 2>/dev/null) != *"Lines: 1 lines, 0 ignored, 1 matched"* ]]; then
-    warn "fail2ban filtresi örnek satırı eşleştirmedi; hostpanel jail'i kapalı yazıldı"
-    on=false
+  on=$(write_f2b_filter)
+  [[ $on == true ]] || warn "fail2ban filtresi örnek satırı eşleştirmedi; hostpanel jail'i kapalı yazıldı"
+  # A rerun keeps what was set in Sunucu → fail2ban and only adds this admin's IP.
+  read -r -a cur <<<"$(f2b_current)"
+  while read -r x; do [[ -n $x ]] && ign+=("$x"); done < <(f2b_ignored)
+  local have=0
+  for x in "${ign[@]}"; do [[ $x == "$ip" ]] && have=1; done
+  if [[ -n $ip && $ip != 127.* && $ip != ::1 ]] && ((!have)); then
+    ign+=("$ip")
   fi
-  local f2b_ports="443"
-  [[ $PORT == 443 ]] || f2b_ports="${PORT},443"
-  cat >/etc/fail2ban/jail.d/hostpanel.conf <<JAIL
-# HostPanel (written by install.sh). ignoreip keeps the installing admin's
-# address from being locked out; edit if that address changes.
-[hostpanel]
-enabled  = ${on}
-filter   = hostpanel
-logpath  = /var/log/hostpanel/auth.log
-backend  = auto
-port     = ${f2b_ports}
-maxretry = 5
-findtime = 15m
-bantime  = 1h
-ignoreip = ${ign}
-
-[sshd]
-enabled  = true
-ignoreip = ${ign}
-JAIL
+  local jports="443"
+  [[ $PORT == 443 ]] || jports="${PORT},443"
+  render_f2b_jail "$on" "${cur[0]}" "${cur[1]}" "${cur[2]}" "${cur[3]}" "$jports" "${ign[@]}" >"$F2B_JAIL"
   [[ -f /var/log/hostpanel/auth.log ]] || install -o hostpanel -g hostpanel -m 0640 /dev/null /var/log/hostpanel/auth.log
   if fail2ban-client -t >/dev/null 2>&1; then
     systemctl enable fail2ban >/dev/null 2>&1 || true
     systemctl restart fail2ban
-    say "fail2ban: sshd + hostpanel jail'leri (muaf: ${ign})"
+    say "fail2ban: sshd + hostpanel jail'leri (muaf: 127.0.0.1/8 ::1 ${ign[*]})"
   else
     warn "fail2ban yapılandırma testi başarısız; servis yeniden başlatılmadı (fail2ban-client -t)"
   fi

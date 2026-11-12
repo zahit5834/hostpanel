@@ -133,6 +133,9 @@ func (c Config) AuthLogPath() string { return filepath.Join(c.LogDir, "auth.log"
 func (c Config) RenewLogPath() string { return filepath.Join(c.RootLogDir, "ssl-renewals.log") }
 
 // UpdateLogPath is hp-update.sh's progress log (root).
+// AptLogPath is where hp-system.sh apt-run tees apt's output.
+func (c Config) AptLogPath() string { return filepath.Join(c.RootLogDir, "apt.log") }
+
 func (c Config) UpdateLogPath() string { return filepath.Join(c.RootLogDir, "update.log") }
 
 // RcloneLogPath mirrors rclone's log from hp-backup.sh (root).

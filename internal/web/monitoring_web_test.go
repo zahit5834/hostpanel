@@ -73,10 +73,14 @@ func TestMonitoringDryRun(t *testing.T) {
 
 	// --- server page (dry-run sample UFW rules) ---
 	code, body = w.get("/server", false)
-	if code != 200 || !strings.Contains(body, "OpenSSH") || !strings.Contains(body, "korumalı") || !strings.Contains(body, "nginx") {
+	if code != 200 || !strings.Contains(body, "Bellek planı") || !strings.Contains(body, "nginx") {
 		t.Fatalf("server %d", code)
 	}
-	for _, p := range []string{"/server/part/apt", "/server/part/disk"} {
+	code, body = w.get("/server?tab=ufw", false)
+	if code != 200 || !strings.Contains(body, "OpenSSH") || !strings.Contains(body, "korumalı") {
+		t.Fatalf("server ufw %d", code)
+	}
+	for _, p := range []string{"/server/part/upd", "/server/part/restart", "/server/part/disk", "/server/part/ssh"} {
 		if code, _ := w.get(p, true); code != 200 {
 			t.Fatalf("%s %d", p, code)
 		}

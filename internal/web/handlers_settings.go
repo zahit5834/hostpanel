@@ -17,6 +17,8 @@ type securityData struct {
 	ClientIP      string
 	Setup         *auth.TOTPSetup
 	RecoveryCodes []string
+	Sessions      []sessionRow
+	Attempts      []attemptRow
 }
 
 func (s *Server) securityData(r *http.Request) (securityData, error) {
@@ -24,13 +26,15 @@ func (s *Server) securityData(r *http.Request) (securityData, error) {
 	if err != nil {
 		return securityData{}, err
 	}
-	return securityData{
+	d := securityData{
 		Username:     u.Username,
 		TOTPEnabled:  u.TOTPEnabled,
 		RecoveryLeft: s.Auth.RecoveryCodesLeft(r.Context()),
 		Allowlist:    store.GetSetting(r.Context(), s.DB, "ip_allowlist", ""),
 		ClientIP:     clientIP(r),
-	}, nil
+	}
+	d.Sessions, d.Attempts = s.sessionsData(r)
+	return d, nil
 }
 
 func (s *Server) renderSecurity(w http.ResponseWriter, r *http.Request, status int, d securityData, errMsg, notice string) {
@@ -120,6 +124,7 @@ func (s *Server) totpDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Activity.Record(r.Context(), logs.Entry{Action: "settings.2fa.disable", Summary: "İki adımlı doğrulama kapatıldı"}, nil)
+	s.securityAlert(r, "Panelde iki adımlı doğrulama kapatıldı", "Ayarlar → Güvenlik'ten kapatıldı.")
 	http.Redirect(w, r, "/settings/security", http.StatusSeeOther)
 }
 

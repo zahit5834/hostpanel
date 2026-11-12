@@ -367,3 +367,21 @@ func (s *smtpServer) serve(conn net.Conn, mode string, tlsConf *tls.Config) {
 		}
 	}
 }
+
+// Faz 11 kinds are switched on for a selection saved before they existed, and
+// stay off once the admin saves a selection without them.
+func TestNewKindsDefaultOn(t *testing.T) {
+	s, db := newSvc(t)
+	ctx := context.Background()
+	store.SetSetting(ctx, db, setKinds, `["disk.high"]`) // saved by an older version (no known list)
+	c := s.Load(ctx)
+	if !c.Enabled(KindSecurity) || !c.Enabled(KindSystem) || !c.Enabled(KindDisk) || c.Enabled(KindSiteStatus) {
+		t.Fatalf("%v", c.Kinds)
+	}
+	if err := s.Save(ctx, Input{Kinds: []string{KindDisk}, SMTPPort: 587}); err != nil {
+		t.Fatal(err)
+	}
+	if c = s.Load(ctx); c.Enabled(KindSecurity) || c.Enabled(KindSystem) || !c.Enabled(KindDisk) {
+		t.Fatalf("after save: %v", c.Kinds)
+	}
+}

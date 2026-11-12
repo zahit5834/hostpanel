@@ -10,6 +10,7 @@ import (
 
 	"github.com/zahit5834/hostpanel/internal/logs"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
+	"github.com/zahit5834/hostpanel/internal/store"
 	"github.com/zahit5834/hostpanel/internal/update"
 )
 
@@ -90,6 +91,7 @@ func (s *Server) transferExport(w http.ResponseWriter, r *http.Request) {
 	s.Activity.Record(r.Context(), logs.Entry{Action: "panel.export", TargetType: "panel",
 		Summary: fmt.Sprintf("Panel yapılandırması dışa aktarıldı (%d müşteri, %d plan)", man.Customers, man.Plans)},
 		map[string]any{"customers": man.Customers, "plans": man.Plans, "runtimes": man.Runtimes, "bytes": buf.Len()})
+	store.SetSetting(r.Context(), s.DB, setTransferExported, strconv.FormatInt(time.Now().Unix(), 10)) // security audit
 	name := fmt.Sprintf("hostpanel-config-%s-%s.hpcfg", safeFileName(man.Server), time.Now().Format("20060102-1504"))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)

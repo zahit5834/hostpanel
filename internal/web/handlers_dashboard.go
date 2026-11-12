@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
+	"github.com/zahit5834/hostpanel/internal/store"
 	"github.com/zahit5834/hostpanel/internal/system"
 )
 
@@ -151,6 +153,22 @@ func (s *Server) dashboardAlerts(ctx context.Context, snap system.Snapshot, rows
 	for _, b := range failed {
 		out = append(out, alert{Text: b.Domain + ": yedek başarısız (" + b.CreatedAt.Format("02.01 15:04") + ")",
 			Link: "/backups", Detail: b.Error})
+	}
+	if p := s.memoryPlan(ctx); p.Over() {
+		out = append(out, alert{Text: fmt.Sprintf("Bellek sınırlarının toplamı fiziksel RAM'i aşıyor (%d / %d MB)", p.ReservedMB, p.TotalMB),
+			Link: "/server?tab=general", Detail: "Hepsi aynı anda sınırına yaklaşırsa çekirdek süreç öldürür."})
+	}
+	for _, e := range s.recentOOM(ctx) {
+		out = append(out, alert{Text: "Bellek yetersizliği: " + e.Summary + " (" + e.TS.Format("02.01 15:04") + ")", Link: "/server?tab=general"})
+	}
+	if s.Sys != nil {
+		if ri := s.Sys.Reboot(ctx); ri.Required && ri.Scheduled.IsZero() {
+			out = append(out, alert{Text: "Sunucunun yeniden başlatılması gerekiyor", Link: "/server?tab=updates",
+				Detail: strings.Join(ri.Pkgs, ", ")})
+		}
+	}
+	if store.GetSetting(ctx, s.DB, setIntegrityKey, "") != "" {
+		out = append(out, alert{Text: "Kurulu root script'leri bu sürümden farklı", Link: "/security"})
 	}
 	return out
 }

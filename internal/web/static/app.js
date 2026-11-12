@@ -134,6 +134,33 @@
       };
     });
 
+    // SSH change countdown: data-deadline = unix seconds; reloads the page
+    // when it reaches zero so the reverted state shows.
+    window.Alpine.data("countdown", function () {
+      return {
+        left: 0,
+        timer: null,
+        init: function () {
+          var self = this;
+          var end = parseInt(this.$el.dataset.deadline, 10) * 1000;
+          var tick = function () {
+            self.left = Math.max(0, Math.round((end - Date.now()) / 1000));
+            if (self.left === 0) {
+              clearInterval(self.timer);
+              setTimeout(function () { window.location.reload(); }, 2500);
+            }
+          };
+          tick();
+          this.timer = setInterval(tick, 1000);
+        },
+        destroy: function () { clearInterval(this.timer); },
+        get text() {
+          var m = Math.floor(this.left / 60), s = this.left % 60;
+          return m + ":" + (s < 10 ? "0" : "") + s;
+        }
+      };
+    });
+
     window.Alpine.data("copy", function () {
       return {
         label: "Kopyala",

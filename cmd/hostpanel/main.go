@@ -31,6 +31,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/databases"
 	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/hostsec"
 	"github.com/zahit5834/hostpanel/internal/images"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
@@ -43,6 +44,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
 	"github.com/zahit5834/hostpanel/internal/store"
+	"github.com/zahit5834/hostpanel/internal/sysmaint"
 	"github.com/zahit5834/hostpanel/internal/system"
 	"github.com/zahit5834/hostpanel/internal/traffic"
 	"github.com/zahit5834/hostpanel/internal/update"
@@ -280,7 +282,12 @@ func serve(args []string) error {
 	srv := &web.Server{Cfg: cfg, DB: a.db, Auth: a.auth, Activity: activity, Jobs: jm, Runner: runner, Log: log, Version: version,
 		Customers: customers.New(a.db), Sites: siteSvc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, PG: pgSvc, Backups: bkSvc,
 		Monitor: monSvc, Notify: notifySvc, Crons: cronSvc, Update: updSvc, DNS: dnsSvc, Mail: mailSvc,
-		Traffic: trafficSvc, Images: imgSvc, Idle: idle}
+		Traffic: trafficSvc, Images: imgSvc, Idle: idle,
+		SSH: &hostsec.SSH{Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun},
+		F2B: &hostsec.Fail2ban{Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun},
+		Sys: &sysmaint.Service{Runner: runner, Probe: probe, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun}}
+	// Cheap checks that ride on the monitor's 10-minute step (no new timer).
+	monSvc.Periodic = []func(context.Context){srv.OOMCheck, srv.SSHWatch, srv.CLIWatch}
 	srv.ExportConfig = func(ctx context.Context, pass string, w io.Writer) (panelcfg.Manifest, error) {
 		server := store.GetSetting(ctx, a.db, "backup_server_name", "")
 		if server == "" {
@@ -311,6 +318,15 @@ func serve(args []string) error {
 	if !cfg.DryRun { // dry-run has no real containers to compare with
 		daily = append(daily, func(ctx context.Context) { imgSvc.Check(ctx) })
 	}
+	if !cfg.Dev { // dev reads deploy/ straight from the repo (test files, no unit)
+		daily = append(daily, func(ctx context.Context) { srv.IntegrityCheck(ctx) })
+	}
+	daily = append(daily, srv.AuditNotify,
+		// Maintenance is neither a request nor a job: hand its garbage back too.
+		func(context.Context) { idle.Touch() })
+	// The boot report waits until sites and containers had time to come up.
+	bootTimer := time.AfterFunc(3*time.Minute, func() { srv.BootReport(jobCtx) })
+	defer bootTimer.Stop()
 	go maintenance(ctx, a, activity, jm, sslSvc, dbSvc, pgSvc, cronSvc, updSvc, log, daily)
 	go bkSvc.RunScheduler(jobCtx)
 	go notifySvc.Run(jobCtx)
@@ -422,7 +438,7 @@ func admin(args []string) error {
 		if err := a.auth.SetAdminPassword(ctx, *username, pw); err != nil {
 			return err
 		}
-		activity.Record(ctx, logs.Entry{Action: "settings.password", Summary: "Admin şifresi CLI ile sıfırlandı"}, nil)
+		activity.Record(ctx, logs.Entry{Action: "admin.reset-password", Summary: "Admin şifresi CLI ile sıfırlandı (" + *username + ")"}, nil)
 		fmt.Printf("Kullanıcı: %s\nŞifre:     %s\n", *username, pw)
 	case "init":
 		if _, err := a.auth.Admin(ctx); err == nil {
@@ -441,7 +457,7 @@ func admin(args []string) error {
 		if err := a.auth.DisableTOTP(ctx); err != nil {
 			return err
 		}
-		activity.Record(ctx, logs.Entry{Action: "settings.2fa.disable", Summary: "2FA CLI ile kapatıldı"}, nil)
+		activity.Record(ctx, logs.Entry{Action: "admin.disable-2fa", Summary: "2FA CLI ile kapatıldı"}, nil)
 		fmt.Println("İki adımlı doğrulama kapatıldı.")
 	default:
 		return fmt.Errorf("bilinmeyen admin komutu: %s", sub)

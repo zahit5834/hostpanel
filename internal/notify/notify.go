@@ -36,6 +36,8 @@ const (
 	KindLoginNewIP  = "login.newip"
 	KindCron        = "cron.failed"
 	KindUpdate      = "panel.update"
+	KindSecurity    = "security" // SSH/UFW/fail2ban changes, script integrity, audit findings
+	KindSystem      = "system"   // reboot, OOM, memory, OS updates
 	KindTest        = "test"
 )
 
@@ -48,12 +50,20 @@ var Kinds = []struct{ ID, Label string }{
 	{KindDisk, "Disk %85 üzeri"},
 	{KindCron, "Site cron görevi başarısız"},
 	{KindUpdate, "Panel ve container güncellemeleri (yeni sürüm / sonuç)"},
+	{KindSecurity, "Güvenlik: SSH/UFW/fail2ban değişiklikleri, script bütünlüğü, denetim bulguları"},
+	{KindSystem, "Sunucu: yeniden başlatma, bellek yetersizliği (OOM), sistem güncellemeleri"},
 	{KindLoginFailed, "Başarısız panel girişi"},
 	{KindLoginNewIP, "Yeni IP'den panel girişi"},
 }
 
 // DefaultKinds are enabled until the admin changes the selection.
-var DefaultKinds = []string{KindSiteStatus, KindRestarting, KindSSLExpiring, KindBackup, KindDisk, KindCron, KindUpdate, KindLoginNewIP}
+var DefaultKinds = []string{KindSiteStatus, KindRestarting, KindSSLExpiring, KindBackup, KindDisk, KindCron, KindUpdate, KindLoginNewIP,
+	KindSecurity, KindSystem}
+
+// legacyKnown are the kinds that existed before setKnown was stored (Faz 11):
+// a saved selection that predates a default kind gets it switched on.
+var legacyKnown = []string{KindSiteStatus, KindRestarting, KindSSLExpiring, KindBackup, KindDisk, KindCron, KindUpdate,
+	KindLoginFailed, KindLoginNewIP}
 
 // Event is one notification.
 type Event struct {
@@ -81,6 +91,7 @@ const (
 	setSMFrom     = "notify_smtp_from"
 	setSMTo       = "notify_smtp_to"
 	setKinds      = "notify_kinds"
+	setKnown      = "notify_kinds_known" // kinds that existed when the selection was saved
 	setKnownIPs   = "notify_known_ips"
 	maxKnownIPs   = 20
 	sendTimeout   = 15 * time.Second
@@ -157,6 +168,16 @@ func (s *Service) Load(ctx context.Context) Config {
 	}
 	if raw := s.get(ctx, setKinds, ""); raw != "" {
 		json.Unmarshal([]byte(raw), &c.Kinds)
+		known := legacyKnown
+		if kr := s.get(ctx, setKnown, ""); kr != "" {
+			known = nil
+			json.Unmarshal([]byte(kr), &known)
+		}
+		for _, k := range DefaultKinds {
+			if !slices.Contains(known, k) && !slices.Contains(c.Kinds, k) {
+				c.Kinds = append(c.Kinds, k) // added after the admin's last save
+			}
+		}
 	} else {
 		c.Kinds = DefaultKinds
 	}
@@ -235,10 +256,15 @@ func (s *Service) Save(ctx context.Context, in Input) error {
 		kinds = []string{}
 	}
 	kj, _ := json.Marshal(kinds)
+	all := make([]string, len(Kinds))
+	for i, k := range Kinds {
+		all[i] = k.ID
+	}
+	known, _ := json.Marshal(all)
 	vals := map[string]string{
 		setTGEnabled: b01(in.TelegramOn), setTGChat: in.TelegramChat,
 		setSMEnabled: b01(in.SMTPOn), setSMHost: in.SMTPHost, setSMPort: strconv.Itoa(in.SMTPPort), setSMUser: in.SMTPUser,
-		setSMFrom: in.SMTPFrom, setSMTo: in.SMTPTo, setKinds: string(kj),
+		setSMFrom: in.SMTPFrom, setSMTo: in.SMTPTo, setKinds: string(kj), setKnown: string(known),
 	}
 	if in.TelegramToken != "" {
 		v, err := s.Box.SealString(in.TelegramToken)
