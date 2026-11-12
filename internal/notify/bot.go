@@ -81,7 +81,7 @@ func (s *Service) RunBot(ctx context.Context, h BotHandler) {
 			// commands were off: offset -1 returns only the newest update.
 			ups, err := s.getUpdates(ctx, c.TelegramToken, -1, 0)
 			if err == nil {
-				offset = 0
+				// Nothing newer queued: keep the offset already confirmed.
 				if len(ups) > 0 {
 					offset = ups[len(ups)-1].UpdateID + 1
 				}

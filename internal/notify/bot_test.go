@@ -117,8 +117,17 @@ func TestBotOnlyAnswersOwnChat(t *testing.T) {
 	if len(api.sent) != 2 || api.sentTo[0] != "42" || !strings.Contains(api.sent[0], "yanıt: durum") {
 		t.Fatalf("sent %q to %q", api.sent, api.sentTo)
 	}
-	if api.offsets[0] != "-1" || api.offsets[1] != "6" {
+	// The queued update (5) is skipped: the start polls with -1 and update 5
+	// never reached the handler (cmds above). Arrival order of the requests
+	// at the fake server is not fixed (an aborted poll may land late), so no
+	// offset other than -1 and ≥6 may appear at all.
+	if api.offsets[0] != "-1" {
 		t.Fatalf("offsets %v (queued update must be skipped)", api.offsets)
+	}
+	for _, o := range api.offsets {
+		if o != "-1" && o != "6" && o != "12" {
+			t.Fatalf("offsets %v", api.offsets)
+		}
 	}
 }
 
