@@ -261,7 +261,7 @@ func TestSSLLifecycleDryRun(t *testing.T) {
 		t.Fatalf("remove log:\n%s", l)
 	}
 	conf, _ = s.Sites.RenderNginxFor(site)
-	if strings.Contains(conf, "443") {
+	if strings.Contains(conf, "listen 443") {
 		t.Fatalf("nginx still TLS:\n%s", conf)
 	}
 
