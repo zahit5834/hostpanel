@@ -100,12 +100,12 @@ func TestParsers(t *testing.T) {
 
 func TestRecords(t *testing.T) {
 	d := Domain{Name: "ornek.com", DKIMSelector: "mail", DKIMTXT: fakeDKIM("ornek.com")}
-	rs := Records(d, "mail.ornek.com")
-	if len(rs) != 4 || rs[0].Value != "10 mail.ornek.com." || rs[2].Name != "mail._domainkey.ornek.com" || rs[3].Name != "_dmarc.ornek.com" {
+	rs := Records(d, "mail.ornek.com", "")
+	if len(rs) != 8 || rs[7].Value != "0 1 587 mail.ornek.com." || rs[0].Value != "10 mail.ornek.com." || rs[2].Name != "mail._domainkey.ornek.com" || rs[3].Name != "_dmarc.ornek.com" {
 		t.Fatalf("%+v", rs)
 	}
 	d.DKIMTXT = ""
-	if len(Records(d, "mail.ornek.com")) != 3 {
+	if len(Records(d, "mail.ornek.com", "")) != 7 {
 		t.Fatal("dkim without key")
 	}
 }

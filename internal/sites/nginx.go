@@ -159,6 +159,11 @@ func NginxDataFor(s Site, def *runtimes.Definition, mode, templatesDir string) N
 	default:
 		d.ServerNames = append([]string{s.Domain, s.WWWName()}, s.Aliases...)
 	}
+	if s.Wildcard {
+		// Exact names (other sites, the mail host, the panel) still win: nginx
+		// checks exact server_names before wildcard ones.
+		d.ServerNames = append(d.ServerNames, s.WildcardName())
+	}
 	return d
 }
 

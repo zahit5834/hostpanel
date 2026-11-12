@@ -409,19 +409,116 @@ mailtest() { (
 # Not "mailtest || …": set -e is ignored inside a tested command.
 mailtest
 [[ $? -eq 0 ]] || { echo "FAIL mail account/alias/quota file functions"; fail=1; }
+tm2=$(mktemp -d)
+mailops() { (
+  source ./lib.sh
+  MAIL_FILE_OWNER="$(id -u):$(id -g)"
+  set -e
+  A=$tm2/acc V=$tm2/virt Q=$tm2/q R=$tm2/rspamd/override.d
+  h=$(printf 'parola12345' | openssl passwd -6 -stdin)
+  mail_account_set "$A" ali@ornek.com "$h"
+  mail_account_set "$A" veli@ornek.com "$h"
+  mail_account_set "$A" can@diger.com "$h"
+  mail_alias_add "$V" info@ornek.com ali@ornek.com
+  # Suspension: nologin=y survives a password reset, list shows it.
+  mail_rspamd_base "$R"
+  mail_account_nologin "$A" ali@ornek.com on
+  mail_map_set "$R/$MAIL_SUSPENDED" ali@ornek.com on
+  mail_map_set "$R/$MAIL_SUSPENDED" ali@ornek.com on
+  [[ $(grep -c . "$R/$MAIL_SUSPENDED") == 1 ]]
+  mail_account_set "$A" ali@ornek.com "$h"
+  grep -q '^ali@ornek.com|{SHA512-CRYPT}[^|]*|nologin=y$' "$A"
+  mail_map_set "$R/$MAIL_SEND_BLOCKED" veli@ornek.com on
+  out=$(mail_list "$A" "$V" "$Q" "$R/$MAIL_SUSPENDED" "$R/$MAIL_SEND_BLOCKED")
+  [[ $out == *"account ali@ornek.com 0 suspended"* && $out == *"account veli@ornek.com 0 blocked"* && $out == *"account can@diger.com 0 -"* ]]
+  mail_account_nologin "$A" ali@ornek.com off
+  if grep -q nologin "$A"; then exit 1; fi
+  # Catch-all: identity lines for every account of that domain only, hidden from list.
+  mail_catchall_set "$A" "$V" ornek.com veli@ornek.com
+  grep -qx '@ornek.com veli@ornek.com' "$V"
+  grep -qx 'ali@ornek.com ali@ornek.com' "$V"
+  grep -qx 'veli@ornek.com veli@ornek.com' "$V"
+  if grep -q 'can@diger.com can@diger.com' "$V"; then exit 1; fi
+  grep -qx 'info@ornek.com ali@ornek.com' "$V"
+  out=$(mail_list "$A" "$V" "$Q")
+  [[ $out == *"catchall ornek.com veli@ornek.com"* && $out != *"alias ali@ornek.com"* && $out != *"alias @"* ]]
+  if mail_has_alias "$V" ali@ornek.com; then exit 1; fi
+  mail_account_set "$A" yeni@ornek.com "$h"
+  mail_catchall_sync "$A" "$V"
+  grep -qx 'yeni@ornek.com yeni@ornek.com' "$V"
+  mail_account_del "$A" "$V" "$Q" yeni@ornek.com
+  mail_catchall_sync "$A" "$V"
+  if grep -q yeni "$V"; then exit 1; fi
+  # Deleting the target drops the catch-all and with it the identity lines.
+  mail_account_del "$A" "$V" "$Q" veli@ornek.com
+  mail_catchall_sync "$A" "$V"
+  [[ $(cat "$V") == "info@ornek.com ali@ornek.com" ]]
+  if (mail_catchall_set "$A" "$V" ornek.com dis@gmail.com); then exit 1; fi
+  mail_catchall_set "$A" "$V" ornek.com ali@ornek.com
+  mail_catchall_set "$A" "$V" ornek.com -
+  [[ $(cat "$V") == "info@ornek.com ali@ornek.com" ]]
+  # Rspamd overrides.
+  mail_ratelimit "$R" 200
+  grep -q 'burst = 200; rate = "200 / 1h"' "$R/ratelimit.conf"
+  [[ $(mail_ratelimit_get "$R") == 200 ]]
+  grep -q 'symbols_enabled = \[RATELIMIT_CHECK, RATELIMIT_UPDATE, HOSTPANEL_SEND_BLOCKED, HOSTPANEL_SUSPENDED\]' "$R/settings.conf"
+  grep -q 'groups_enabled = \[dkim\]' "$R/settings.conf"
+  grep -q 'map = "/etc/rspamd/override.d/hostpanel-suspended.map"' "$R/multimap.conf"
+  [[ $(grep -c . "$R/$MAIL_SEND_BLOCKED") == 1 ]] # base rewrite keeps the lists
+  mail_ratelimit "$R" 0
+  if grep -q rates "$R/ratelimit.conf"; then exit 1; fi
+  [[ $(mail_ratelimit_get "$R") == 0 ]]
+  if (mail_ratelimit "$R" 5); then exit 1; fi
+  if (mail_ratelimit "$R" 10001); then exit 1; fi
+  if (mail_ratelimit "$R" "1;x"); then exit 1; fi
+  [[ $(mail_ratelimit_get "$tm2/none") == 0 ]]
+) >/dev/null 2>&1; }
+mailops
+[[ $? -eq 0 ]] || { echo "FAIL mail suspend/catch-all/ratelimit functions"; fail=1; }
+rm -rf "$tm2"
+tr_=$(mktemp -d)
+mkdir -p "$tr_/md/cur" "$tr_/md/new" "$tr_/md/.Junk/cur" "$tr_/md/.Spam/cur"
+echo a >"$tr_/md/cur/1700.M1P1.host,S=1:2,S"
+echo b >"$tr_/md/new/1701.M2P2.host,S=1"
+echo c >"$tr_/md/.Junk/cur/1702.M3P3.host:2,"
+echo d >"$tr_/md/.Spam/cur/1703.M4P4.host:2,"  # other folders are not read
+head -c 11000000 /dev/zero >"$tr_/md/cur/big.M5:2,"
+echo old >"$tr_/md/cur/1600.old:2,"; touch -d '200 days ago' "$tr_/md/cur/1600.old:2,"
+out=$( (source ./lib.sh; mail_report_sync "$tr_/md" "$tr_/out" "$(id -g)") 2>&1 )
+[[ $out == "copied=3 kept=0 removed=0" && -f "$tr_/out/1700.M1P1.host,S=1" && -f "$tr_/out/1702.M3P3.host" && ! -e "$tr_/out/big.M5" ]] ||
+  { echo "FAIL mail_report_sync copy: $out $(ls "$tr_/out")"; fail=1; }
+[[ $(stat -c %a "$tr_/out") == 750 && $(stat -c %a "$tr_/out/1701.M2P2.host,S=1") == 640 ]] || { echo "FAIL mail_report_sync modes"; fail=1; }
+mv "$tr_/md/cur/1700.M1P1.host,S=1:2,S" "$tr_/md/cur/1700.M1P1.host,S=1:2,RS" # flags change: same copy
+rm "$tr_/md/new/1701.M2P2.host,S=1"
+out=$( (source ./lib.sh; mail_report_sync "$tr_/md" "$tr_/out" "$(id -g)") 2>&1 )
+[[ $out == "copied=0 kept=2 removed=1" ]] || { echo "FAIL mail_report_sync resync: $out"; fail=1; }
+ln -s /etc "$tr_/evil"
+bad mail_report_sync "$tr_/evil" "$tr_/out2" "$(id -g)"
+rm -rf "$tr_"
 bad mail_account_set "$tm/x" a@ornek.com 'plain'
 ( source ./lib.sh; MAIL_FILE_OWNER="$(id -u):$(id -g)"; for i in $(seq 1 50); do mail_alias_add "$tm/v50" x@ornek.com "t$i@gmail.com"; done ) >/dev/null 2>&1
 bad mail_alias_add "$tm/v50" x@ornek.com t51@gmail.com
 rm -rf "$tm"
 v=$( (source ./lib.sh; render_mail_vhost mail.ornek.com) )
-[[ $v == *"server_name mail.ornek.com;"* && $v == *"/.well-known/acme-challenge/"* && $v == *"return 404;"* && $v != *ssl* ]] ||
+[[ $v == *"server_name mail.ornek.com autoconfig.ornek.com autodiscover.ornek.com;"* && $v == *"/.well-known/acme-challenge/"* && $v == *"return 404;"* && $v != *ssl* ]] ||
   { echo "FAIL mail vhost"; fail=1; }
+[[ $v == *"location = /mail/config-v1.1.xml"* && $v == *"<username>%EMAILADDRESS%</username>"* && $v == *"<socketType>STARTTLS</socketType>"* ]] ||
+  { echo "FAIL mail vhost autoconfig"; fail=1; }
+[[ $v == *'location ~* ^/autodiscover/autodiscover\.xml$'* && $v == *"<Server>mail.ornek.com</Server>"* ]] || { echo "FAIL mail vhost autodiscover"; fail=1; }
+[[ $v != *'$('* && $(grep -c "'" <<<"$v") == 6 ]] || { echo "FAIL mail vhost quoting"; fail=1; }
 bad render_mail_vhost "mail.ornek.com; include /etc/passwd"
-v=$( (source ./lib.sh; render_mail_vhost mail.ornek.com tls) )
-for want in "listen 443 ssl http2;" "server_name mail.ornek.com;" "/etc/letsencrypt/live/hostpanel-mail/fullchain.pem" \
+bad render_mail_vhost mail.ornek.com "mail.ornek.com evil.com"
+bad render_mail_vhost mail.ornek.com tls
+v=$( (source ./lib.sh; render_mail_vhost mail.ornek.com "mail.ornek.com autoconfig.ornek.com") )
+for want in "listen 443 ssl http2;" "server_name mail.ornek.com autoconfig.ornek.com;" "/etc/letsencrypt/live/hostpanel-mail/fullchain.pem" \
   "/etc/letsencrypt/live/hostpanel-mail/privkey.pem" "ssl_protocols TLSv1.2 TLSv1.3;" 'return 200 "mail.ornek.com bir posta sunucusudur'; do
   [[ $v == *"$want"* ]] || { echo "FAIL mail tls vhost misses: $want"; fail=1; }
 done
+tc=$(mktemp -d)
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$tc/k" -out "$tc/c" -days 1 -subj /CN=mail.ornek.com \
+  -addext "subjectAltName=DNS:mail.ornek.com,DNS:autodiscover.ornek.com,DNS:other.com" 2>/dev/null
+[[ $( (source ./lib.sh; mail_cert_names mail.ornek.com "$tc/c") ) == "mail.ornek.com autodiscover.ornek.com" ]] || { echo "FAIL mail_cert_names"; fail=1; }
+rm -rf "$tc"
 [[ $v != *default_server* ]] || { echo "FAIL mail vhost must not be default_server"; fail=1; }
 bad render_mail_vhost mail.ornek.com other
 
@@ -504,6 +601,71 @@ ign=$( (source ./lib.sh; F2B_JAIL=$jd/j.conf; f2b_ignored) )
 cur=$( (source ./lib.sh; F2B_JAIL=$jd/none; f2b_current) )
 [[ $cur == "5 15 60 0" ]] || { echo "FAIL f2b_current default: $cur"; fail=1; }
 rm -rf "$jd"
+
+# --- database directory location (Faz 13, T2) ---
+dd=$(mktemp -d)
+dbt() { (source ./lib.sh; DB_ROOT=$dd/new OLD_DB_ROOT=$dd/old DB_ROOT_UID=$(id -u); "$@"); }
+mkdir -p "$dd/old/mssql/backup" "$dd/old/postgres"
+[[ $(dbt db_path mssql) == "$dd/old/mssql" ]] || { echo "FAIL db_path old"; fail=1; }
+[[ $(dbt db_path postgres-backup) == "$dd/new/postgres-backup" ]] || { echo "FAIL db_path absent → new"; fail=1; }
+mkdir -p "$dd/new"
+chmod 0711 "$dd/new"
+dbt db_relocate to-new mssql >/dev/null 2>&1 || { echo "FAIL db_relocate to-new"; fail=1; }
+[[ -d $dd/new/mssql/backup && ! -e $dd/old/mssql ]] || { echo "FAIL relocate result"; fail=1; }
+[[ $(dbt db_path mssql) == "$dd/new/mssql" ]] || { echo "FAIL db_path after move"; fail=1; }
+mkdir "$dd/old/mssql"
+if dbt db_relocate to-old mssql >/dev/null 2>&1; then echo "FAIL relocate over existing target"; fail=1; fi
+rmdir "$dd/old/mssql"
+dbt db_relocate to-old mssql >/dev/null 2>&1 || { echo "FAIL db_relocate to-old"; fail=1; }
+[[ -d $dd/old/mssql/backup ]] || { echo "FAIL relocate back"; fail=1; }
+dbt db_relocate to-new postgres postgres-backup >/dev/null 2>&1 || { echo "FAIL relocate pg (no backup dir)"; fail=1; }
+[[ -d $dd/new/postgres ]] || { echo "FAIL pg moved"; fail=1; }
+if dbt db_relocate to-new etc >/dev/null 2>&1; then echo "FAIL relocate unknown name"; fail=1; fi
+ln -s /etc "$dd/old/postgres-backup"
+if dbt check_db_dirs >/dev/null 2>&1; then echo "FAIL check_db_dirs symlink"; fail=1; fi
+rm "$dd/old/postgres-backup"
+chmod 0777 "$dd/new"
+if dbt ensure_db_root >/dev/null 2>&1; then echo "FAIL ensure_db_root writable"; fail=1; fi
+rm -rf "$dd"
+
+# --- Faz 13: ACME DNS-01 lines, serial never moves backwards
+za=$(mktemp -d)
+cp testdata_zone_good.txt "$za/z"
+[[ $( (source ./lib.sh; zone_serial "$za/z") ) == 2026110701 ]] || { echo "FAIL zone_serial"; fail=1; }
+[[ $( (source ./lib.sh; zone_next_serial 2026110701 2026110705) ) == 2026110706 ]] || { echo "FAIL next serial behind"; fail=1; }
+[[ $( (source ./lib.sh; zone_next_serial 2026111201 2026110705) ) == 2026111201 ]] || { echo "FAIL next serial ahead"; fail=1; }
+[[ $( (source ./lib.sh; zone_next_serial 2026111201 "") ) == 2026111201 ]] || { echo "FAIL next serial new zone"; fail=1; }
+(source ./lib.sh; zone_set_serial "$za/z" 2026111299) || { echo "FAIL zone_set_serial"; fail=1; }
+[[ $( (source ./lib.sh; zone_serial "$za/z") ) == 2026111299 && $(wc -l <"$za/z") == $(wc -l <testdata_zone_good.txt) ]] || { echo "FAIL serial rewrite"; fail=1; }
+if (source ./lib.sh; zone_set_serial "$za/z" 4294967296) 2>/dev/null; then echo "FAIL serial overflow"; fail=1; fi
+v1=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ v2=0123456789_-abcdefghijklmnopqrstuvwxyzABCDE
+(source ./lib.sh; validate_acme_value "$v1") || { echo "FAIL acme value"; fail=1; }
+for b in short "${v1}x" "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO\"Q" 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN P'; do
+  if (source ./lib.sh; validate_acme_value "$b") 2>/dev/null; then echo "FAIL acme value accepted: $b"; fail=1; fi
+done
+(
+  source ./lib.sh
+  st=$za/state
+  acme_state_edit "$st" add "$(acme_line ornek.com "$v1")"
+  acme_state_edit "$st" add "$(acme_line ornek.com "$v2")"
+  acme_state_edit "$st" add "$(acme_line ornek.com "$v1")" # duplicate
+  [[ $(wc -l <"$st") == 2 ]] || { echo "FAIL acme state dedupe"; exit 1; }
+  zone_with_acme "$za/z" "$st" "$za/out"
+  [[ $(grep -c '^_acme-challenge.ornek.com. 60 IN TXT "' "$za/out") == 3 ]] || { echo "FAIL acme lines (2 root + 1 manual)"; exit 1; }
+  validate_zone_file "$za/out" ornek.com || exit 1
+  # rewrite with the lines already in the source: still once each
+  zone_with_acme "$za/out" "$st" "$za/out2"
+  cmp -s "$za/out" "$za/out2" || { echo "FAIL acme merge not idempotent"; exit 1; }
+  acme_state_edit "$st" del "$(acme_line ornek.com "$v1")"
+  [[ $(cat "$st") == "$(acme_line ornek.com "$v2")" ]] || { echo "FAIL acme state del"; exit 1; }
+  [[ $(stat -c %a "$st") == 600 ]] || { echo "FAIL acme state mode"; exit 1; }
+  [[ $(acme_zone_for www.app.ornek.com ornek.com app.ornek.com baska.com) == app.ornek.com ]] || { echo "FAIL acme zone longest"; exit 1; }
+  [[ $(acme_zone_for ornek.com ornek.com) == ornek.com ]] || { echo "FAIL acme zone apex"; exit 1; }
+  if acme_zone_for xornek.com ornek.com; then echo "FAIL acme zone suffix without dot"; exit 1; fi
+  for i in $(seq 1 19); do acme_state_edit "$st" add "$(acme_line ornek.com "$(printf 'a%042d' "$i")")"; done
+  if (acme_state_edit "$st" add "$(acme_line ornek.com "$v1")") 2>/dev/null; then echo "FAIL acme state cap"; exit 1; fi
+) || fail=1
+rm -rf "$za"
 
 if [[ $fail -eq 0 ]]; then echo "lib.sh: tüm testler geçti"; fi
 exit $fail

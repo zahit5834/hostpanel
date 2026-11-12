@@ -271,3 +271,12 @@ func (s *Server) pgRoleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	s.renderPG(w, r, http.StatusOK, pgsql.CreateInput{}, "", notice)
 }
+
+func (s *Server) pgServerRelocate(w http.ResponseWriter, r *http.Request) {
+	if r.PostFormValue("confirm") != relocateConfirm {
+		s.pgJobRedirect(w, r, 0, errors.New("onay için "+relocateConfirm+" yazın"))
+		return
+	}
+	id, err := s.PG.StartRelocate(r.Context())
+	s.pgJobRedirect(w, r, id, err)
+}

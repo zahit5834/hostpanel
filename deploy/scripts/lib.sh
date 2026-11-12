@@ -264,6 +264,73 @@ validate_zone_file() {
   ((soa == 1)) || die "zone: tam bir SOA kaydı olmalı"
 }
 
+# zone_serial FILE — SOA serial of a panel zone file (line 2, field 7).
+zone_serial() {
+  awk 'NR == 2 && $4 == "SOA" { print $7; exit }' "$1"
+}
+
+# zone_set_serial FILE SERIAL — rewrite the SOA serial in place.
+zone_set_serial() {
+  local f=$1 s=$2
+  [[ $s =~ ^[0-9]{1,10}$ ]] && ((s <= 4294967295)) || die "SOA serial taşması: ${s}"
+  awk -v s="$s" 'NR == 2 && $4 == "SOA" { $7 = s } { print }' "$f" >"$f.serial" && mv -f "$f.serial" "$f"
+}
+
+# zone_next_serial INCOMING CURRENT — max(incoming, current+1); current may
+# be empty (new zone). A serial that moves backwards would leave secondaries
+# and the inline-signed copy of a DNSSEC zone on the old data.
+zone_next_serial() {
+  local in=$1 cur=${2:-}
+  if [[ -n $cur ]] && ((cur + 1 > in)); then echo $((cur + 1)); else echo "$in"; fi
+}
+
+# ACME DNS-01 challenge lines (root generated only): one TXT per value, TTL 60.
+ACME_TTL=60
+acme_line() { printf '_acme-challenge.%s. %s IN TXT "%s"\n' "$1" "$ACME_TTL" "$2"; }
+
+# validate_acme_value V — certbot's CERTBOT_VALIDATION (base64url SHA-256).
+validate_acme_value() {
+  [[ $1 =~ ^[A-Za-z0-9_-]{43}$ ]] || die "geçersiz ACME doğrulama değeri"
+}
+
+# zone_with_acme SRC STATE OUT — SRC without the lines of STATE that it may
+# already hold, plus every line of STATE (deduplicated, input order kept).
+zone_with_acme() {
+  local src=$1 state=$2 out=$3
+  if [[ -s $state ]]; then
+    grep -vxF -f "$state" "$src" >"$out" || true
+    awk '!seen[$0]++' "$state" >>"$out"
+  else
+    cat "$src" >"$out"
+  fi
+}
+
+# acme_state_edit STATE add|del LINE — add/remove one challenge line
+# (at most 20 per zone: a renewal holds two per wildcard name).
+acme_state_edit() {
+  local state=$1 op=$2 line=$3 n
+  touch "$state"
+  grep -vxF -- "$line" "$state" >"$state.new" || true
+  if [[ $op == add ]]; then
+    n=$(wc -l <"$state.new")
+    ((n < 20)) || die "bu zone'da çok fazla bekleyen ACME doğrulaması var"
+    printf '%s\n' "$line" >>"$state.new"
+  fi
+  mv -f "$state.new" "$state"
+  chmod 0600 "$state"
+}
+
+# acme_zone_for NAME ZONE... — the longest zone that NAME belongs to.
+acme_zone_for() {
+  local name=$1 z best=""
+  shift
+  for z in "$@"; do
+    if [[ $name == "$z" || $name == *".$z" ]] && ((${#z} > ${#best})); then best=$z; fi
+  done
+  [[ -n $best ]] || return 1
+  printf '%s\n' "$best"
+}
+
 validate_email() {
   [[ $1 =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}$ ]] || die "geçersiz e-posta: $1"
 }
@@ -337,19 +404,92 @@ validate_ip_or_cidr() {
 # ---------------------------------------------------------------------------
 
 BACKUP_ROOT=/var/backups/hostpanel
-MSSQL_HOST_BACKUP=/var/lib/hostpanel/mssql/backup
+
+# Database directories (Faz 13). They used to sit in /var/lib/hostpanel, which
+# the panel user owns: it could swap one for a symlink between root's check
+# and use. The new parent DB_ROOT belongs to root, so nothing in the path is
+# writable by the panel. Installs from before Faz 13 keep the old location
+# until the panel's "move" job (relocate) runs, one engine at a time.
+DB_ROOT=/var/lib/hostpanel-db
+OLD_DB_ROOT=/var/lib/hostpanel
+DB_NAMES=(mssql postgres postgres-backup)
+DB_ROOT_UID=0 # owner required for DB_ROOT (test_lib.sh uses its own uid)
+
+# db_path NAME — where NAME (mssql|postgres|postgres-backup) lives: the old
+# location only while it exists there and not in the new one.
+db_path() {
+  if [[ -e $DB_ROOT/$1 || -L $DB_ROOT/$1 || ! (-e $OLD_DB_ROOT/$1 || -L $OLD_DB_ROOT/$1) ]]; then
+    printf '%s\n' "$DB_ROOT/$1"
+  else
+    printf '%s\n' "$OLD_DB_ROOT/$1"
+  fi
+}
+
+# db_moved NAME — 0 when NAME uses the root-owned location.
+db_moved() { [[ $(db_path "$1") == "$DB_ROOT/$1" ]]; }
+
+# ensure_db_root — the root-owned parent (created only when missing; an
+# existing one must be a real directory owned by root and not group/world
+# writable).
+ensure_db_root() {
+  [[ ! -L $DB_ROOT ]] || die "${DB_ROOT} symlink olamaz"
+  if [[ ! -e $DB_ROOT ]]; then
+    install -d -o root -g root -m 0711 "$DB_ROOT"
+  fi
+  [[ -d $DB_ROOT ]] || die "${DB_ROOT} dizin değil"
+  local st
+  st=$(stat -c '%u %a' "$DB_ROOT")
+  [[ ${st%% *} == "$DB_ROOT_UID" ]] || die "${DB_ROOT} root'a ait değil"
+  (((8#${st#* } & 8#022) == 0)) || die "${DB_ROOT} başkalarınca yazılabilir"
+}
+
+MSSQL_HOST_BACKUP=$(db_path mssql)/backup
 # PostgreSQL dumps written by root on the host (pre-drop + backup staging);
 # kept outside the container's volume.
-PG_HOST_BACKUP=/var/lib/hostpanel/postgres-backup
+PG_HOST_BACKUP=$(db_path postgres-backup)
 
-# check_db_dirs — the database directories sit in /var/lib/hostpanel, which the
-# panel user owns: it could replace one with a symlink (e.g. to /etc) before
-# root runs "install -d -m 0700 -o <uid>" on it or bind-mounts it into a
-# container. Every helper touching them refuses symlinks first.
+# ensure_pg_backup_dir — root 0700 directory for host-side PostgreSQL dumps.
+ensure_pg_backup_dir() {
+  if [[ $PG_HOST_BACKUP == "$DB_ROOT"/* ]]; then ensure_db_root; fi
+  install -d -m 0700 -o root -g root "$PG_HOST_BACKUP"
+}
+
+# check_db_dirs — refuse symlinks for every database directory (old and new
+# location) and for the new parent; every helper touching them calls it first.
 check_db_dirs() {
-  local d
-  for d in /var/lib/hostpanel/mssql /var/lib/hostpanel/postgres "$PG_HOST_BACKUP"; do
-    [[ ! -L $d ]] || die "${d} symlink olamaz"
+  local d n
+  [[ ! -L $DB_ROOT ]] || die "${DB_ROOT} symlink olamaz"
+  for n in "${DB_NAMES[@]}"; do
+    for d in "$OLD_DB_ROOT/$n" "$DB_ROOT/$n"; do
+      [[ ! -L $d ]] || die "${d} symlink olamaz"
+    done
+  done
+}
+
+# db_relocate to-new|to-old NAME... — move database directories between the
+# old and the new parent. A rename on the same filesystem only (instant, no
+# copy); the caller removes the container first. Everything is checked
+# before the first move.
+db_relocate() {
+  local dir=$1 n src dst
+  shift
+  validate_oneof "$dir" to-new to-old
+  check_db_dirs
+  ensure_db_root
+  for n in "$@"; do
+    validate_oneof "$n" "${DB_NAMES[@]}"
+    if [[ $dir == to-new ]]; then src=$OLD_DB_ROOT/$n dst=$DB_ROOT/$n; else src=$DB_ROOT/$n dst=$OLD_DB_ROOT/$n; fi
+    [[ -e $src ]] || continue
+    [[ -d $src ]] || die "${src} dizin değil"
+    [[ ! -e $dst ]] || die "hedef zaten var: ${dst}"
+    [[ $(stat -c %d "$src") == "$(stat -c %d "$(dirname "$dst")")" ]] ||
+      die "${src} ile $(dirname "$dst") farklı dosya sistemlerinde (taşıma yalnızca aynı diskte yapılır)"
+  done
+  for n in "$@"; do
+    if [[ $dir == to-new ]]; then src=$OLD_DB_ROOT/$n dst=$DB_ROOT/$n; else src=$DB_ROOT/$n dst=$OLD_DB_ROOT/$n; fi
+    [[ -e $src ]] || continue
+    mv -T -- "$src" "$dst"
+    log "taşındı: ${src} → ${dst}"
   done
 }
 # ROOT_LOG_DIR holds logs root writes and the panel reads. It must not live in
@@ -875,24 +1015,38 @@ validate_mail_target() {
 mail_write() { atomic_write "$1" 0600 "$MAIL_FILE_OWNER"; }
 _mail_src() { if [[ -f $1 ]]; then printf '%s\n' "$1"; else echo /dev/null; fi; }
 
-# mail_list ACC VIRT QUOTA — "account <addr> <quota_mb>" and
-# "alias <addr> <target,target>" lines (no password hashes).
+# mail_list ACC VIRT QUOTA [SUSPENDED_MAP BLOCKED_MAP] — lines
+#   account <addr> <quota_mb> <flags>   flags: suspended,blocked or "-"
+#   alias <addr> <target,target>
+#   catchall <domain> <target>
+# (no password hashes; the identity lines kept for catch-all are not aliases).
 mail_list() {
-  local acc virt quota
+  local acc virt quota susp blk
   acc=$(_mail_src "$1") virt=$(_mail_src "$2") quota=$(_mail_src "$3")
-  awk -F'|' -v Q="$quota" '
+  susp=$(_mail_src "${4:-}") blk=$(_mail_src "${5:-}")
+  awk -F'|' -v Q="$quota" -v S="$susp" -v B="$blk" '
     FILENAME == Q {
       n = split($0, q, ":")
       if (n == 2 && q[2] ~ /^[0-9]+M$/) { sub(/M$/, "", q[2]); qs[q[1]] = q[2] + 0 }
       next
     }
-    NF >= 2 && $1 != "" { print "account " $1 " " (($1 in qs) ? qs[$1] : 0) }' "$quota" "$acc"
-  awk '!/^[[:space:]]*#/ && NF == 2 { print "alias " $1 " " $2 }' "$virt"
+    FILENAME == S { if (NF) su[$1] = 1; next }
+    FILENAME == B { if (NF) bl[$1] = 1; next }
+    NF >= 2 && $1 != "" {
+      fl = ""
+      if (($1 in su) || $3 ~ /(^|,)nologin=y(,|$)/) fl = "suspended"
+      if ($1 in bl) fl = fl (fl == "" ? "" : ",") "blocked"
+      print "account " $1 " " (($1 in qs) ? qs[$1] : 0) " " (fl == "" ? "-" : fl)
+    }' FS='|' "$quota" FS='[ \t]+' "$susp" "$blk" FS='|' "$acc"
+  awk '!/^[[:space:]]*#/ && NF == 2 && $1 != $2 {
+    if (substr($1, 1, 1) == "@") print "catchall " substr($1, 2) " " $2
+    else print "alias " $1 " " $2
+  }' "$virt"
 }
 
 # mail_has_account ACC ADDR / mail_has_alias VIRT ADDR
 mail_has_account() { awk -F'|' -v a="$2" '$1 == a { f = 1 } END { exit !f }' "$(_mail_src "$1")"; }
-mail_has_alias() { awk -v a="$2" 'NF == 2 && $1 == a { f = 1 } END { exit !f }' "$(_mail_src "$1")"; }
+mail_has_alias() { awk -v a="$2" 'NF == 2 && $1 == a && $2 != a { f = 1 } END { exit !f }' "$(_mail_src "$1")"; }
 mail_account_count() { awk -F'|' 'NF >= 2 && $1 != "" { n++ } END { print n + 0 }' "$(_mail_src "$1")"; }
 
 # mail_domain_used ACC VIRT DOMAIN — true if DOMAIN has an account or alias.
@@ -901,14 +1055,62 @@ mail_domain_used() {
     awk -v d="$3" 'NF == 2 { n = split($1, p, "@") } NF == 2 && n == 2 && p[2] == d { f = 1 } END { exit !f }' "$(_mail_src "$2")"
 }
 
-# mail_account_set ACC ADDR HASH — add or replace the account's line.
+# mail_account_set ACC ADDR HASH — add or replace the account's line; extra
+# fields of an existing line (nologin=y while suspended) are kept.
 mail_account_set() {
-  local acc=$1 addr=$2 hash=$3 re='^\$6\$[A-Za-z0-9./]{1,16}\$[A-Za-z0-9./]{86}$'
+  local acc=$1 addr=$2 hash=$3 re='^\$6\$[A-Za-z0-9./]{1,16}\$[A-Za-z0-9./]{86}$' extra
   [[ $hash =~ $re ]] || die "geçersiz şifre özeti"
+  extra=$(awk -F'|' -v a="$addr" '$1 == a && NF >= 3 { print $3 }' "$(_mail_src "$acc")" | tail -n 1)
+  [[ -z $extra || $extra =~ ^[a-z_]+=[a-z0-9]+(,[a-z_]+=[a-z0-9]+)*$ ]] || extra=""
   {
     awk -F'|' -v a="$addr" '$1 != a' "$(_mail_src "$acc")"
-    printf '%s|{SHA512-CRYPT}%s\n' "$addr" "$hash"
+    printf '%s|{SHA512-CRYPT}%s%s\n' "$addr" "$hash" "${extra:+|$extra}"
   } | mail_write "$acc"
+}
+
+# mail_account_nologin ACC ADDR on|off — Dovecot extra field nologin=y:
+# IMAP refuses the login with "Login disabled"; mail keeps arriving.
+mail_account_nologin() {
+  local tmp
+  tmp=$(awk -F'|' -v OFS='|' -v a="$2" -v on="$3" '
+    $1 == a && NF >= 2 { print $1, $2 (on == "on" ? "|nologin=y" : ""); next }
+    { print }' "$(_mail_src "$1")")
+  printf '%s\n' "$tmp" | mail_write "$1"
+}
+
+# mail_map_set MAP ADDR on|off — one address per line (Rspamd multimap).
+mail_map_set() {
+  local map=$1 addr=$2 on=$3
+  {
+    awk -v a="$addr" 'NF && $1 != a' "$(_mail_src "$map")"
+    if [[ $on == on ]]; then printf '%s\n' "$addr"; fi
+  } | atomic_write "$map" 0644 "$MAIL_FILE_OWNER"
+}
+
+# mail_catchall_sync ACC VIRT — Postfix matches "@domain" before the real
+# accounts' implicit mapping, so a domain with a catch-all needs an identity
+# line ("addr addr") for every account; domains without one get none.
+mail_catchall_sync() {
+  local acc virt
+  acc=$(_mail_src "$1") virt=$(_mail_src "$2")
+  {
+    awk 'NF && !(NF == 2 && $1 == $2)' "$virt"
+    awk -v V="$virt" '
+      FILENAME == V { if (NF == 2 && substr($1, 1, 1) == "@") ca[substr($1, 2)] = 1; next }
+      { split($0, f, "|"); n = split(f[1], p, "@") }
+      n == 2 && (p[2] in ca) { print f[1] " " f[1] }' "$virt" "$acc" | sort -u
+  } | mail_write "$2"
+}
+
+# mail_catchall_set ACC VIRT DOMAIN TARGET|- — TARGET must be an account.
+mail_catchall_set() {
+  local acc=$1 virt=$2 d=$3 t=$4
+  if [[ $t != - ]]; then mail_has_account "$acc" "$t" || die "hedef bir posta kutusu olmalı: $t"; fi
+  {
+    awk -v k="@$d" '!(NF == 2 && $1 == k)' "$(_mail_src "$virt")"
+    if [[ $t != - ]]; then printf '@%s %s\n' "$d" "$t"; fi
+  } | mail_write "$virt"
+  mail_catchall_sync "$acc" "$virt"
 }
 
 # mail_virt_drop VIRT ALIAS TARGET — remove TARGET from ALIAS ("" = from every
@@ -960,49 +1162,275 @@ mail_alias_add() {
 # mail_alias_del VIRT ALIAS TARGET
 mail_alias_del() { mail_virt_drop "$1" "$2" "$3" | mail_write "$1"; }
 
+# Rspamd overrides written by the panel (config/rspamd/override.d; DMS
+# copies them into /etc/rspamd/override.d and reloads Rspamd on change).
+MAIL_RS_SETTINGS=settings.conf MAIL_RS_MULTIMAP=multimap.conf MAIL_RS_RATELIMIT=ratelimit.conf
+MAIL_SEND_BLOCKED=hostpanel-send-blocked.map MAIL_SUSPENDED=hostpanel-suspended.map
+
+# mail_rspamd_base DIR — settings + multimap + empty maps. DMS disables every
+# Rspamd check for authenticated users (only DKIM signing stays); the
+# override keeps that and enables the panel's limit and block lists.
+mail_rspamd_base() {
+  local d=$1 m
+  [[ ! -L $d && ! -L ${d%/*} ]] || die "${d} symlink olamaz"
+  mkdir -p -m 0755 -- "$d"
+  cat <<'CONF' | atomic_write "$d/$MAIL_RS_SETTINGS" 0644 "$MAIL_FILE_OWNER"
+# HostPanel (hp-mail.sh) — do not edit.
+authenticated {
+  priority = high;
+  authenticated = yes;
+  apply {
+    groups_enabled = [dkim];
+    symbols_enabled = [RATELIMIT_CHECK, RATELIMIT_UPDATE, HOSTPANEL_SEND_BLOCKED, HOSTPANEL_SUSPENDED];
+  }
+}
+CONF
+  cat <<CONF | atomic_write "$d/$MAIL_RS_MULTIMAP" 0644 "$MAIL_FILE_OWNER"
+# HostPanel (hp-mail.sh) — do not edit. Authenticated senders on these lists
+# are refused at submission; IMAP and incoming mail are not affected.
+HOSTPANEL_SEND_BLOCKED {
+  type = "user";
+  map = "/etc/rspamd/override.d/${MAIL_SEND_BLOCKED}";
+  action = "reject";
+  message = "Bu hesabin gonderimi durduruldu";
+}
+HOSTPANEL_SUSPENDED {
+  type = "user";
+  map = "/etc/rspamd/override.d/${MAIL_SUSPENDED}";
+  action = "reject";
+  message = "Bu hesap askiya alindi";
+}
+CONF
+  for m in "$MAIL_SEND_BLOCKED" "$MAIL_SUSPENDED"; do
+    [[ ! -L $d/$m ]] || die "${d}/${m} symlink olamaz"
+    if [[ ! -f $d/$m ]]; then atomic_write "$d/$m" 0644 "$MAIL_FILE_OWNER" </dev/null; fi
+  done
+}
+
+# mail_ratelimit DIR N — messages per hour per authenticated account
+# (Rspamd ratelimit, selector user; 0 = no limit, else 10–10000).
+mail_ratelimit() {
+  local d=$1 n=$2
+  [[ $n =~ ^[0-9]{1,5}$ ]] && ((n == 0 || (n >= 10 && n <= 10000))) || die "geçersiz saatlik sınır: $n"
+  mail_rspamd_base "$d"
+  if ((n == 0)); then
+    printf '# HostPanel (hp-mail.sh): no sending limit.\n'
+  else
+    printf '# HostPanel (hp-mail.sh) — do not edit.\nrates {\n  hostpanel_user = {\n    selector = "user.lower";\n    bucket = { burst = %d; rate = "%d / 1h"; }\n  }\n}\n' "$n" "$n"
+  fi | atomic_write "$d/$MAIL_RS_RATELIMIT" 0644 "$MAIL_FILE_OWNER"
+}
+
+# mail_ratelimit_get DIR — the current limit (0 = none or not written yet).
+mail_ratelimit_get() {
+  sed -n 's/^    bucket = { burst = \([0-9]*\); .*/\1/p' "$(_mail_src "$1/$MAIL_RS_RATELIMIT")" | head -n 1 | grep . || echo 0
+}
+
+# DMARC report mails copied for the panel to parse (it never reads a
+# maildir itself). Root-owned 0750 directory, files 0640 for the panel group.
+MAIL_REPORT_DIR=/var/lib/hostpanel-mail-reports
+MAIL_REPORT_LOCAL=dmarc
+
+# mail_report_sync MAILDIR DEST GROUP — copy the report mailbox's messages
+# (cur/new and the Junk folder; ≤10 MB, ≤180 days, newest 5000) to DEST as
+# "<unique name>" (the maildir flags after ":" change when read); files no
+# longer in the mailbox are removed. Prints copied=N kept=N removed=N.
+mail_report_sync() {
+  local md=$1 dest=$2 grp=$3 list f base n=0 k=0 r=0 sub
+  [[ ! -L $md && ! -L $dest ]] || die "rapor dizinleri symlink olamaz"
+  install -d -o "$(id -u)" -g "$grp" -m 0750 "$dest"
+  list=$(mktemp)
+  for sub in cur new .Junk/cur .Junk/new; do
+    [[ -d $md/$sub && ! -L $md/$sub && ! -L ${md}/${sub%/*} ]] || continue
+    find "$md/$sub" -maxdepth 1 -type f -size -10240k -mtime -180 -printf '%T@ %p\n'
+  done | sort -rn | head -n 5000 | cut -d' ' -f2- >"$list"
+  declare -A want=()
+  while IFS= read -r f; do
+    base=${f##*/}
+    base=${base%%:*}
+    [[ $base =~ ^[A-Za-z0-9._,=-]{1,200}$ && $base != .* ]] || continue
+    want[$base]=1
+    if [[ -f $dest/$base ]]; then
+      k=$((k + 1))
+      continue
+    fi
+    install -o "$(id -u)" -g "$grp" -m 0640 /dev/null "$dest/.$base.tmp"
+    cat -- "$f" >"$dest/.$base.tmp"
+    mv -f -- "$dest/.$base.tmp" "$dest/$base"
+    n=$((n + 1))
+  done <"$list"
+  rm -f -- "$list"
+  for f in "$dest"/*; do
+    [[ -e $f ]] || continue
+    base=${f##*/}
+    if [[ -z ${want[$base]:-} ]]; then
+      rm -f -- "$f"
+      r=$((r + 1))
+    fi
+  done
+  echo "copied=$n kept=$k removed=$r"
+}
+
 # TLS profile shared by the vhosts root renders itself (Mozilla intermediate).
 HP_TLS_PROFILE='    ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
     ssl_prefer_server_ciphers off;'
 
-# render_mail_vhost HOST [tls] — port 80: the ACME challenge for the mail
-# host, 404 for the rest. With "tls" (the certificate exists) also port 443
-# with the mail certificate and a short notice, so https://HOST never lands
-# on (and shows the certificate of) a customer's site.
+# mail_base HOST — the parent domain of the mail host (mail.ornek.com →
+# ornek.com); its autoconfig./autodiscover. names serve client set-up.
+mail_base() { printf '%s\n' "${1#*.}"; }
+
+# mail_autoconf_xml HOST — Thunderbird autoconfig (config-v1.1).
+mail_autoconf_xml() {
+  cat <<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<clientConfig version="1.1">
+  <emailProvider id="$1">
+    <domain>$(mail_base "$1")</domain>
+    <displayName>$1</displayName>
+    <displayShortName>$1</displayShortName>
+    <incomingServer type="imap">
+      <hostname>$1</hostname>
+      <port>993</port>
+      <socketType>SSL</socketType>
+      <authentication>password-cleartext</authentication>
+      <username>%EMAILADDRESS%</username>
+    </incomingServer>
+    <outgoingServer type="smtp">
+      <hostname>$1</hostname>
+      <port>465</port>
+      <socketType>SSL</socketType>
+      <authentication>password-cleartext</authentication>
+      <username>%EMAILADDRESS%</username>
+    </outgoingServer>
+    <outgoingServer type="smtp">
+      <hostname>$1</hostname>
+      <port>587</port>
+      <socketType>STARTTLS</socketType>
+      <authentication>password-cleartext</authentication>
+      <username>%EMAILADDRESS%</username>
+    </outgoingServer>
+  </emailProvider>
+</clientConfig>
+XML
+}
+
+# mail_autodiscover_xml HOST — Outlook POX autodiscover (no LoginName: a
+# static answer cannot know the address; Outlook then uses the address).
+mail_autodiscover_xml() {
+  cat <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
+  <Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
+    <Account>
+      <AccountType>email</AccountType>
+      <Action>settings</Action>
+      <Protocol>
+        <Type>IMAP</Type>
+        <Server>$1</Server>
+        <Port>993</Port>
+        <DomainRequired>off</DomainRequired>
+        <SPA>off</SPA>
+        <SSL>on</SSL>
+        <AuthRequired>on</AuthRequired>
+      </Protocol>
+      <Protocol>
+        <Type>SMTP</Type>
+        <Server>$1</Server>
+        <Port>465</Port>
+        <DomainRequired>off</DomainRequired>
+        <SPA>off</SPA>
+        <SSL>on</SSL>
+        <AuthRequired>on</AuthRequired>
+        <UsePOPAuth>on</UsePOPAuth>
+      </Protocol>
+    </Account>
+  </Response>
+</Autodiscover>
+XML
+}
+
+# _mail_vhost_locations HOST — the set-up documents (fixed content; nginx
+# return also answers Outlook's POST) and a short notice for the rest.
+_mail_vhost_locations() {
+  cat <<CONF
+    location = /mail/config-v1.1.xml {
+        default_type text/xml;
+        charset utf-8;
+        return 200 '$(mail_autoconf_xml "$1")';
+    }
+    location = /.well-known/autoconfig/mail/config-v1.1.xml {
+        default_type text/xml;
+        charset utf-8;
+        return 200 '$(mail_autoconf_xml "$1")';
+    }
+    location ~* ^/autodiscover/autodiscover\.xml\$ {
+        default_type text/xml;
+        charset utf-8;
+        return 200 '$(mail_autodiscover_xml "$1")';
+    }
+CONF
+}
+
+# render_mail_vhost HOST [TLS_NAMES] — port 80: the ACME challenge for the
+# mail host and its autoconfig./autodiscover. names, the client set-up
+# documents, 404 for the rest. With TLS_NAMES (the names the certificate
+# holds, space separated) also port 443 with the mail certificate, the
+# set-up documents and a short notice, so https://HOST never lands on (and
+# shows the certificate of) a customer's site.
 render_mail_vhost() {
   validate_domain "$1"
-  [[ $# -lt 2 ]] || validate_oneof "$2" tls
+  local host=$1 base names tls="" n
+  base=$(mail_base "$1")
+  validate_domain "$base"
+  names="$host autoconfig.$base autodiscover.$base"
+  for n in ${2:-}; do
+    validate_oneof "$n" $names
+    tls+="${tls:+ }$n"
+  done
   cat <<CONF
-# HostPanel mail server (hp-mail.sh) — certificate challenges only; do not edit.
+# HostPanel mail server (hp-mail.sh) — certificate challenges and client set-up only; do not edit.
 server {
     listen 80;
     listen [::]:80;
-    server_name $1;
+    server_name $names;
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/letsencrypt;
         default_type text/plain;
     }
+$(_mail_vhost_locations "$host")
     location / {
         return 404;
     }
 }
 CONF
-  [[ ${2:-} == tls ]] || return 0
+  [[ -n $tls ]] || return 0
   cat <<CONF
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name $1;
+    server_name $tls;
     ssl_certificate /etc/letsencrypt/live/${MAIL_CERT_NAME}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${MAIL_CERT_NAME}/privkey.pem;
 ${HP_TLS_PROFILE}
+$(_mail_vhost_locations "$host")
     location / {
         default_type text/plain;
         charset utf-8;
-        return 200 "$1 bir posta sunucusudur (IMAP 993 SSL/TLS, SMTP 465 SSL/TLS veya 587 STARTTLS).\n";
+        return 200 "$host bir posta sunucusudur (IMAP 993 SSL/TLS, SMTP 465 SSL/TLS veya 587 STARTTLS).\n";
     }
 }
 CONF
+}
+
+# mail_cert_names HOST CERT — the names of HOST's vhost the certificate holds.
+mail_cert_names() {
+  local base out="" n sans
+  base=$(mail_base "$1")
+  sans=$(openssl x509 -noout -ext subjectAltName -in "$2" 2>/dev/null | tr ',' '\n' | sed -n 's/^ *DNS:\([a-z0-9.-]*\) *$/\1/p')
+  for n in "$1" "autoconfig.$base" "autodiscover.$base"; do
+    if grep -qxF -- "$n" <<<"$sans"; then out+="${out:+ }$n"; fi
+  done
+  printf '%s\n' "$out"
 }
 
 # install_vhost TMP FILE LINK WHAT — install a rendered vhost; nginx -t must
@@ -1032,10 +1460,12 @@ install_vhost() {
 
 # write_mail_vhost HOST — install it (with port 443 once the certificate exists).
 write_mail_vhost() {
-  local tmp
+  local tmp names
   tmp=$(mktemp)
-  if [[ -s /etc/letsencrypt/live/$MAIL_CERT_NAME/fullchain.pem ]]; then
-    render_mail_vhost "$1" tls >"$tmp"
+  local cert=/etc/letsencrypt/live/$MAIL_CERT_NAME/fullchain.pem
+  if [[ -s $cert ]]; then
+    names=$(mail_cert_names "$1" "$cert")
+    render_mail_vhost "$1" "${names:-$1}" >"$tmp"
   else
     render_mail_vhost "$1" >"$tmp"
   fi
@@ -1047,7 +1477,7 @@ write_mail_vhost() {
 refresh_mail_vhost() {
   [[ -f $MAIL_VHOST && ! -L $MAIL_VHOST ]] || return 0
   local host
-  host=$(sed -n 's/^    server_name \([^ ;]*\);$/\1/p' "$MAIL_VHOST" | head -n 1)
+  host=$(sed -n 's/^    server_name \([^ ;]*\)[ ;].*/\1/p' "$MAIL_VHOST" | head -n 1)
   [[ -n $host ]] || return 0
   write_mail_vhost "$host"
 }

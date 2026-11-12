@@ -5,7 +5,8 @@
 #   prepare <first_domain>           directories, fail2ban ignore list, first account
 #                                    postmaster@<first_domain> (random password nobody knows)
 #   vhost <hostname>                 port 80 nginx vhost (ACME only)
-#   cert <hostname> <email>          Let's Encrypt (lineage hostpanel-mail) → tls/, renewal hook
+#   cert <hostname> <email> [autoconf]  Let's Encrypt (lineage hostpanel-mail) → tls/, renewal hook;
+#                                    autoconf adds autoconfig./autodiscover.<parent domain>
 #   create <image> <hostname> <memory_mb> <clamav 0|1> <msg_limit_mb> <postmaster_domain>
 #   pull <image>                     download an image (update; the container keeps running)
 #   wait                             until the container reports healthy (≤180 s)
@@ -14,13 +15,22 @@
 #   start|stop|restart
 #   status                           key=value lines
 #   logs <n>
-#   list                             "account <addr> <quota_mb>" / "alias <addr> <targets>"
+#   list                             "account <addr> <quota_mb> <flags>" / "alias <addr> <targets>" /
+#                                    "catchall <domain> <target>" (flags: suspended,blocked or -)
 #   usage                            "<addr> <used_kib> <limit_kib|->" (container running)
 #   account-set <addr> create|reset  stdin: password (one line)
 #   account-del <addr>               maildir archived to _mail/pre-delete-*.tar.zst, then removed
 #   quota-set <addr> <mb>            0 = unlimited
 #   alias-add <alias> <target>
 #   alias-del <alias> <target>
+#   account-suspend <addr> on|off    no IMAP/SMTP login (mail still arrives, data kept)
+#   send-block <addr> on|off         refuse its submissions (IMAP and incoming mail work)
+#   catchall <domain> <addr|->       unknown addresses of the domain → that mailbox
+#   ratelimit <n>                    messages per hour per mailbox (0 = none, 10–10000)
+#   queue-purge <addr>               delete queued messages from that sender; prints deleted=N
+#   dmarc-sync <dmarc@domain>        copy the DMARC report mailbox to /var/lib/hostpanel-mail-reports
+#                                    (only that local part; the panel parses the copies)
+#   sent-stats <minutes>             "<addr> <n>" accepted submissions in the last 1–1440 minutes
 #   dkim <domain>                    key created if missing; prints txt=<record>
 #   domain-del <domain>              refuses while accounts/aliases exist; keys archived
 #   queue | flush
@@ -38,7 +48,7 @@
 # its internal services (Rspamd, Redis) would listen on the host.
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
-[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") precheck|prepare|vhost|cert|create|pull|wait|remove|purge|start|stop|restart|status|logs|list|usage|account-*|quota-set|alias-*|dkim|domain-del|queue|flush|bans|unban|backup|restore …"
+[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") precheck|prepare|vhost|cert|create|pull|wait|remove|purge|start|stop|restart|status|logs|list|usage|account-*|quota-set|alias-*|send-block|catchall|ratelimit|queue-purge|sent-stats|dmarc-sync|dkim|domain-del|queue|flush|bans|unban|backup|restore …"
 action=$1
 shift
 
@@ -53,6 +63,9 @@ VIRT=$CONF/postfix-virtual.cf
 QUOTA=$CONF/dovecot-quotas.cf
 DKIM_DIR=$CONF/rspamd/dkim
 DKIM_MAP=$CONF/rspamd/dkim_selectors.map
+RS_OVR=$CONF/rspamd/override.d
+SUSP_MAP=$RS_OVR/$MAIL_SUSPENDED
+BLOCK_MAP=$RS_OVR/$MAIL_SEND_BLOCKED
 SELECTOR=mail
 MAIL_BACKUP=$BACKUP_ROOT/_mail
 WEBROOT=/var/www/letsencrypt
@@ -219,6 +232,7 @@ case $action in
       mail_account_set "$ACC" "postmaster@$1" "$hash"
       log "ilk hesap oluşturuldu: postmaster@$1"
     fi
+    if [[ ! -f $RS_OVR/$MAIL_RS_RATELIMIT ]]; then mail_ratelimit "$RS_OVR" 200; fi
     ;;
 
   vhost)
@@ -228,18 +242,27 @@ case $action in
     install -d -o root -g root -m 0755 "$WEBROOT"
     write_mail_vhost "$1"
     ensure_default_vhost
-    log "nginx: ${MAIL_VHOST} (80: ACME; 443: sertifika alındıktan sonra)"
+    log "nginx: ${MAIL_VHOST} (80: ACME + otomatik ayar; 443: sertifika alındıktan sonra)"
     ;;
 
   cert)
-    [[ $# -eq 2 ]] || die "kullanım: cert <hostname> <email>"
+    [[ $# -eq 2 || $# -eq 3 ]] || die "kullanım: cert <hostname> <email> [autoconf]"
     validate_domain "$1"
     validate_email "$2"
+    names=(-d "$1")
+    if [[ $# -eq 3 ]]; then
+      validate_oneof "$3" autoconf
+      base=$(mail_base "$1")
+      validate_domain "$base"
+      names+=(-d "autoconfig.$base" -d "autodiscover.$base")
+    fi
     command -v certbot >/dev/null || die "certbot kurulu değil"
     install -d -o root -g root -m 0755 "$WEBROOT"
+    # The port 80 vhost must answer the extra names before the challenge.
+    if [[ $# -eq 3 ]]; then write_mail_vhost "$1"; fi
     certbot certonly --non-interactive --agree-tos --no-eff-email --email "$2" \
       --cert-name "$MAIL_CERT_NAME" --keep-until-expiring --expand \
-      --webroot -w "$WEBROOT" -d "$1"
+      --webroot -w "$WEBROOT" "${names[@]}"
     ensure_dirs
     copy_tls
     install_hook
@@ -397,7 +420,7 @@ mem_pct={{.MemPerc}}' "$NAME"
 
   list)
     [[ $# -eq 0 ]] || die "kullanım: list"
-    mail_list "$ACC" "$VIRT" "$QUOTA"
+    mail_list "$ACC" "$VIRT" "$QUOTA" "$SUSP_MAP" "$BLOCK_MAP"
     ;;
 
   usage)
@@ -426,6 +449,7 @@ mem_pct={{.MemPerc}}' "$NAME"
       mail_has_account "$ACC" "$1" || die "hesap yok: $1"
     fi
     mail_account_set "$ACC" "$1" "$hash"
+    if [[ $2 == create ]]; then mail_catchall_sync "$ACC" "$VIRT"; fi
     log "hesap $([[ $2 == create ]] && echo oluşturuldu || echo şifresi değişti): $1"
     ;;
 
@@ -437,6 +461,10 @@ mem_pct={{.MemPerc}}' "$NAME"
     mail_has_account "$ACC" "$addr" || die "hesap yok: $addr"
     (($(mail_account_count "$ACC") > 1)) || die "son hesap silinemez (posta sunucusu en az bir hesap ister)"
     mail_account_del "$ACC" "$VIRT" "$QUOTA" "$addr"
+    mail_catchall_sync "$ACC" "$VIRT"
+    for m in "$SUSP_MAP" "$BLOCK_MAP"; do
+      if [[ -f $m ]]; then mail_map_set "$m" "$addr" off; fi
+    done
     flock -u 9
     log "hesap silindi: $addr (yeni posta kabul edilmiyor)"
     md=$DATA/$domain/$local
@@ -482,6 +510,92 @@ mem_pct={{.MemPerc}}' "$NAME"
     lock
     mail_alias_del "$VIRT" "$1" "$2"
     log "yönlendirme silindi: $1 → $2"
+    ;;
+
+  account-suspend)
+    [[ $# -eq 2 ]] || die "kullanım: account-suspend <addr> on|off"
+    validate_mail_addr "$1"
+    validate_oneof "$2" on off
+    lock
+    mail_has_account "$ACC" "$1" || die "hesap yok: $1"
+    mail_rspamd_base "$RS_OVR"
+    # Both are needed: nologin=y stops IMAP (Dovecot extra field) but not
+    # SMTP AUTH; the Rspamd list refuses its submissions.
+    mail_account_nologin "$ACC" "$1" "$2"
+    mail_map_set "$SUSP_MAP" "$1" "$2"
+    log "hesap $([[ $2 == on ]] && echo askıya alındı || echo yeniden açıldı): $1"
+    ;;
+
+  send-block)
+    [[ $# -eq 2 ]] || die "kullanım: send-block <addr> on|off"
+    validate_mail_addr "$1"
+    validate_oneof "$2" on off
+    lock
+    mail_has_account "$ACC" "$1" || die "hesap yok: $1"
+    mail_rspamd_base "$RS_OVR"
+    mail_map_set "$BLOCK_MAP" "$1" "$2"
+    log "gönderim $([[ $2 == on ]] && echo durduruldu || echo yeniden açıldı): $1"
+    ;;
+
+  catchall)
+    [[ $# -eq 2 ]] || die "kullanım: catchall <domain> <addr|->"
+    validate_domain "$1"
+    if [[ $2 != - ]]; then validate_mail_addr "$2"; fi
+    lock
+    mail_catchall_set "$ACC" "$VIRT" "$1" "$2"
+    log "catch-all: $1 → $([[ $2 == - ]] && echo kapalı || echo "$2")"
+    ;;
+
+  ratelimit)
+    [[ $# -eq 1 ]] || die "kullanım: ratelimit <n>"
+    lock
+    mail_ratelimit "$RS_OVR" "$1"
+    log "saatlik gönderim sınırı: $([[ $1 == 0 ]] && echo yok || echo "$1 ileti / kutu")"
+    ;;
+
+  queue-purge)
+    [[ $# -eq 1 ]] || die "kullanım: queue-purge <addr>"
+    validate_mail_addr "$1"
+    need_running
+    ids=$({ docker exec "$NAME" postqueue -j 2>/dev/null || true; } | awk -v a="$1" '
+      match($0, /"sender": *"[^"\\]*"/) {
+        s = substr($0, RSTART, RLENGTH); sub(/^"sender": *"/, "", s); sub(/"$/, "", s)
+        if (s == a && match($0, /"queue_id": *"[0-9A-Za-z]+"/)) {
+          q = substr($0, RSTART, RLENGTH); sub(/^"queue_id": *"/, "", q); sub(/"$/, "", q); print q
+        }
+      }')
+    n=0
+    if [[ -n $ids ]]; then
+      n=$(grep -c . <<<"$ids")
+      docker exec -i "$NAME" postsuper -d - <<<"$ids" >/dev/null 2>&1 || die "kuyruktaki iletiler silinemedi"
+    fi
+    log "kuyruktan silinen ileti ($1): $n"
+    echo "deleted=$n"
+    ;;
+
+  dmarc-sync)
+    [[ $# -eq 1 ]] || die "kullanım: dmarc-sync <dmarc@domain>"
+    validate_mail_addr "$1"
+    # Only the report mailbox: the panel must never read a customer's mail.
+    [[ ${1%%@*} == "$MAIL_REPORT_LOCAL" ]] || die "yalnızca ${MAIL_REPORT_LOCAL}@ kutusu okunabilir"
+    lock
+    mail_has_account "$ACC" "$1" || die "hesap yok: $1"
+    md=$DATA/${1#*@}/${1%%@*}
+    [[ ! -L $DATA/${1#*@} && ! -L $md ]] || die "beklenmeyen posta dizini: $md"
+    grp=root
+    getent group hostpanel >/dev/null && grp=hostpanel
+    [[ -d $md ]] || { install -d -o root -g "$grp" -m 0750 "$MAIL_REPORT_DIR"; echo "copied=0 kept=0 removed=0"; exit 0; }
+    mail_report_sync "$md" "$MAIL_REPORT_DIR" "$grp"
+    ;;
+
+  sent-stats)
+    [[ $# -eq 1 && $1 =~ ^[0-9]{1,4}$ ]] && (($1 >= 1 && $1 <= 1440)) || die "kullanım: sent-stats <1-1440>"
+    need_running
+    # One "<queue id>: client=…, sasl_username=<addr>" line per message
+    # accepted from an authenticated client (failed logins have no queue id).
+    { docker logs --since "${1}m" "$NAME" 2>&1 || true; } |
+      sed -nE 's/.*: [0-9A-Za-z]{6,}: client=[^ ]*, sasl_method=[A-Z0-9-]+, sasl_username=([a-z0-9._+@-]+)$/\1/p' |
+      sort | uniq -c | awk '$1 ~ /^[0-9]+$/ { print $2 " " $1 }'
     ;;
 
   dkim)

@@ -23,10 +23,14 @@ type Server struct {
 	MemoryMB   int
 	ClamAV     bool
 	MsgLimitMB int
-	Status     string
-	LastError  string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// RatePerHour is the sending limit per mailbox (0 = none); QueueAlert the
+	// queue length that raises an alarm (0 = off).
+	RatePerHour int
+	QueueAlert  int
+	Status      string
+	LastError   string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Domain is a mail domain; its mailboxes and aliases are not stored here.
@@ -37,6 +41,7 @@ type Domain struct {
 	Name         string
 	DKIMSelector string
 	DKIMTXT      string
+	DMARCPolicy  string // none | quarantine | reject
 	CreatedAt    time.Time
 }
 
@@ -50,9 +55,9 @@ func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 func (st *Store) Server(ctx context.Context) (Server, error) {
 	var s Server
 	var created, updated int64
-	err := st.db.QueryRowContext(ctx, `SELECT id, image, hostname, le_email, memory_mb, clamav, msg_limit_mb, status, last_error, created_at, updated_at
+	err := st.db.QueryRowContext(ctx, `SELECT id, image, hostname, le_email, memory_mb, clamav, msg_limit_mb, rate_per_hour, queue_alert, status, last_error, created_at, updated_at
 		FROM mail_servers ORDER BY id LIMIT 1`).Scan(&s.ID, &s.Image, &s.Hostname, &s.LEEmail, &s.MemoryMB, &s.ClamAV, &s.MsgLimitMB,
-		&s.Status, &s.LastError, &created, &updated)
+		&s.RatePerHour, &s.QueueAlert, &s.Status, &s.LastError, &created, &updated)
 	if err != nil {
 		return s, err
 	}
@@ -92,13 +97,13 @@ func (st *Store) UpdateServerSettings(ctx context.Context, s Server) error {
 	return err
 }
 
-const domainSelect = `SELECT d.id, COALESCE(d.customer_id, 0), COALESCE(c.name, ''), d.name, d.dkim_selector, d.dkim_txt, d.created_at
+const domainSelect = `SELECT d.id, COALESCE(d.customer_id, 0), COALESCE(c.name, ''), d.name, d.dkim_selector, d.dkim_txt, d.dmarc_policy, d.created_at
 	FROM mail_domains d LEFT JOIN customers c ON c.id = d.customer_id`
 
 func scanDomain(row interface{ Scan(...any) error }) (Domain, error) {
 	var d Domain
 	var created int64
-	err := row.Scan(&d.ID, &d.CustomerID, &d.CustomerName, &d.Name, &d.DKIMSelector, &d.DKIMTXT, &created)
+	err := row.Scan(&d.ID, &d.CustomerID, &d.CustomerName, &d.Name, &d.DKIMSelector, &d.DKIMTXT, &d.DMARCPolicy, &created)
 	d.CreatedAt = time.Unix(created, 0)
 	return d, err
 }
@@ -163,6 +168,19 @@ func (st *Store) SetDKIM(ctx context.Context, id int64, txt string) error {
 // DeleteDomain removes a domain row.
 func (st *Store) DeleteDomain(ctx context.Context, id int64) error {
 	_, err := st.db.ExecContext(ctx, `DELETE FROM mail_domains WHERE id=?`, id)
+	return err
+}
+
+// SetLimits stores the sending limit and the queue alarm threshold.
+func (st *Store) SetLimits(ctx context.Context, id int64, ratePerHour, queueAlert int) error {
+	_, err := st.db.ExecContext(ctx, `UPDATE mail_servers SET rate_per_hour=?, queue_alert=?, updated_at=? WHERE id=?`,
+		ratePerHour, queueAlert, time.Now().Unix(), id)
+	return err
+}
+
+// SetDMARCPolicy stores the published DMARC policy of a domain.
+func (st *Store) SetDMARCPolicy(ctx context.Context, id int64, policy string) error {
+	_, err := st.db.ExecContext(ctx, `UPDATE mail_domains SET dmarc_policy=? WHERE id=?`, policy, id)
 	return err
 }
 

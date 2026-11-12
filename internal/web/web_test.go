@@ -120,14 +120,8 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	mailSvc.Register()
 	svc.MailHost = mailSvc.Host
 	bkSvc.Mail = mailSvc
-	dnsSvc.Mail = func(ctx context.Context) (string, []dns.MailDomain) {
-		host, ds := mailSvc.DNSInfo(ctx)
-		var out []dns.MailDomain
-		for _, d := range ds {
-			out = append(out, dns.MailDomain{Name: d.Name, DKIMSelector: d.DKIMSelector, DKIMTXT: d.DKIMTXT})
-		}
-		return host, out
-	}
+	dnsSvc.Mail = mailSvc.ZoneInfo
+	sslSvc.ACMEReady = dnsSvc.ACMEReady
 	s := &Server{Cfg: cfg, DB: db, Auth: a, Activity: act, Jobs: jm, Runner: runner, Log: log, Version: "test",
 		Customers: customers.New(db), Sites: svc, Runtimes: reg, SSL: sslSvc, DBs: dbSvc, PG: pgSvc, Backups: bkSvc,
 		Monitor: monSvc, Notify: notifySvc, DNS: dnsSvc, Mail: mailSvc,

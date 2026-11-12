@@ -59,6 +59,23 @@ type Service struct {
 	Roots   *x509.CertPool                            // nil: system pool (tests inject a test CA)
 	Checker func(ctx context.Context) *Checker        // nil: real DNS + HTTP
 	Notify  func(ctx context.Context, e notify.Event) // nil: no notifications
+	// ACMEReady reports why DNS-01 can't be used for names (nil: it can);
+	// injected by the dns package, nil = DNS validation unavailable.
+	ACMEReady func(ctx context.Context, names []string) error
+}
+
+// Let's Encrypt validation methods.
+const (
+	MethodHTTP = "http" // HTTP-01 through the ACME webroot
+	MethodDNS  = "dns"  // DNS-01 through the panel's BIND (wildcards)
+)
+
+// DNSReady is ACMEReady for the site's names (nil: DNS validation usable).
+func (s *Service) DNSReady(ctx context.Context, names []string) error {
+	if s.ACMEReady == nil {
+		return errors.New("DNS doğrulaması için panelin DNS sunucusu gerekir")
+	}
+	return s.ACMEReady(ctx, names)
 }
 
 // Register binds job kinds and hooks certificate lookup into nginx rendering.
@@ -145,7 +162,11 @@ func (s *Service) checker(ctx context.Context) *Checker {
 
 // SiteNames lists every name the site's nginx config answers for, primary first.
 func SiteNames(site sites.Site) []string {
-	return append([]string{site.Domain, site.WWWName()}, site.Aliases...)
+	names := append([]string{site.Domain, site.WWWName()}, site.Aliases...)
+	if site.Wildcard {
+		names = append(names, site.WildcardName())
+	}
+	return names
 }
 
 // Precheck runs the DNS + HTTP checks for the site's names.
@@ -160,6 +181,7 @@ type LEInput struct {
 	Names   []string
 	Email   string
 	Staging bool
+	Method  string // MethodHTTP (default) | MethodDNS; a "*." name needs DNS
 }
 
 // StartLE validates the request and queues ssl.letsencrypt.
@@ -169,13 +191,27 @@ func (s *Service) StartLE(ctx context.Context, site sites.Site, in LEInput) (int
 		allowed[n] = true
 	}
 	var names []string
-	hasPrimary := false
+	hasPrimary, wild := false, false
 	for _, n := range in.Names {
 		if !allowed[n] {
 			return 0, fmt.Errorf("site bu adı sunmuyor: %s", n)
 		}
 		hasPrimary = hasPrimary || n == site.Domain
+		wild = wild || strings.HasPrefix(n, "*.")
 		names = append(names, n)
+	}
+	switch in.Method {
+	case "", MethodHTTP:
+		if wild {
+			return 0, errors.New("*. adlı (wildcard) sertifika yalnızca DNS doğrulamasıyla alınabilir")
+		}
+		in.Method = MethodHTTP
+	case MethodDNS:
+		if err := s.DNSReady(ctx, names); err != nil {
+			return 0, err
+		}
+	default:
+		return 0, errors.New("geçersiz doğrulama yöntemi")
 	}
 	if !hasPrimary {
 		// certbot's lineage is named after the domain and nginx serves it; keep it first.
@@ -192,7 +228,7 @@ func (s *Service) StartLE(ctx context.Context, site sites.Site, in LEInput) (int
 	}
 	return s.Jobs.Submit(ctx, jobs.Spec{Kind: "ssl.letsencrypt", TargetType: "site", TargetID: site.Domain,
 		Summary: label + " sertifikası alınıyor: " + strings.Join(names, ", "),
-		Params:  map[string]any{"site_id": site.ID, "names": names, "email": in.Email, "staging": in.Staging}})
+		Params:  map[string]any{"site_id": site.ID, "names": names, "email": in.Email, "staging": in.Staging, "method": in.Method}})
 }
 
 func paramID(p map[string]any, key string) int64 {
@@ -231,8 +267,18 @@ func (s *Service) jobLE(ctx context.Context, l *jobs.Log, p map[string]any) erro
 	names := paramStrings(p, "names")
 	email, _ := p["email"].(string)
 	staging, _ := p["staging"].(bool)
+	method, challenge, helperMethod := MethodHTTP, "http-01", "webroot"
+	if m, _ := p["method"].(string); m == MethodDNS {
+		method, challenge, helperMethod = MethodDNS, "dns-01", "dns"
+	}
 	defer s.Sites.Lock(site.ID)()
 
+	if method == MethodDNS {
+		if err := s.DNSReady(ctx, names); err != nil {
+			return err
+		}
+		l.Printf("DNS doğrulaması: certbot _acme-challenge TXT kayıtlarını panelin DNS sunucusuna yazar (zone'un NS kayıtları bu sunucuyu göstermeli).")
+	}
 	l.Printf("DNS / HTTP ön kontrolü…")
 	for _, c := range s.checker(ctx).Check(ctx, names) {
 		mark := "✓"
@@ -251,8 +297,8 @@ func (s *Service) jobLE(ctx context.Context, l *jobs.Log, p map[string]any) erro
 	if prev.ID != 0 && prev.Kind == KindLE && prev.Staging != staging {
 		force = "1" // switching between staging and production needs a fresh certificate
 	}
-	args := append([]string{"issue", site.Domain, email, "webroot", btoa(staging), force}, names...)
-	l.Printf("certbot çalıştırılıyor (webroot)…")
+	args := append([]string{"issue", site.Domain, email, helperMethod, btoa(staging), force}, names...)
+	l.Printf("certbot çalıştırılıyor (%s)…", challenge)
 	if _, err := s.helper(ctx, l, nil, nil, args...); err != nil {
 		return fmt.Errorf("sertifika alınamadı: %w", err)
 	}
@@ -265,7 +311,7 @@ func (s *Service) jobLE(ctx context.Context, l *jobs.Log, p map[string]any) erro
 	if err != nil {
 		return err
 	}
-	c := Certificate{SiteID: site.ID, Domain: site.Domain, Kind: KindLE, Challenge: "http-01", Names: info.Names,
+	c := Certificate{SiteID: site.ID, Domain: site.Domain, Kind: KindLE, Challenge: challenge, Names: info.Names,
 		Issuer: info.Issuer, Serial: info.Serial, Fingerprint: info.Fingerprint, KeyType: info.KeyType,
 		NotBefore: info.NotBefore, NotAfter: info.NotAfter, Status: StatusPending, Staging: staging, CertPEM: chain}
 	if err := s.Store.Insert(ctx, &c); err != nil {

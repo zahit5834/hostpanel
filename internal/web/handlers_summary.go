@@ -175,6 +175,15 @@ func (s *Server) BuildSummary(ctx context.Context, mode string, now time.Time) (
 		}
 		line("Altyapı: çalışmayan → %s", strings.Join(n, ", "))
 	}
+	if s.RBL != nil {
+		var n []string
+		for _, r := range s.RBL.State(ctx).Listed() {
+			n = append(n, r.Target+" ("+r.List+")")
+		}
+		if len(n) > 0 {
+			line("Posta kara listesi: %s", strings.Join(n, ", "))
+		}
+	}
 
 	if s.Monitor != nil {
 		up, _ := s.Monitor.Store.UptimeSummary(ctx, traffic.DayKey(since))

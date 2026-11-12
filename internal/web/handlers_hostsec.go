@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/zahit5834/hostpanel/internal/rbl"
 	"net/http"
 	"net/url"
 	"slices"
@@ -408,6 +409,20 @@ func (s *Server) gatherAudit(ctx context.Context) hostsec.AuditInput {
 	if s.PG != nil {
 		if srv, err := s.PG.Store.Server(ctx); err == nil && srv.External {
 			in.DBExternal = append(in.DBExternal, fmt.Sprintf("PostgreSQL (%d IP)", len(srv.AllowIPs)))
+		}
+	}
+	if s.DBs.AtOldLocation(ctx) {
+		in.DBOldLocation = append(in.DBOldLocation, "MSSQL")
+	}
+	if s.PG != nil && s.PG.AtOldLocation(ctx) {
+		in.DBOldLocation = append(in.DBOldLocation, "PostgreSQL")
+	}
+	if s.RBL != nil && s.Mail != nil && s.Mail.Installed(ctx) {
+		st := s.RBL.State(ctx)
+		in.MailChecked = st.CheckedAt > 0
+		for _, r := range st.Listed() {
+			l, _ := rbl.ByID(r.List)
+			in.MailListed = append(in.MailListed, r.Target+" ("+l.Name+")")
 		}
 	}
 	in.Integrity, in.IntegrityChecked = s.IntegrityCheck(ctx), true

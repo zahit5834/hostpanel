@@ -7,7 +7,13 @@
 #       open 53/tcp+udp in UFW when UFW is active (comment hostpanel-dns).
 #       Refuses when a BIND not installed by the panel already has zones.
 #   hp-dns.sh write-zone <zone>      zone file on stdin (validate_zone_file,
-#                                    named-checkzone, install, rndc reload)
+#                                    named-checkzone, install, rndc reload);
+#                                    serial = max(incoming, current+1), pending
+#                                    ACME challenge lines are kept
+#   hp-dns.sh acme-auth | acme-cleanup
+#       certbot --manual DNS-01 hooks (environment CERTBOT_DOMAIN,
+#       CERTBOT_VALIDATION): add/remove "_acme-challenge.<domain> TXT" in the
+#       panel zone that holds the name, reload, wait for the local answer.
 #   hp-dns.sh sync-config            stdin: "<zone> <dnssec 0|1>" per line; this
 #                                    script writes named.conf.hostpanel itself
 #   hp-dns.sh delete-zone <zone>     archive zone file + keys, then remove them
@@ -19,7 +25,7 @@
 # and every other directive but $TTL are refused) before named-checkzone.
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
-[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") install|write-zone|sync-config|delete-zone|ds|status …"
+[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") install|write-zone|acme-auth|acme-cleanup|sync-config|delete-zone|ds|status …"
 action=$1
 shift
 
@@ -30,6 +36,10 @@ ZONE_DIR=/var/lib/bind/hostpanel
 KEY_DIR=$ZONE_DIR/keys
 ARCHIVE_DIR=/var/backups/hostpanel/dns
 UFW_TAG=hostpanel-dns
+# Root-only state: pending ACME challenge lines per zone + the lock shared by
+# every zone file writer (panel write-zone and certbot hooks).
+STATE_ROOT=/var/lib/hostpanel-dns
+ACME_DIR=$STATE_ROOT/acme
 
 need_bind() {
   [[ -f $MARKER ]] || die "DNS sunucusu panel tarafından kurulmamış"
@@ -37,6 +47,95 @@ need_bind() {
 }
 
 zone_file() { echo "$ZONE_DIR/$1.db"; }
+
+dns_lock() {
+  [[ ! -L $STATE_ROOT && ! -L $ACME_DIR ]] || die "${STATE_ROOT} symlink olamaz"
+  install -d -o root -g root -m 0700 "$STATE_ROOT" "$ACME_DIR"
+  exec 9>"$STATE_ROOT/.lock"
+  flock -w 120 9 || die "başka bir DNS işlemi sürüyor"
+}
+
+acme_state() {
+  local f=$ACME_DIR/$1
+  [[ ! -L $f ]] || die "ACME durum dosyası symlink olamaz"
+  printf '%s\n' "$f"
+}
+
+configured_zones() {
+  [[ -f $CONF ]] || return 0
+  sed -n 's/^zone "\([a-z0-9.-]*\)" {$/\1/p' "$CONF"
+}
+
+# install_zone ZONE CANDIDATE — the final checks and the atomic swap shared by
+# write-zone and the ACME hooks (the caller holds dns_lock). The serial never
+# moves backwards; on reload failure the previous file is restored.
+install_zone() {
+  local zone=$1 tmp=$2 dst cur in
+  dst=$(zone_file "$zone")
+  [[ ! -L $dst ]] || die "zone dosyası symlink olamaz"
+  in=$(zone_serial "$tmp")
+  cur=""
+  [[ -f $dst ]] && cur=$(zone_serial "$dst")
+  zone_set_serial "$tmp" "$(zone_next_serial "$in" "$cur")"
+  validate_zone_file "$tmp" "$zone"
+  named-checkzone -q -k fail -n fail "$zone" "$tmp" || {
+    named-checkzone -k fail -n fail "$zone" "$tmp" >&2 || true
+    die "named-checkzone zone'u reddetti"
+  }
+  [[ ! -f $dst ]] || cp -a "$dst" "$dst.prev"
+  chown bind:bind "$tmp"
+  chmod 0640 "$tmp"
+  mv -f "$tmp" "$dst"
+  if zone_configured "$zone" && systemctl is-active --quiet named; then
+    if ! rndc reload "$zone" >/dev/null; then
+      [[ -f $dst.prev ]] && mv -f "$dst.prev" "$dst"
+      rndc reload "$zone" >/dev/null 2>&1 || true
+      die "rndc reload başarısız; önceki zone dosyası geri yüklendi"
+    fi
+  fi
+  rm -f "$dst.prev"
+}
+
+# acme_hook add|del — certbot manual DNS-01 hook body.
+acme_hook() {
+  local op=$1 domain=${CERTBOT_DOMAIN:-} val=${CERTBOT_VALIDATION:-} zone state line dst old tmp i
+  domain=${domain#\*.}
+  validate_domain "$domain"
+  validate_acme_value "$val"
+  need_bind
+  dns_lock
+  mapfile -t zones < <(configured_zones)
+  zone=$(acme_zone_for "$domain" "${zones[@]}") || die "${domain} paneldeki hiçbir DNS zone'unda değil"
+  dst=$(zone_file "$zone")
+  [[ -f $dst ]] || die "zone dosyası yok: ${zone}"
+  state=$(acme_state "$zone")
+  line=$(acme_line "$domain" "$val")
+  old=$(mktemp "$STATE_ROOT/.old.XXXXXX")
+  tmp=$(mktemp "$ZONE_DIR/.${zone}.XXXXXX")
+  trap 'rm -f "$old" "$tmp" "$tmp.base"' EXIT
+  [[ -f $state ]] && cp "$state" "$old"
+  acme_state_edit "$state" "$op" "$line"
+  if [[ -s $old ]]; then grep -vxF -f "$old" "$dst" >"$tmp.base" || true; else cp "$dst" "$tmp.base"; fi
+  zone_with_acme "$tmp.base" "$state" "$tmp"
+  if ! (install_zone "$zone" "$tmp"); then
+    mv -f "$old" "$state"
+    die "ACME kaydı zone'a yazılamadı: ${zone}"
+  fi
+  [[ -s $state ]] || rm -f "$state"
+  rm -f "$old" "$tmp.base"
+  trap - EXIT
+  log "ACME ${op}: _acme-challenge.${domain} (${zone})"
+  [[ $op == add ]] || return 0
+  # Let's Encrypt asks the authoritative servers (this one) right after the
+  # hook returns: wait until named answers with the new value (inline-signed
+  # zones are re-signed asynchronously).
+  command -v dig >/dev/null || { sleep 5; return 0; }
+  for ((i = 0; i < 30; i++)); do
+    [[ $(dig +short +norecurse +time=2 +tries=1 @127.0.0.1 TXT "_acme-challenge.${domain}" 2>/dev/null) == *"\"$val\""* ]] && return 0
+    sleep 1
+  done
+  die "named 30 sn içinde yeni ACME kaydını yanıtlamadı: _acme-challenge.${domain}"
+}
 
 zone_configured() { [[ -f $CONF ]] && grep -qxF "zone \"$1\" {" "$CONF"; }
 
@@ -90,8 +189,8 @@ install)
   export DEBIAN_FRONTEND=noninteractive
   log "apt-get update"
   apt-get update -q
-  log "apt-get install bind9 bind9-utils"
-  apt-get install -y -q --no-install-recommends bind9 bind9-utils
+  log "apt-get install bind9 bind9-utils bind9-dnsutils"
+  apt-get install -y -q --no-install-recommends bind9 bind9-utils bind9-dnsutils
   touch "$MARKER"
   install -d -o bind -g bind -m 0750 "$ZONE_DIR" "$KEY_DIR"
   [[ -f $CONF ]] || install -o root -g bind -m 0644 /dev/null "$CONF"
@@ -120,29 +219,18 @@ write-zone)
   need_bind
   install -d -o bind -g bind -m 0750 "$ZONE_DIR"
   tmp=$(mktemp "$ZONE_DIR/.${zone}.XXXXXX")
-  trap 'rm -f "$tmp"' EXIT
-  head -c 1048577 >"$tmp"
-  validate_zone_file "$tmp" "$zone"
-  named-checkzone -q -k fail -n fail "$zone" "$tmp" || {
-    named-checkzone -k fail -n fail "$zone" "$tmp" >&2 || true
-    die "named-checkzone zone'u reddetti"
-  }
-  dst=$(zone_file "$zone")
-  [[ ! -L $dst ]] || die "zone dosyası symlink olamaz"
-  [[ ! -f $dst ]] || cp -a "$dst" "$dst.prev"
-  chown bind:bind "$tmp"
-  chmod 0640 "$tmp"
-  mv -f "$tmp" "$dst"
-  trap - EXIT
-  if zone_configured "$zone" && systemctl is-active --quiet named; then
-    if ! rndc reload "$zone" >/dev/null; then
-      [[ -f $dst.prev ]] && mv -f "$dst.prev" "$dst"
-      rndc reload "$zone" >/dev/null 2>&1 || true
-      die "rndc reload başarısız; önceki zone dosyası geri yüklendi"
-    fi
-  fi
-  rm -f "$dst.prev"
-  log "zone yazıldı: $zone"
+  trap 'rm -f "$tmp" "$tmp.in"' EXIT
+  head -c 1048577 >"$tmp.in"
+  validate_zone_file "$tmp.in" "$zone"
+  dns_lock
+  zone_with_acme "$tmp.in" "$(acme_state "$zone")" "$tmp"
+  install_zone "$zone" "$tmp"
+  log "zone yazıldı: $zone (serial $(zone_serial "$(zone_file "$zone")"))"
+  ;;
+
+acme-auth | acme-cleanup)
+  [[ $# -eq 0 ]] || die "kullanım: ${action} (certbot ortam değişkenleriyle)"
+  if [[ $action == acme-auth ]]; then acme_hook add; else acme_hook del; fi
   ;;
 
 sync-config)
@@ -194,6 +282,8 @@ delete-zone)
   validate_domain "$zone"
   need_bind
   ! zone_configured "$zone" || die "zone hâlâ yapılandırmada; önce sync-config"
+  dns_lock
+  rm -f "$(acme_state "$zone")"
   shopt -s nullglob
   files=("$ZONE_DIR/$zone".db* "$KEY_DIR/K$zone".+*)
   if ((${#files[@]} > 0)); then

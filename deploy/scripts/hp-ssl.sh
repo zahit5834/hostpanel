@@ -5,7 +5,9 @@
 #       ACME webroot, certbot deploy hook (nginx reload + renewal log line).
 #   hp-ssl.sh issue <domain> <email> <method> <staging 0|1> <force 0|1> <name>...
 #       Let's Encrypt via certbot certonly; lineage name = <domain>.
-#       method: webroot (dns-* methods can be added here later).
+#       method: webroot (HTTP-01) | dns (DNS-01 through the panel's BIND:
+#       certbot --manual with hp-dns.sh acme-auth/acme-cleanup hooks, which
+#       certbot also uses on renewal). "*.<name>" only with dns.
 #   hp-ssl.sh renew <domain> <force 0|1>
 #   hp-ssl.sh show <domain>            prints the LE fullchain (public data)
 #   hp-ssl.sh export-key <domain>      prints the LE private key (panel export)
@@ -75,18 +77,32 @@ case $action in
     shift 5
     validate_domain "$domain"
     validate_email "$email"
-    validate_oneof "$method" webroot
+    validate_oneof "$method" webroot dns
     validate_oneof "$staging" 0 1
     validate_oneof "$force" 0 1
     (( $# <= 100 )) || die "en fazla 100 alan adı"
     args=(certonly --non-interactive --agree-tos --no-eff-email --email "$email"
           --cert-name "$domain" --keep-until-expiring --expand)
     for n in "$@"; do
-      validate_domain "$n"
+      if [[ $n == '*.'* ]]; then
+        [[ $method == dns ]] || die "wildcard ad yalnızca DNS doğrulamasıyla: ${n}"
+        validate_domain "${n#\*.}"
+      else
+        validate_domain "$n"
+      fi
       args+=(-d "$n")
     done
     case $method in
       webroot) args+=(--webroot -w "$WEBROOT") ;;
+      dns)
+        [[ -f /etc/bind/.hostpanel ]] || die "DNS doğrulaması için panelin DNS sunucusu kurulu olmalı"
+        # Stored in the renewal config: the root-owned path of this script set.
+        here=$(dirname "$(readlink -f "$0")")
+        [[ $here =~ ^/[A-Za-z0-9._/-]+$ && -x $here/hp-dns.sh ]] || die "hp-dns.sh bulunamadı"
+        args+=(--manual --preferred-challenges dns
+               --manual-auth-hook "${here}/hp-dns.sh acme-auth"
+               --manual-cleanup-hook "${here}/hp-dns.sh acme-cleanup")
+        ;;
     esac
     [[ $staging == 1 ]] && args+=(--test-cert)
     if [[ $force == 1 ]]; then

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"github.com/zahit5834/hostpanel/internal/rbl"
 	"net/http"
 	"runtime"
 	"sort"
@@ -172,6 +173,12 @@ func (s *Server) dashboardAlerts(ctx context.Context, snap system.Snapshot, rows
 	}
 	for _, d := range s.infraDown(ctx) {
 		out = append(out, alert{Text: d.Name + " çalışmıyor", Link: "/server?tab=general", Detail: d.Why})
+	}
+	if s.RBL != nil {
+		for _, r := range s.RBL.State(ctx).Listed() {
+			l, _ := rbl.ByID(r.List)
+			out = append(out, alert{Text: r.Target + " kara listede (" + l.Name + ")", Link: "/mail/deliverability", Detail: strings.Join(r.Codes, ", ")})
+		}
 	}
 	if s.Domains != nil {
 		for _, e := range s.Domains.Expiring(ctx, 15) {

@@ -57,7 +57,7 @@ if ((SITES)); then
   typed SITELERI-SIL "TÜM siteler (servisler, nginx config'leri, site kullanıcıları, /var/www/sites) silinecek." || fail "iptal edildi"
 fi
 if ((DBS)); then
-  typed VERITABANLARINI-SIL "MSSQL ve PostgreSQL container'ları ve TÜM veritabanları (/var/lib/hostpanel/{mssql,postgres,postgres-backup}) silinecek." || fail "iptal edildi"
+  typed VERITABANLARINI-SIL "MSSQL ve PostgreSQL container'ları ve TÜM veritabanları (/var/lib/hostpanel-db ve eski konum /var/lib/hostpanel/{mssql,postgres,postgres-backup}) silinecek." || fail "iptal edildi"
 fi
 if ((MAIL)); then
   typed POSTALARI-SIL "Posta sunucusu ve TÜM posta kutuları, postalar ve DKIM anahtarları (/var/lib/hostpanel-mail) silinecek." || fail "iptal edildi"
@@ -115,7 +115,7 @@ if ((DBS)); then
   if command -v docker >/dev/null; then
     docker rm -f hostpanel-mssql hostpanel-postgres >/dev/null 2>&1 || true
   fi
-  rm -rf /var/lib/hostpanel/mssql /var/lib/hostpanel/postgres /var/lib/hostpanel/postgres-backup
+  rm -rf /var/lib/hostpanel/mssql /var/lib/hostpanel/postgres /var/lib/hostpanel/postgres-backup /var/lib/hostpanel-db
 fi
 
 if ((MAIL)); then

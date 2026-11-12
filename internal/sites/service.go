@@ -60,6 +60,10 @@ type Service struct {
 	// Changed is told the host names of a site that was created, deleted or
 	// renamed (aliases/www), so DNS can re-render its zones. Must not block.
 	Changed func(ctx context.Context, names []string)
+	// WildcardReady reports why "*.<domain>" can't be served yet (nil: it
+	// can): the name needs a zone on the panel's own BIND (DNS-01). Injected
+	// by the dns package; nil means never.
+	WildcardReady func(ctx context.Context, domain string) error
 
 	locks sync.Map // site id → *sync.Mutex: one mutating operation per site at a time
 }
@@ -1052,6 +1056,9 @@ func (s *Service) notPanelDomain(ctx context.Context, names []string) error {
 		}
 		if mail != "" && n == mail {
 			return fmt.Errorf("%s posta sunucusunun adı; site olarak kullanılamaz", n)
+		}
+		if _, base, ok := strings.Cut(mail, "."); ok && (n == "autoconfig."+base || n == "autodiscover."+base) {
+			return fmt.Errorf("%s posta istemcilerinin otomatik ayar adresi (posta sunucusu); site olarak kullanılamaz", n)
 		}
 	}
 	return nil

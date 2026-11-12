@@ -176,6 +176,8 @@
         </select>
       </label>
     </div>
+    <label class="check"><input type="checkbox" name="wildcard" value="1" {{if $s.Wildcard}}checked{{end}}> Tüm alt alan adlarını da karşıla (<code>*.{{$s.Domain}}</code>)</label>
+    <p class="muted small">Zone panelin DNS sunucusunda olmalı: <code>*</code> kaydı otomatik eklenir, sertifika SSL sekmesinden DNS doğrulamasıyla alınır. Kendi sitesi olan alt adlar (ve posta adı, panel) etkilenmez.</p>
   </section>
   <section class="card stack">
     <h2>Altyapı</h2>
@@ -320,7 +322,7 @@
     <tbody>
     {{range $d.Checks}}
       <tr>
-        <td><input type="checkbox" name="names" value="{{.Name}}" {{if or .OK (eq .Name $d.Site.Domain)}}checked{{end}} aria-label="{{.Name}}"></td>
+        <td><input type="checkbox" name="names" value="{{.Name}}" {{if or .OK (eq .Name $d.Site.Domain) (and (eq .Name $d.Site.WildcardName) (not $d.DNSErr))}}checked{{end}} aria-label="{{.Name}}"></td>
         <td><code>{{.Name}}</code></td>
         <td class="small">{{range $i, $ip := .IPs}}{{if $i}}, {{end}}{{$ip}}{{else}}<span class="muted">kayıt yok</span>{{end}}</td>
         <td class="small">{{if .OK}}<span class="badge success">hazır</span>{{else}}<span class="badge failed">sorun</span>{{end}}
@@ -336,6 +338,13 @@ DNS henüz bu sunucuyu göstermiyorsa siteyi kendi bilgisayarınızda denemek i�
 {{range $d.Checks}}{{if not .OK}}{{or $d.ServerIP "SUNUCU_IP"}}  {{.Name}}
 {{end}}{{end}}DNS değişince bu sayfayı yenileyip sertifikayı alın.</div>
   {{end}}
+  <label>Doğrulama yöntemi
+    <select name="method">
+      <option value="http">HTTP (port 80)</option>
+      <option value="dns"{{if $d.DNSErr}} disabled{{else if $d.Site.Wildcard}} selected{{end}}>DNS (panelin DNS sunucusu)</option>
+    </select>
+    <span class="muted small">{{if $d.DNSErr}}DNS doğrulaması kullanılamıyor: {{$d.DNSErr}}{{else}}DNS doğrulaması <code>*.</code> (wildcard) adlar için zorunludur, CDN arkasındaki sitelerde de çalışır; zone'un NS kayıtları bu sunucuyu göstermeli. Yenileme aynı yöntemle otomatik.{{end}}</span>
+  </label>
   <div><button type="button" class="small" hx-get="/sites/{{$d.Site.ID}}/ssl/check" hx-target="#ssl-check" hx-swap="outerHTML">Tekrar kontrol et</button></div>
 </div>
 {{end}}

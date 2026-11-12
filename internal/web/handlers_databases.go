@@ -304,3 +304,15 @@ func (s *Server) dbLoginAction(w http.ResponseWriter, r *http.Request) {
 	}
 	s.renderDatabases(w, r, http.StatusOK, databases.CreateInput{}, "", notice)
 }
+
+// relocateConfirm is typed to move a database data directory (T2).
+const relocateConfirm = "TASI"
+
+func (s *Server) dbServerRelocate(w http.ResponseWriter, r *http.Request) {
+	if r.PostFormValue("confirm") != relocateConfirm {
+		s.renderDatabases(w, r, http.StatusBadRequest, databases.CreateInput{}, "Onay için "+relocateConfirm+" yazın.", "")
+		return
+	}
+	id, err := s.DBs.StartRelocate(r.Context())
+	s.dbJobRedirect(w, r, id, err)
+}

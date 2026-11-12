@@ -22,6 +22,10 @@ func TestMailRecords(t *testing.T) {
 		"_dmarc.ornek.com. 3600 IN TXT \"v=DMARC1; p=quarantine\"\n",
 		"sub.ornek.com. 3600 IN MX 10 mail.ornek.com.\n",
 		"_dmarc.sub.ornek.com. 3600 IN TXT",
+		"_autodiscover._tcp.ornek.com. 3600 IN SRV 0 0 443 mail.ornek.com.\n",
+		"_imaps._tcp.ornek.com. 3600 IN SRV 0 1 993 mail.ornek.com.\n",
+		"_submissions._tcp.ornek.com. 3600 IN SRV 0 1 465 mail.ornek.com.\n",
+		"_submission._tcp.sub.ornek.com. 3600 IN SRV 0 1 587 mail.ornek.com.\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in\n%s", want, got)
@@ -48,7 +52,7 @@ func TestMailRecords(t *testing.T) {
 		switch {
 		case r.Source != "posta" && r.Source != "nameserver":
 			t.Errorf("source %+v", r)
-		case r.Source == "posta" && r.Name != "mail._domainkey":
+		case r.Source == "posta" && r.Name != "mail._domainkey" && r.Type != TypeSRV:
 			t.Errorf("manual record overridden by %+v", r)
 		}
 	}
@@ -67,6 +71,43 @@ func TestMailRecords(t *testing.T) {
 	for _, r := range AutoRecords(in) {
 		if r.Source == "posta" {
 			t.Fatalf("%+v", r)
+		}
+	}
+}
+
+func TestMailClientAndReportRecords(t *testing.T) {
+	z := Zone{ID: 1, Name: "ornek.com", Serial: 2026111101, DefaultTTL: 3600, Refresh: 3600, Retry: 900, Expire: 1209600, Minimum: 300}
+	in := RenderInput{Zone: z, Settings: testSettings(), MailHost: "mail.ornek.com",
+		MailDomains:    []MailDomain{{Name: "ornek.com", DMARC: "v=DMARC1; p=reject; rua=mailto:dmarc@ornek.com"}},
+		MailExtraHosts: []string{"autoconfig.ornek.com", "autodiscover.ornek.com", "autoconfig.baska.net"},
+		MailReports:    []string{"musteri.net._report._dmarc.ornek.com", "x.com._report._dmarc.baska.net"},
+	}
+	got := Render(in)
+	for _, want := range []string{
+		"_dmarc.ornek.com. 3600 IN TXT \"v=DMARC1; p=reject; rua=mailto:dmarc@ornek.com\"\n",
+		"autoconfig.ornek.com. 3600 IN A 185.48.180.32\n",
+		"autodiscover.ornek.com. 3600 IN A 185.48.180.32\n",
+		"musteri.net._report._dmarc.ornek.com. 3600 IN TXT \"v=DMARC1\"\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "baska.net") || strings.Contains(got, "x.com._report") {
+		t.Fatalf("names outside the zone:\n%s", got)
+	}
+	if err := ValidateZoneFile(got, "ornek.com"); err != nil {
+		t.Fatal(err)
+	}
+	// Manual records at those names win.
+	in.Records = []Record{
+		{Name: "autoconfig", Type: TypeCNAME, Value: "elsewhere.net"},
+		{Name: "_imaps._tcp", Type: TypeSRV, Prio: 5, Weight: 0, Port: 993, Value: "imap.elsewhere.net"},
+		{Name: "musteri.net._report._dmarc", Type: TypeTXT, Value: "v=DMARC1"},
+	}
+	for _, r := range AutoRecords(in) {
+		if r.Name == "autoconfig" || r.Name == "_imaps._tcp" || r.Name == "musteri.net._report._dmarc" {
+			t.Errorf("manual record overridden by %+v", r)
 		}
 	}
 }

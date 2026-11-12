@@ -3,12 +3,12 @@
 Ubuntu 24.04 için tek yöneticili, ultra hafif hosting kontrol paneli: Go, tek statik binary (~19 MB), boşta < 30 MB RAM, boşta ~%0 CPU.
 
 ## Özellikler
-- **Siteler:** ASP.NET Core, Node.js, PHP 8.3 (site başına php-fpm) ve statik/SPA. Her site kendi Linux kullanıcısı ve sıkı sandbox'lı systemd unit'iyle çalışır.
+- **Siteler:** ASP.NET Core, Node.js, PHP 8.3 (site başına php-fpm) ve statik/SPA. Her site kendi Linux kullanıcısı ve sıkı sandbox'lı systemd unit'iyle çalışır. İsteğe bağlı olarak tüm alt alan adlarını karşılar (`*.alanadi.com`).
 - **Deploy:** zip yükleme veya Git (SSH deploy key / açık https), sunucuda build. Health check başarısızsa önceki sürüme otomatik döner; tek tıkla rollback.
-- **SSL:** Let's Encrypt (DNS + HTTP ön kontrolü, otomatik yenileme), CSR üretimi, ücretli sertifika doğrulama ve kurulumu, bitiş takibi.
+- **SSL:** Let's Encrypt (DNS + HTTP ön kontrolü, otomatik yenileme), panelin DNS sunucusuyla DNS doğrulaması ve wildcard (`*.alanadi.com`) sertifika, CSR üretimi, ücretli sertifika doğrulama ve kurulumu, bitiş takibi.
 - **MSSQL 2025 (Docker):** müşteri başına login, izole veritabanları, dış erişim için IP allowlist + UFW.
 - **PostgreSQL 18 (Docker):** müşteri başına rol, sahibine ait veritabanları, site env'ine connection string, `pg_dump -Fc` dökümüyle taşıma, yedek/geri yükleme, dış erişim için IP allowlist + UFW.
-- **E-posta (docker-mailserver):** müşteri alan adları için posta kutuları, kota, yönlendirmeler; DKIM/SPF/DMARC/MX kayıtları panelin DNS'ine otomatik; Let's Encrypt sertifikası, kuyruk, engellenen IP'ler, yedek/geri yükleme. Webmail yoktur (Outlook, Thunderbird, telefon).
+- **E-posta (docker-mailserver):** müşteri alan adları için posta kutuları, kota, yönlendirmeler, catch-all; DKIM/SPF/DMARC/MX kayıtları panelin DNS'ine otomatik; Let's Encrypt sertifikası, kuyruk, engellenen IP'ler, yedek/geri yükleme. İstemcilerin otomatik ayarı (Thunderbird, Outlook, iPhone/Mac profili), kutu başına saatlik gönderim sınırı, kutuyu askıya alma / gönderimini durdurma, kara liste (RBL) kontrolü, DMARC politikası ve raporları. Webmail yoktur.
 - **Yedekleme:** yerel + Google Drive (rclone, isteğe bağlı şifreleme). Planlar, saklama kuralları, geri yükleme/klon ve taşıma sihirbazı. Haftalık yedek doğrulama (Drive'dan indirip sağlama, arşiv ve veritabanı kontrolü; hiçbir şey geri yüklenmez).
 - **DNS (kendi nameserver'larınız):** BIND 9 (yalnızca yetkili sunucu), zone ve kayıt yönetimi (A, AAAA, CNAME, MX, TXT, SRV, CAA, NS), sitelerin A/AAAA kayıtları otomatik, yetki devri kontrolü, isteğe bağlı DNSSEC.
 - **İzleme:** CPU/RAM/disk, site başına RAM/CPU, health check, çökme döngüsü tespiti, altyapı izleme (nginx, Docker, BIND, fail2ban, certbot, veritabanı ve posta container'ları), 30 günlük sunucu metrik grafikleri, dış heartbeat (healthchecks.io / Uptime Kuma), Telegram/e-posta bildirimleri, günlük/haftalık özet raporu, Telegram komutları (`/durum`, `/siteler`, `/disk`, `/yedekler`, 2FA kodlu `/yeniden_baslat`).
@@ -85,12 +85,13 @@ Ardından `https://127.0.0.1:8443` adresini açın.
    - Sitenin domain, www ve alias'ları için A/AAAA kayıtları otomatik üretilir; aynı ada elle kayıt girerseniz sizinki geçerli olur.
    - Domain'in nameserver'larını registrar'da `ns1`/`ns2` yapın. Zone sayfasındaki "Yetki devri" alanı yayıldığında yeşile döner (birkaç saat sürebilir).
 5. **DNSSEC (isteğe bağlı):** zone ayarlarından açın; "DS kaydı"nı registrar'a girin. Kapatmadan önce DS'i registrar'dan kaldırın.
+6. **Wildcard site ve sertifika:** site → Ayarlar → "Tüm alt alan adlarını da karşıla" (zone panelin DNS sunucusunda olmalı; `*` kaydı otomatik eklenir). Ardından SSL sekmesinde `*.alanadi.com`'u seçip "DNS (panelin DNS sunucusu)" yöntemiyle sertifika alın. certbot doğrulama kaydını (`_acme-challenge`) zone'a kendisi yazar ve siler; yenileme de aynı yolla otomatiktir. DNS doğrulaması CDN arkasındaki sitelerde de kullanılabilir. Kendi sitesi olan alt adlar, posta adı ve panel etkilenmez.
 
 Sunucu kapalıyken bu domain'ler çözülmez. E-posta gibi kritik hizmetler için bunu göz önünde bulundurun.
 
 ## PostgreSQL
 1. **Veritabanları → PostgreSQL:** Docker yoksa "Docker'ı kur", ardından bellek miktarını seçip "PostgreSQL'i kur".
-   - İmaj `postgres:18.6-trixie`, container `hostpanel-postgres`, veri `/var/lib/hostpanel/postgres`.
+   - İmaj `postgres:18.6-trixie`, container `hostpanel-postgres`, veri `/var/lib/hostpanel-db/postgres` (v0.8.0 öncesi kurulumlarda `/var/lib/hostpanel/postgres`; aşağıdaki nota bakın).
    - Yalnızca `127.0.0.1:5432`'de dinler. `postgres` süper kullanıcısının şifresi yoktur ve TCP'den bağlanamaz; yönetim işlerini root helper container içinden yapar.
 2. **Müşteri rolü + veritabanı:** veritabanını oluştururken müşteriyi ve (isteğe bağlı) siteyi seçin. Rol (`c_<müşteri>`) gerekirse otomatik açılır. Bağlantı dizesi sitenin ortam değişkenine yazılır:
    - .NET (Npgsql): `ConnectionStrings__DefaultConnection` = `Host=127.0.0.1;Port=5432;Database=…;Username=…;Password=…`
@@ -108,6 +109,8 @@ Sunucu kapalıyken bu domain'ler çözülmez. E-posta gibi kritik hizmetler içi
 
 Not: PostgreSQL'de veritabanı **adları** tüm rollere görünür; içerik görünmez. Bir müşteri başka bir müşterinin veritabanına bağlanamaz, okuyamaz ve yazamaz. "İzolasyon testi" bunu iki yönde doğrular.
 
+**Veri dizinini güvenli konuma taşıma (v0.8.0 öncesi kurulumlar):** MSSQL ve PostgreSQL verisi eskiden panel kullanıcısına ait `/var/lib/hostpanel` altındaydı. Veritabanları ve PostgreSQL sayfalarındaki "Veri dizinini güvenli konuma taşı" (`TASI` yazarak) container'ı kaldırır, dizini root'a ait `/var/lib/hostpanel-db/`'ye taşır (aynı disk; kopya değil, anlık) ve container'ı yeniden açar. Birkaç dakikalık kesinti olur; açılmazsa eski konuma otomatik dönülür. Güvenlik sayfası eski konumdaki kurulumları uyarır.
+
 ## E-posta
 1. **Ön koşullar:**
    - Posta sunucusunun adı (ör. `mail.ornek.com`) için bu sunucuyu gösteren bir **A kaydı**.
@@ -122,7 +125,14 @@ Not: PostgreSQL'de veritabanı **adları** tüm rollere görünür; içerik gör
    - Şifre panelde **saklanmaz**: oluşturma ve sıfırlamada bir kez gösterilir.
    - Zone panelin DNS'indeyse MX, SPF, DKIM ve DMARC kayıtları otomatik yayınlanır. Değilse sayfadaki tabloyu alan adının DNS sağlayıcısına girin.
 4. **İstemci ayarları:** IMAP `<posta adı>:993` (SSL/TLS), SMTP `<posta adı>:465` (SSL/TLS) ya da `587` (STARTTLS); kullanıcı adı tam e-posta adresidir.
-5. **Yedek:** E-posta sayfasından "Şimdi yedekle" ya da Yedekler → plan kapsamı "Posta sunucusu". Yedek tüm hesapları, DKIM anahtarlarını ve postaları içerir (tam yedek). Geri yükleme E-posta sayfasından yapılır.
+   - **Otomatik ayar:** E-posta → Teslim edilebilirlik → "Otomatik ayar adlarını sertifikaya ekle" (`autoconfig.` / `autodiscover.` + posta adının üst alan adı; A kayıtları bu sunucuyu göstermeli). Sonra Thunderbird ve Outlook yalnızca adres + şifreyle kurulur. iPhone/Mac için posta kutusu satırındaki **Apple profili** (şifre içermez; imzasız olduğu için iOS "doğrulanmamış" der).
+5. **Teslim edilebilirlik** (E-posta → Teslim edilebilirlik):
+   - **Gönderim sınırı:** her kutu saatte en fazla N ileti (varsayılan 200). Aşan iletiler geçici hatayla reddedilir. Kuyruk birikmesi ve olağan dışı gönderim bildirim olarak gelir (bildirim türü "Posta").
+   - **Erişim:** alan adı sayfasında bir kutuyu **askıya alın** (giriş kapanır, posta gelmeye devam eder) ya da yalnızca **gönderimini durdurun** (isteğe bağlı olarak kuyruktaki iletileri silerek). Geri açmak son 10 dakikada kimlik doğrulaması ister.
+   - **Catch-all:** alan adının bilinmeyen adreslerine gelen postalar paneldeki bir kutuya (spam'i artırır).
+   - **Kara listeler:** sunucu IP'si ve alan adları her gün Spamhaus, SpamCop, Barracuda, PSBL, Mailspike'ta sorgulanır. Spamhaus genel DNS çözümleyicilerini yanıtlamaz; ücretsiz DQS anahtarı girilebilir.
+   - **DMARC:** alan adı başına politika (none / quarantine / reject). Bir `dmarc@<alan adı>` kutusu seçilirse raporlar oraya gelir ve panelde alan adı başına özet (geçen/kalan IP'ler) gösterilir. Panel yalnızca bu kutuyu okur.
+6. **Yedek:** E-posta sayfasından "Şimdi yedekle" ya da Yedekler → plan kapsamı "Posta sunucusu". Yedek tüm hesapları, DKIM anahtarlarını ve postaları içerir (tam yedek). Geri yükleme E-posta sayfasından yapılır.
 
 Kaba kuvvet denemelerini container içindeki fail2ban engeller (yalnızca posta portları; SSH'a dokunmaz). Engellenen IP'ler E-posta sayfasından kaldırılabilir.
 
@@ -210,6 +220,7 @@ Varsayılan olarak yalnızca panel kaldırılır. Siteler çalışmaya devam ede
 - **Gizli bilgiler:** AES-256-GCM ile saklanır (`master.key`, 0600) ve loglarda maskelenir.
 - **Yalnızca root'ta duranlar:** Drive token'ı, git deploy key'leri ve yedek dosyaları. Panel ele geçirilse bile bunları okuyamaz.
 - **Site izolasyonu:** her site ayrı kullanıcı ve sandbox'la çalışır. MSSQL'de müşteriler birbirinin veritabanını göremez; PostgreSQL'de bağlanamaz.
+- **E-posta:** ele geçirilmiş bir kutu saatlik sınırla sınırlanır ve tek tıkla durdurulur; panel müşteri postalarını okumaz (yalnızca seçilen DMARC rapor kutusu).
 - **Oturum güvenliği:** argon2id, 2FA, CSRF, sıkı CSP, giriş rate limit'i, fail2ban.
 
 ## Geliştirme

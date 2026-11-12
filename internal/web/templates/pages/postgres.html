@@ -206,6 +206,15 @@
   {{end}}
 </dl>
 {{if .Err}}<p class="err-text small">{{.Err}}</p>{{end}}
+{{if .DataDir}}<p class="small muted">Veri dizini: <code>{{.DataDir}}</code></p>{{end}}
+{{if .OldLocation}}<div class="alert info small stack">
+  <p><strong>Veri dizini eski konumda.</strong> Üst dizin panel kullanıcısına ait; root'a ait <code>/var/lib/hostpanel-db</code> altına taşımak bir güvenlik açığını kapatır. Taşıma aynı diskte anlıktır (kopyalama yok), ama container yeniden oluşturulduğu için PostgreSQL birkaç dakika erişilemez. Açılmazsa eski konuma otomatik dönülür. Önce yedek almanız önerilir.</p>
+  <form method="post" action="/postgres/server/relocate" class="ops" data-confirm="PostgreSQL durdurulup veri dizini taşınacak. Devam edilsin mi?">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Onay için <code>TASI</code> yazın <input name="confirm" autocomplete="off" required spellcheck="false"></label>
+    <button type="submit">Veri dizinini güvenli konuma taşı</button>
+  </form>
+</div>{{end}}
 <p class="small"><a href="/logs/system?source=postgres">Container logları →</a></p>
 {{end}}{{end}}
 

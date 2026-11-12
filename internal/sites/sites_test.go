@@ -142,6 +142,14 @@ func TestRenderNginxModes(t *testing.T) {
 	if err != nil || !strings.Contains(st, "try_files $uri $uri/ /index.html;") || !strings.Contains(st, "server_name ornek.com www.ornek.com shop.ornek.com;") {
 		t.Fatalf("%v\n%s", err, st)
 	}
+	site.Wildcard = true
+	if st, _ := RenderNginx(templatesDir, "static.conf.tpl", NginxDataFor(site, static.Def(), ModeApp, "/opt/hostpanel/templates")); !strings.Contains(st, "server_name ornek.com www.ornek.com shop.ornek.com *.ornek.com;") {
+		t.Fatalf("wildcard server_name:\n%s", st)
+	}
+	if names := site.HostNames(); names[len(names)-1] != "*.ornek.com" {
+		t.Fatalf("HostNames %v", names)
+	}
+	site.Wildcard = false
 	// A snippet that sneaks in a log directive fails the full-config check.
 	site.CustomSnippet = "error_log /etc/cron.d/x;"
 	if _, err := RenderNginx(templatesDir, "static.conf.tpl", NginxDataFor(site, static.Def(), ModeApp, "/opt/hostpanel/templates")); err == nil {

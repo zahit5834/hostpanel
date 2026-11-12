@@ -88,11 +88,19 @@ func (c *Checker) hasV6() bool {
 	return false
 }
 
+// WildcardProbe is the label checked in place of "*" (the wildcard record
+// and the site's *.domain server_name both answer it).
+const WildcardProbe = "hostpanel-wildcard-probe"
+
 func (c *Checker) one(ctx context.Context, name string) NameCheck {
 	r := NameCheck{Name: name}
+	q := name
+	if rest, ok := strings.CutPrefix(name, "*."); ok {
+		q = WildcardProbe + "." + rest
+	}
 	lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	addrs, err := c.Resolver.LookupIPAddr(lctx, name)
+	addrs, err := c.Resolver.LookupIPAddr(lctx, q)
 	if err != nil || len(addrs) == 0 {
 		r.Problems = append(r.Problems, "DNS kaydı bulunamadı (A/AAAA yok). Alan adının DNS'inde bu sunucunun IP'sine A kaydı ekleyin.")
 		return r
@@ -118,7 +126,7 @@ func (c *Checker) one(ctx context.Context, name string) NameCheck {
 	if !v4 {
 		r.Notes = append(r.Notes, "A (IPv4) kaydı yok.")
 	}
-	r.HTTP, err = c.probe(ctx, name)
+	r.HTTP, err = c.probe(ctx, q)
 	switch {
 	case r.HTTP && len(r.Foreign) > 0:
 		r.Notes = append(r.Notes, "Kayıtlar ("+strings.Join(r.Foreign, ", ")+") bu sunucuya ait değil ama istekler buraya ulaşıyor (CDN/proxy veya NAT olabilir).")

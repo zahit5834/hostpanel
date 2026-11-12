@@ -42,6 +42,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/notify"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
 	"github.com/zahit5834/hostpanel/internal/pgsql"
+	"github.com/zahit5834/hostpanel/internal/rbl"
 	"github.com/zahit5834/hostpanel/internal/runtimes"
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
@@ -149,6 +150,12 @@ func serve(args []string) error {
 	if os.Getenv("GOMEMLIMIT") == "" {
 		debug.SetMemoryLimit(64 << 20)
 	}
+	// GOGC 50 unless set: the live heap is ~1.5 MB, so the extra collections
+	// cost nothing noticeable, while less garbage between cycles leaves fewer
+	// half-used spans behind (idle RSS −0.5 MB, measured in Faz 13).
+	if os.Getenv("GOGC") == "" {
+		debug.SetGCPercent(50)
+	}
 	for _, d := range []string{cfg.LogDir, cfg.JobLogDir()} {
 		if err := os.MkdirAll(d, 0o750); err != nil {
 			return err
@@ -234,14 +241,8 @@ func serve(args []string) error {
 	}
 	mailSvc.Register()
 	siteSvc.MailHost = mailSvc.Host
-	dnsSvc.Mail = func(ctx context.Context) (string, []dns.MailDomain) {
-		host, ds := mailSvc.DNSInfo(ctx)
-		out := make([]dns.MailDomain, 0, len(ds))
-		for _, d := range ds {
-			out = append(out, dns.MailDomain{Name: d.Name, DKIMSelector: d.DKIMSelector, DKIMTXT: d.DKIMTXT})
-		}
-		return host, out
-	}
+	dnsSvc.Mail = mailSvc.ZoneInfo
+	sslSvc.ACMEReady = dnsSvc.ACMEReady
 	bkSvc := &backups.Service{Store: backups.NewStore(a.db), DB: a.db, Box: a.box, Runner: runner, Probe: probe, Jobs: jm,
 		Activity: activity, Log: log, Sites: siteSvc, DBs: dbSvc, PG: pgSvc, ScriptsDir: cfg.ScriptsDir,
 		UploadDir: siteSvc.UploadDir, DryRun: cfg.DryRun, Mail: mailSvc}
@@ -294,8 +295,9 @@ func serve(args []string) error {
 	srv.Domains = &domains.Service{DB: a.db, Log: log, Notify: func(ctx context.Context, title, text, key string) {
 		notifySvc.Send(ctx, notify.Event{Kind: notify.KindDomain, Key: key, Title: title, Text: text})
 	}}
+	srv.RBL = &rbl.Service{DB: a.db, Box: a.box, Targets: srv.RBLTargets}
 	// Cheap checks that ride on the monitor's 10-minute step (no new timer).
-	monSvc.Periodic = []func(context.Context){srv.OOMCheck, srv.SSHWatch, srv.CLIWatch, srv.InfraCheck}
+	monSvc.Periodic = []func(context.Context){srv.OOMCheck, srv.SSHWatch, srv.CLIWatch, srv.InfraCheck, srv.MailWatch}
 	srv.ExportConfig = func(ctx context.Context, pass string, w io.Writer) (panelcfg.Manifest, error) {
 		server := store.GetSetting(ctx, a.db, "backup_server_name", "")
 		if server == "" {
@@ -329,7 +331,7 @@ func serve(args []string) error {
 	if !cfg.Dev { // dev reads deploy/ straight from the repo (test files, no unit)
 		daily = append(daily, func(ctx context.Context) { srv.IntegrityCheck(ctx) })
 	}
-	daily = append(daily, srv.AuditNotify, srv.DomainsMaintain, srv.RuntimePatchCheck, bkSvc.MaintainVerify,
+	daily = append(daily, srv.AuditNotify, srv.DomainsMaintain, srv.RuntimePatchCheck, srv.MailMaintain, bkSvc.MaintainVerify,
 		func(ctx context.Context) { metricsSvc.Purge(ctx, time.Now()) },
 		// Maintenance is neither a request nor a job: hand its garbage back too.
 		func(context.Context) { idle.Touch() })
@@ -340,10 +342,10 @@ func serve(args []string) error {
 	go bkSvc.RunScheduler(jobCtx)
 	go notifySvc.Run(jobCtx)
 	go monSvc.Run(jobCtx)
-	go metricsSvc.Run(jobCtx)                   // 5-minute samples / heartbeat (sleeps without a timer when both are off)
-	go srv.RunSummary(jobCtx)                   // daily/weekly digest (no timer while off)
-	go notifySvc.RunBot(jobCtx, srv.BotCommand) // Telegram commands (no connection while off)
-	go mailSvc.EnsureVhost(jobCtx)              // one-shot: a panel update runs the old hp-update.sh
+	go metricsSvc.Run(jobCtx)                                              // 5-minute samples / heartbeat (sleeps without a timer when both are off)
+	go srv.RunSummary(jobCtx)                                              // daily/weekly digest (no timer while off)
+	go notifySvc.RunBot(jobCtx, srv.BotCommand)                            // Telegram commands (no connection while off)
+	go func() { mailSvc.EnsureVhost(jobCtx); mailSvc.EnsureOps(jobCtx) }() // one-shot: a panel update runs the old hp-update.sh
 	cronDone := make(chan struct{})
 	go func() { cronSvc.Run(jobCtx); close(cronDone) }()
 	srv.BaseCtx = jobCtx

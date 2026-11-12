@@ -64,6 +64,15 @@ type MailDomain struct {
 	Name         string
 	DKIMSelector string
 	DKIMTXT      string // "" until the key exists
+	DMARC        string // full _dmarc TXT value ("" = DMARCPolicy)
+}
+
+// MailInfo is what the mail service publishes into the zones.
+type MailInfo struct {
+	Host       string
+	Domains    []MailDomain
+	ExtraHosts []string // RenderInput.MailExtraHosts
+	Reports    []string // RenderInput.MailReports
 }
 
 // RenderInput is everything a zone file is built from.
@@ -77,6 +86,24 @@ type RenderInput struct {
 	// domains of this zone (MX, SPF, DKIM and DMARC records).
 	MailHost    string
 	MailDomains []MailDomain
+	// MailExtraHosts get the mail server's A record too (autoconfig. and
+	// autodiscover. of the mail host's parent domain, client set-up).
+	// MailReports are the "<domain>._report._dmarc.<report domain>" names
+	// authorizing DMARC reports for other domains (RFC 7489 §7.1).
+	MailExtraHosts []string
+	MailReports    []string
+}
+
+// MailSRV are the client set-up records published per mail domain (RFC 6186
+// and RFC 8314; _autodiscover for Outlook).
+var MailSRV = []struct {
+	Label              string
+	Prio, Weight, Port int
+}{
+	{"_autodiscover._tcp", 0, 0, 443},
+	{"_imaps._tcp", 0, 1, 993},
+	{"_submissions._tcp", 0, 1, 465},
+	{"_submission._tcp", 0, 1, 587},
 }
 
 // DMARCPolicy and SPFPolicy are the records published for mail domains.
@@ -163,16 +190,19 @@ func mailRecords(in RenderInput, taken map[string]bool) []Record {
 		r.ZoneID, r.Auto, r.Source = in.Zone.ID, true, "posta"
 		out = append(out, r)
 	}
-	if rel := relName(in.MailHost, zone); rel != "" && !taken[rel] {
-		taken[rel] = true
-		for _, ip := range in.Settings.IPs {
-			if ip.Is4() {
-				auto(Record{Name: rel, Type: TypeA, Value: ip.String()})
+	for _, h := range append([]string{in.MailHost}, in.MailExtraHosts...) {
+		if rel := relName(h, zone); rel != "" && !taken[rel] {
+			taken[rel] = true
+			for _, ip := range in.Settings.IPs {
+				if ip.Is4() {
+					auto(Record{Name: rel, Type: TypeA, Value: ip.String()})
+				}
 			}
 		}
 	}
-	cname, mx, spf, txt := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
+	cname, mx, spf, txt, named := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, r := range in.Records {
+		named[r.Name] = true
 		switch r.Type {
 		case TypeCNAME:
 			cname[r.Name] = true
@@ -202,7 +232,21 @@ func mailRecords(in RenderInput, taken map[string]bool) []Record {
 			}
 		}
 		if n := under("_dmarc", rel); !txt[n] && !cname[n] {
-			auto(Record{Name: n, Type: TypeTXT, Value: DMARCPolicy})
+			v := d.DMARC
+			if v == "" {
+				v = DMARCPolicy
+			}
+			auto(Record{Name: n, Type: TypeTXT, Value: v})
+		}
+		for _, srv := range MailSRV {
+			if n := under(srv.Label, rel); !named[n] {
+				auto(Record{Name: n, Type: TypeSRV, Prio: srv.Prio, Weight: srv.Weight, Port: srv.Port, Value: in.MailHost})
+			}
+		}
+	}
+	for _, name := range in.MailReports {
+		if n := relName(name, zone); n != "" && n != "@" && !txt[n] && !cname[n] {
+			auto(Record{Name: n, Type: TypeTXT, Value: "v=DMARC1"})
 		}
 	}
 	return out

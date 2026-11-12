@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
@@ -64,7 +65,11 @@ type Service struct {
 	// NameTaken rejects a mail host name used by a site or the panel.
 	NameTaken func(ctx context.Context, host string) error
 
-	mu sync.Mutex // serializes container-level operations
+	// ReportsDir overrides ReportsDir (tests).
+	ReportsDir string
+
+	mu     sync.Mutex // serializes container-level operations
+	syncMu sync.Mutex // one DMARC report sync at a time
 }
 
 // Register adds the job handlers.
@@ -73,6 +78,7 @@ func (s *Service) Register() {
 	s.Jobs.Register("mail.recreate", s.jobRecreate)
 	s.Jobs.Register("mail.mailbox.delete", s.jobDeleteMailbox)
 	s.Jobs.Register("mail.update", s.jobImageUpdate)
+	s.Jobs.Register("mail.cert.expand", s.jobCertExpand)
 }
 
 func paramID(p map[string]any, key string) int64 {
@@ -320,9 +326,10 @@ func (s *Service) createContainer(ctx context.Context, l *jobs.Log, srv Server) 
 }
 
 // vhostRev is the revision of the mail host's nginx vhost (lib.sh
-// render_mail_vhost). 2: port 443 with the mail certificate + catch-all.
+// render_mail_vhost). 2: port 443 with the mail certificate + catch-all;
+// 3: client set-up documents and the autoconfig./autodiscover. names.
 const (
-	vhostRev        = "2"
+	vhostRev        = "3"
 	settingVhostRev = "mail_vhost_rev"
 )
 
@@ -589,6 +596,9 @@ func (s *Service) RemoveFailed(ctx context.Context, w io.Writer) error {
 	}
 	if s.Fake != nil {
 		s.Fake.reset()
+	}
+	if err := s.applyRate(ctx, w, srv); err != nil {
+		fmt.Fprintf(w, "UYARI: gönderim sınırı yeniden yazılamadı: %v\n", err)
 	}
 	s.changed(ctx, names...)
 	return nil
@@ -1127,8 +1137,9 @@ type Record struct {
 	Value string
 }
 
-// Records returns the records of domain d for mail host.
-func Records(d Domain, host string) []Record {
+// Records returns the records of domain d for mail host (rua = DMARC
+// report address, "" = none).
+func Records(d Domain, host, rua string) []Record {
 	rs := []Record{
 		{d.Name, "MX", "10 " + host + "."},
 		{d.Name, "TXT", "v=spf1 mx ~all"},
@@ -1136,7 +1147,28 @@ func Records(d Domain, host string) []Record {
 	if d.DKIMTXT != "" {
 		rs = append(rs, Record{d.DKIMSelector + "._domainkey." + d.Name, "TXT", d.DKIMTXT})
 	}
-	return append(rs, Record{"_dmarc." + d.Name, "TXT", "v=DMARC1; p=quarantine"})
+	rs = append(rs, Record{"_dmarc." + d.Name, "TXT", DMARCValue(d, rua)})
+	for _, x := range dns.MailSRV {
+		rs = append(rs, Record{x.Label + "." + d.Name, "SRV", fmt.Sprintf("%d %d %d %s.", x.Prio, x.Weight, x.Port, host)})
+	}
+	return rs
+}
+
+// HostRecords are the records outside the mail domains: the mail host and
+// its client set-up names (A, IPv4 only) and the report authorizations.
+func HostRecords(host string, ips []netip.Addr, ds []Domain, rua string) []Record {
+	var rs []Record
+	for _, n := range append([]string{host}, AutoconfNames(host)...) {
+		for _, ip := range ips {
+			if ip.Is4() {
+				rs = append(rs, Record{n, "A", ip.String()})
+			}
+		}
+	}
+	for _, n := range ReportNames(ds, rua) {
+		rs = append(rs, Record{n, "TXT", "v=DMARC1"})
+	}
+	return rs
 }
 
 // Check is one line of the deliverability checks.
@@ -1355,6 +1387,9 @@ func (s *Service) Restore(ctx context.Context, w io.Writer, name string) error {
 			s.Store.SetDKIM(ctx, d.ID, txt)
 			fmt.Fprintf(w, "%s: DKIM kaydı yedektekiyle güncellendi (DNS yeniden uygulanıyor)\n", d.Name)
 		}
+	}
+	if err := s.applyRate(ctx, w, srv); err != nil {
+		fmt.Fprintf(w, "UYARI: gönderim sınırı yeniden yazılamadı: %v\n", err)
 	}
 	s.changed(ctx, names...)
 	return nil

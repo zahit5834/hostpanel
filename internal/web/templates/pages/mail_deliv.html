@@ -1,0 +1,138 @@
+{{define "content"}}
+{{with .Data}}{{$srv := .Server}}
+<div class="card-head"><h1><a href="/mail" class="muted">E-posta</a> / Teslim edilebilirlik</h1></div>
+
+{{if .JobID}}{{template "job-console" .JobID}}{{end}}
+{{if not .Installed}}<div class="alert">Posta sunucusunun kurulumu tamamlanmadı.</div>{{else}}
+
+<div class="grid two">
+<section class="card stack">
+  <h2>Giden posta sınırı</h2>
+  <p class="small">Ele geçirilmiş tek bir kutunun sunucu IP'sini kara listeye sokmasını önler: her posta kutusu saatte en fazla bu kadar ileti gönderebilir (aşan iletiler geçici hatayla reddedilir, istemci sonra yeniden dener).</p>
+  <form method="post" action="/mail/limits" class="stack">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <div class="form-grid">
+      <label>Kutu başına saatlik sınır <input type="number" name="rate_per_hour" min="0" max="{{.MaxRate}}" value="{{$srv.RatePerHour}}">
+        <span class="muted small">0 = sınırsız, aksi halde {{.MinRate}}–{{.MaxRate}}.</span></label>
+      <label>Kuyruk uyarısı (ileti) <input type="number" name="queue_alert" min="0" value="{{$srv.QueueAlert}}">
+        <span class="muted small">Kuyruk bu sayıya ulaşınca bildirim (0 = kapalı).</span></label>
+    </div>
+    <div><button type="submit">Kaydet</button></div>
+  </form>
+  <p class="muted small">10 dakikada saatlik sınırın yarısından fazla ileti gönderen kutu için “olağan dışı gönderim” bildirimi gelir (bildirim türü: Posta). Kutunun gönderimini alan adı sayfasında <strong>Erişim → Gönderimi durdur</strong> ile hemen kesebilirsiniz.</p>
+</section>
+
+<section class="card stack">
+  <h2>Son 1 saatte gönderenler</h2>
+  {{if .Running}}
+  <div hx-get="/mail/deliverability/senders" hx-trigger="load" hx-swap="innerHTML"><p class="muted small">Okunuyor…</p></div>
+  {{else}}<p class="muted small">Posta sunucusu çalışmıyor.</p>{{end}}
+</section>
+</div>
+
+<section class="card stack">
+  <div class="card-head"><h2>Kara listeler (RBL)</h2>
+    <form method="post" action="/mail/rbl/check"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">Şimdi kontrol et</button></form></div>
+  {{if .RBL.CheckedAt}}
+  <p class="small">Son kontrol: {{datetime .RBL.Checked}}{{if .RBL.DQS}} (Spamhaus DQS ile){{end}}. Her gün otomatik kontrol edilir; yeni listelenme bildirilir.</p>
+  {{if .RBL.Refused}}<div class="alert small">Bazı sorgular reddedildi. Spamhaus genel çözümleyicilerden (1.1.1.1, 8.8.8.8, birçok sağlayıcının DNS'i) gelen sorguları yanıtlamaz: ücretsiz <a href="https://www.spamhaus.com/free-trial/sign-up-for-a-free-data-query-service-account/" rel="noopener" target="_blank">Data Query Service</a> anahtarı alıp aşağıya girin.</div>{{end}}
+  <table class="table">
+    <thead><tr><th>Liste</th><th>Adres / ad</th><th>Durum</th><th></th></tr></thead>
+    <tbody>
+    {{range .RBL.Results}}{{$l := rblList .List}}
+      <tr>
+        <td>{{$l.Name}}</td>
+        <td><code>{{.Target}}</code></td>
+        <td>{{if eq .Status "listed"}}<span class="badge failed">listede</span> <span class="small muted">{{join .Codes ", "}}</span>
+          {{else if eq .Status "clean"}}<span class="badge success">temiz</span>
+          {{else if eq .Status "refused"}}<span class="badge warn">reddedildi</span> <span class="small muted">{{.Detail}}</span>
+          {{else}}<span class="badge">bilinmiyor</span> <span class="small muted">{{.Detail}}</span>{{end}}
+          {{if $l.Note}}<div class="muted small">{{$l.Note}}</div>{{end}}</td>
+        <td class="right">{{if eq .Status "listed"}}<a href="{{$l.Delist}}" rel="noopener" target="_blank">Kaldırma talebi</a>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="muted small">Henüz kontrol edilmedi. Sunucunun genel IPv4 adresleri IP listelerinde, posta adı ve alan adları Spamhaus DBL'de sorgulanır.</p>{{end}}
+  <form method="post" action="/mail/rbl/key" class="inline-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Spamhaus DQS anahtarı <input name="dqs_key" autocomplete="off" spellcheck="false" maxlength="26" placeholder="{{if .HasDQS}}kayıtlı (değiştirmek için yenisini girin){{else}}26 karakter{{end}}"></label>
+    <button type="submit">Kaydet</button>
+    {{if .HasDQS}}<button type="submit" name="clear" value="1" class="link-btn" data-confirm="DQS anahtarı silinsin mi?">Anahtarı kaldır</button>{{end}}
+  </form>
+  <p class="muted small">Anahtar şifreli saklanır ve sayfaya geri basılmaz. Listeden çıkmak için önce sebebi giderin (ele geçirilmiş kutu, iletişim formu kötüye kullanımı), sonra listenin kaldırma sayfasını kullanın.</p>
+</section>
+
+<section class="card stack">
+  <h2>DMARC raporları</h2>
+  <p class="small">Gmail, Outlook gibi alıcılar alan adlarınız adına gelen postaların SPF/DKIM sonuçlarını günlük rapor olarak gönderir. Raporlar için bir <code>{{.DMARCLocal}}@</code> posta kutusu seçin: tüm posta alan adlarının <code>_dmarc</code> kaydına <code>rua=mailto:…</code> eklenir; panel yalnızca bu kutuyu okur (müşteri postaları hiçbir koşulda okunmaz).</p>
+  <form method="post" action="/mail/dmarc/address" class="inline-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <select name="address">
+      <option value="">Rapor toplama kapalı</option>
+      {{range .ReportChoices}}<option value="{{.}}"{{if eq . $.Data.ReportAddr}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+    <button type="submit">Kaydet</button>
+  </form>
+  {{if not .ReportChoices}}<p class="muted small">Önce bir alan adında <code>{{.DMARCLocal}}</code> adlı posta kutusu oluşturun.</p>{{end}}
+  {{if .ReportAddr}}
+  <div hx-get="/mail/deliverability/dmarc" hx-trigger="load" hx-swap="innerHTML"><p class="muted small">Yeni raporlar işleniyor…</p></div>
+  {{end}}
+  <p class="muted small">Politika (none / quarantine / reject) alan adı sayfasından değiştirilir. Rapor kutusu başka bir kuruluş alan adındaysa (ör. raporlar <code>dmarc@ornek.com</code>'a, alan adı <code>musteri.net</code>) rapor kutusunun zone'una yetki kaydı (<code>musteri.net._report._dmarc…</code>) gerekir; aşağıdaki tabloda.</p>
+</section>
+
+<section class="card stack">
+  <h2>İstemcilerin otomatik ayarı</h2>
+  <p class="small">Müşteriler yalnızca adres + şifreyle hesap kurabilsin: Thunderbird MX kaydından <code>{{index .AutoconfNames 0}}</code> adresine, Outlook <code>_autodiscover._tcp</code> SRV kaydıyla posta sunucusuna bakar. iPhone/Mac için posta kutusu satırındaki <strong>Apple profili</strong>.</p>
+  {{if .Autoconf}}<p class="small"><span class="badge success">hazır</span> Sertifika {{join .AutoconfNames ", "}} adlarını içeriyor.</p>
+  {{else}}
+  <p class="small">Bu adlar için A kayıtları bu sunucuyu gösterince sertifikaya eklenebilir{{if .Zone}} (zone panelde: <a href="/dns">{{.Zone}}</a>, kayıtlar otomatik){{else}}; zone panelde değil, aşağıdaki A kayıtlarını DNS sağlayıcınıza girin{{end}}.</p>
+  <form method="post" action="/mail/autoconf"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">Otomatik ayar adlarını sertifikaya ekle</button></form>
+  {{end}}
+  {{if .HostRecords}}
+  <table class="table">
+    <thead><tr><th>Ad</th><th>Tür</th><th>Değer</th></tr></thead>
+    <tbody>{{range $i, $r := .HostRecords}}
+      <tr><td class="nowrap"><code>{{$r.Name}}</code></td><td>{{$r.Type}}</td><td><code id="hr-{{$i}}">{{$r.Value}}</code> <button type="button" x-data="copy" data-target="hr-{{$i}}" x-on:click="copy" x-text="label">Kopyala</button></td></tr>
+    {{end}}</tbody>
+  </table>
+  <p class="muted small">Zone paneldeyse bu kayıtlar otomatik yayınlanır. Alan adlarının SRV kayıtları kendi sayfalarındaki tabloda.</p>
+  {{end}}
+</section>
+{{end}}
+{{end}}
+{{end}}
+
+{{define "mail-senders"}}{{with .Data}}
+{{if .Err}}<p class="err-text small">{{.Err}}</p>{{end}}
+{{if .Senders}}
+<table class="table">
+  <thead><tr><th>Posta kutusu</th><th class="right">İleti (deneme)</th></tr></thead>
+  <tbody>{{range .Senders}}<tr><td><code>{{.Address}}</code></td><td class="right">{{.Count}}</td></tr>{{end}}</tbody>
+</table>
+<p class="muted small">Kimlik doğrulayarak gönderim yapan kutular; sınır nedeniyle reddedilen denemeler de sayılır.{{if .Rate}} Saatlik sınır: {{.Rate}}.{{end}}</p>
+{{else if not .Err}}<p class="muted small">Son 1 saatte gönderim yok.</p>{{end}}
+{{end}}{{end}}
+
+{{define "mail-dmarc"}}{{with .Data}}
+{{if .Err}}<p class="err-text small">{{.Err}}</p>{{end}}
+{{if .Summaries}}
+{{range .Summaries}}
+<div class="stack">
+  <h3>{{.Domain}} <span class="muted small">son {{$.Data.Days}} gün · {{.Reports}} rapor · {{join .Orgs ", "}}</span></h3>
+  <dl class="kv">
+    <dt>İleti</dt><dd>{{.Total}}</dd>
+    <dt>DMARC geçti</dt><dd>%{{.PassPct}} ({{.Pass}})</dd>
+    <dt>DKIM / SPF</dt><dd>%{{.DKIMPct}} / %{{.SPFPct}}</dd>
+  </dl>
+  <table class="table">
+    <thead><tr><th>Gönderen IP</th><th class="right">İleti</th><th class="right">Geçti</th><th class="right">Kaldı</th></tr></thead>
+    <tbody>{{range .Sources}}<tr><td><code>{{.IP}}</code></td><td class="right">{{.Count}}</td><td class="right">{{.Pass}}</td>
+      <td class="right">{{if .Failing}}<span class="err-text">{{.Failing}}</span>{{else}}0{{end}}</td></tr>{{end}}</tbody>
+  </table>
+</div>
+{{end}}
+<p class="muted small">“Kaldı” satırları: bu IP'ler alan adınız adına gönderdi ama SPF/DKIM doğrulanamadı. Bu sunucu değilse taklit (spoofing) ya da SPF'e eklenmemiş meşru bir servis (bülten, CRM) olabilir.</p>
+{{else}}<p class="muted small">Son {{.Days}} günde rapor yok. Alıcılar raporları genellikle günde bir gönderir; kayıt yayınlandıktan sonra 1–2 gün bekleyin.</p>{{end}}
+{{if .FileErrors}}<details><summary class="small">Okunamayan rapor iletileri ({{len .FileErrors}})</summary><ul class="small muted">{{range .FileErrors}}<li><code>{{index . 0}}</code>: {{index . 1}}</li>{{end}}</ul></details>{{end}}
+{{end}}{{end}}

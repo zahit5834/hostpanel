@@ -42,6 +42,7 @@ const (
 	KindDomain      = "domain.expiring"
 	KindVerify      = "backup.verify" // weekly restore drill result
 	KindSummary     = "summary"       // daily/weekly digest (sent only when scheduled)
+	KindMail        = "mail"          // blacklist listing, queue build-up, unusual sending
 	KindTest        = "test"
 )
 
@@ -57,6 +58,7 @@ var Kinds = []struct{ ID, Label string }{
 	{KindInfra, "Altyapı: nginx, Docker, DNS, fail2ban, veritabanı ve posta container'ları düştü / düzeldi"},
 	{KindDomain, "Alan adının kayıt süresi doluyor (30/15/7 gün)"},
 	{KindVerify, "Yedek doğrulama sonucu (haftalık kurtarma provası)"},
+	{KindMail, "Posta: kara liste, kuyruk birikmesi, olağan dışı gönderim"},
 	{KindSummary, "Günlük / haftalık özet (Ayarlar → Bildirimler'de zamanlanınca)"},
 	{KindSecurity, "Güvenlik: SSH/UFW/fail2ban değişiklikleri, script bütünlüğü, denetim bulguları"},
 	{KindSystem, "Sunucu: yeniden başlatma, bellek yetersizliği (OOM), sistem güncellemeleri"},
@@ -66,7 +68,7 @@ var Kinds = []struct{ ID, Label string }{
 
 // DefaultKinds are enabled until the admin changes the selection.
 var DefaultKinds = []string{KindSiteStatus, KindRestarting, KindSSLExpiring, KindBackup, KindDisk, KindCron, KindUpdate, KindLoginNewIP,
-	KindSecurity, KindSystem, KindInfra, KindDomain, KindVerify, KindSummary}
+	KindSecurity, KindSystem, KindInfra, KindDomain, KindVerify, KindSummary, KindMail}
 
 // legacyKnown are the kinds that existed before setKnown was stored (Faz 11):
 // a saved selection that predates a default kind gets it switched on.

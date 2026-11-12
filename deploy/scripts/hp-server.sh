@@ -104,8 +104,8 @@ case $action in
     du_b() { if [[ -d $1 ]]; then nice -n 10 ionice -c3 timeout 120 du -sb "${@:2}" "$1" 2>/dev/null | cut -f1; else echo 0; fi; }
     echo "sites=$(du_b /var/www/sites)"
     echo "backups=$(du_b /var/backups/hostpanel)"
-    echo "mssql=$(du_b /var/lib/hostpanel/mssql)"
-    pg=$(($(du_b /var/lib/hostpanel/postgres) + $(du_b /var/lib/hostpanel/postgres-backup)))
+    echo "mssql=$(du_b "$(db_path mssql)")"
+    pg=$(($(du_b "$(db_path postgres)") + $(du_b "$(db_path postgres-backup)")))
     echo "postgres=$pg"
     echo "mail=$(du_b /var/lib/hostpanel-mail)"
     echo "docker=$(du_b /var/lib/docker)"

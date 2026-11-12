@@ -73,6 +73,7 @@ func (s *Service) Register() {
 	s.Jobs.Register("db.docker.install", s.jobDockerInstall)
 	s.Jobs.Register("db.server.install", s.jobInstall)
 	s.Jobs.Register("db.server.recreate", s.jobRecreate)
+	s.Jobs.Register("db.server.relocate", s.jobRelocate)
 	s.Jobs.Register("db.create", s.jobCreate)
 	s.Jobs.Register("db.drop", s.jobDrop)
 	s.Jobs.Register("db.isolation-test", s.jobIsolation)
@@ -171,6 +172,7 @@ type Status struct {
 	CPU       string
 	Mem       string
 	MemPct    string
+	DataDir   string // host data directory (helper's data_dir=)
 	Err       string
 }
 
@@ -207,6 +209,8 @@ func ParseStatus(out string) Status {
 			st.Mem = v
 		case "mem_pct":
 			st.MemPct = v
+		case "data_dir":
+			st.DataDir = v
 		}
 	}
 	return st
@@ -218,6 +222,10 @@ func (s *Service) LiveStatus(ctx context.Context) Status {
 		st := Status{Docker: "absent", Container: "absent"}
 		if store.GetSetting(ctx, s.DB, settingDockerInstalled, "") == "1" {
 			st.Docker = "active"
+		}
+		st.DataDir = DataDir
+		if store.GetSetting(ctx, s.DB, settingRelocated, "") == "1" {
+			st.DataDir = NewDataDir
 		}
 		if srv, err := s.Store.Server(ctx); err == nil {
 			switch srv.Status {

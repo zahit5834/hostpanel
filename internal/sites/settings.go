@@ -25,6 +25,7 @@ type SettingsInput struct {
 	Gzip           bool
 	HSTS           bool
 	ForceHTTPS     bool
+	Wildcard       bool
 	CustomSnippet  string
 }
 
@@ -87,6 +88,15 @@ func (s *Service) UpdateSettings(ctx context.Context, site Site, in SettingsInpu
 	}
 	next.MaxUploadMB = in.MaxUploadMB
 	next.Gzip, next.HSTS, next.ForceHTTPS = in.Gzip, in.HSTS, in.ForceHTTPS
+	if in.Wildcard && !site.Wildcard {
+		if s.WildcardReady == nil {
+			return res, errors.New("alt alan adlarını karşılamak için panelin DNS sunucusu gerekir")
+		}
+		if err := s.WildcardReady(ctx, site.Domain); err != nil {
+			return res, err
+		}
+	}
+	next.Wildcard = in.Wildcard
 	next.CustomSnippet = strings.ReplaceAll(strings.TrimSpace(in.CustomSnippet), "\r\n", "\n")
 	if err := ValidateSnippet(next.CustomSnippet, site.Domain); err != nil {
 		return res, err

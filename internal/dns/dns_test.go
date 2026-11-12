@@ -232,3 +232,23 @@ func TestValidateZoneFileBadLines(t *testing.T) {
 		}
 	}
 }
+
+func TestWildcardSiteRecord(t *testing.T) {
+	z := Zone{ID: 1, Name: "ornek.com", Serial: 2026111201, DefaultTTL: 3600, Refresh: 3600, Retry: 900, Expire: 1209600, Minimum: 300, AutoSites: true}
+	in := RenderInput{Zone: z, Settings: testSettings(),
+		Sites: []SiteNames{{Domain: "ornek.com", Names: []string{"ornek.com", "*.ornek.com"}}}}
+	got := Render(in)
+	if !strings.Contains(got, "\n*.ornek.com. 3600 IN A 185.48.180.32\n") {
+		t.Fatalf("wildcard A missing:\n%s", got)
+	}
+	if err := ValidateZoneFile(got, "ornek.com"); err != nil {
+		t.Fatal(err)
+	}
+	// A manual "*" record wins.
+	in.Records = []Record{{Name: "*", Type: TypeCNAME, Value: "ornek.com"}}
+	for _, r := range AutoRecords(in) {
+		if r.Name == "*" {
+			t.Fatalf("auto * despite manual record: %+v", r)
+		}
+	}
+}

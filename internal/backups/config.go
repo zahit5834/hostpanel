@@ -101,6 +101,7 @@ func (c SiteConfig) SettingsFor(target sites.Site) sites.SettingsInput {
 		RuntimeVersion: c.RuntimeVersion, Fields: c.Fields, MemoryMaxMB: c.MemoryMaxMB, CPUQuotaPct: c.CPUQuotaPct,
 		PersistentDirs: strings.Join(c.PersistentDirs, ", "), HealthPath: c.HealthPath, MaxUploadMB: c.MaxUploadMB,
 		Gzip: c.Gzip, HSTS: c.HSTS, ForceHTTPS: c.ForceHTTPS, CustomSnippet: c.CustomSnippet,
+		Wildcard: target.Wildcard, // depends on the target's DNS zone, not on the backup
 	}
 	if c.Domain == target.Domain {
 		in.Aliases, in.WWWMode = strings.Join(c.Aliases, ", "), c.WWWMode

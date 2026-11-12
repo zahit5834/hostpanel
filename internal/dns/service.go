@@ -58,8 +58,9 @@ type Service struct {
 	LookupNS func(ctx context.Context, zone string) ([]*net.NS, error)
 	// LocalAddr is the local BIND for "answers locally" checks (default 127.0.0.1:53).
 	LocalAddr string
-	// Mail returns the mail server's name and mail domains (nil = no mail).
-	Mail func(ctx context.Context) (host string, domains []MailDomain)
+	// Mail returns the mail server's name, mail domains and the extra
+	// client set-up / report authorization names (nil = no mail).
+	Mail func(ctx context.Context) MailInfo
 
 	mu    sync.Mutex // one apply at a time
 	cache sync.Map   // zone → delegationCache
@@ -72,6 +73,7 @@ func (s *Service) Register() {
 	s.Jobs.Register("dns.zone.delete", s.jobZoneDelete)
 	if s.Sites != nil {
 		s.Sites.Changed = s.SitesChanged
+		s.Sites.WildcardReady = s.WildcardReady
 	}
 }
 
@@ -342,9 +344,9 @@ func (s *Service) Input(ctx context.Context, z Zone) (RenderInput, error) {
 		}
 	}
 	if s.Mail != nil {
-		host, domains := s.Mail(ctx)
-		in.MailHost = host
-		for _, d := range domains {
+		mi := s.Mail(ctx)
+		in.MailHost, in.MailExtraHosts, in.MailReports = mi.Host, mi.ExtraHosts, mi.Reports
+		for _, d := range mi.Domains {
 			if ZoneFor(d.Name, zones) == z.Name {
 				in.MailDomains = append(in.MailDomains, d)
 			}
@@ -561,6 +563,31 @@ func (s *Service) ZoneCovering(ctx context.Context, host string) string {
 		return ""
 	}
 	return ZoneFor(host, zones)
+}
+
+// ACMEReady reports why a DNS-01 certificate can't be issued for names (nil:
+// it can): the panel's BIND must be installed and every name (without "*.")
+// must fall in one of its zones (certbot's hooks write _acme-challenge there).
+func (s *Service) ACMEReady(ctx context.Context, names []string) error {
+	if !s.Installed(ctx) {
+		return errors.New("panelin DNS sunucusu kurulu değil (DNS sayfasından kurun)")
+	}
+	zones, err := s.Store.ZoneNames(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range names {
+		n = strings.TrimPrefix(n, "*.")
+		if ZoneFor(n, zones) == "" {
+			return fmt.Errorf("%s paneldeki bir DNS zone'unda değil; önce DNS sayfasında zone'unu oluşturun", n)
+		}
+	}
+	return nil
+}
+
+// WildcardReady is the sites.Service hook: *.<domain> needs DNS-01.
+func (s *Service) WildcardReady(ctx context.Context, domain string) error {
+	return s.ACMEReady(ctx, []string{domain})
 }
 
 // --- checks (unprivileged) ---

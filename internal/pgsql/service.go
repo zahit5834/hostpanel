@@ -71,6 +71,7 @@ type Service struct {
 func (s *Service) Register() {
 	s.Jobs.Register("pg.server.install", s.jobInstall)
 	s.Jobs.Register("pg.server.recreate", s.jobRecreate)
+	s.Jobs.Register("pg.server.relocate", s.jobRelocate)
 	s.Jobs.Register("pg.create", s.jobCreate)
 	s.Jobs.Register("pg.drop", s.jobDrop)
 	s.Jobs.Register("pg.isolation-test", s.jobIsolation)
@@ -117,6 +118,10 @@ func (s *Service) LiveStatus(ctx context.Context) Status {
 		st := Status{Docker: "absent", Container: "absent"}
 		if store.GetSetting(ctx, s.DB, settingDockerInstalled, "") == "1" {
 			st.Docker = "active"
+		}
+		st.DataDir = DataDir
+		if store.GetSetting(ctx, s.DB, settingRelocated, "") == "1" {
+			st.DataDir = NewDataDir
 		}
 		if srv, err := s.Store.Server(ctx); err == nil {
 			switch srv.Status {

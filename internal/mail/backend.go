@@ -12,6 +12,7 @@ import (
 
 	"github.com/zahit5834/hostpanel/internal/databases"
 	"github.com/zahit5834/hostpanel/internal/exec"
+	"github.com/zahit5834/hostpanel/internal/sites"
 )
 
 // Mailbox is one account of the mail server.
@@ -20,6 +21,10 @@ type Mailbox struct {
 	QuotaMB  int   // 0 = unlimited
 	UsedKiB  int64 // valid when HasUsage
 	HasUsage bool
+	// Suspended: no IMAP/SMTP login, mail still arrives. SendBlocked: its
+	// submissions are refused, IMAP and incoming mail work.
+	Suspended   bool
+	SendBlocked bool
 }
 
 // UsedMB is the used space rounded up to whole MB.
@@ -43,6 +48,7 @@ type Alias struct {
 type Listing struct {
 	Mailboxes []Mailbox
 	Aliases   []Alias
+	CatchAll  map[string]string // domain → mailbox receiving unknown addresses
 }
 
 // ForDomain returns the mailboxes and aliases of one domain.
@@ -58,7 +64,20 @@ func (l Listing) ForDomain(domain string) Listing {
 			out.Aliases = append(out.Aliases, a)
 		}
 	}
+	if t, ok := l.CatchAll[domain]; ok {
+		out.CatchAll = map[string]string{domain: t}
+	}
 	return out
+}
+
+// Mailbox returns the mailbox with that address.
+func (l Listing) Mailbox(addr string) (Mailbox, bool) {
+	for _, m := range l.Mailboxes {
+		if m.Address == addr {
+			return m, true
+		}
+	}
+	return Mailbox{}, false
 }
 
 // HasMailbox reports whether addr is an account.
@@ -135,23 +154,35 @@ func ParseStatus(out string) Status {
 	return st
 }
 
-// ParseList parses `hp-mail.sh list`: "account <addr> <quota_mb>" and
-// "alias <addr> <target,target>" lines. Malformed lines are skipped.
+// ParseList parses `hp-mail.sh list`: "account <addr> <quota_mb> [flags]"
+// (flags: suspended,blocked or -), "alias <addr> <target,target>" and
+// "catchall <domain> <mailbox>" lines. Malformed lines are skipped.
 func ParseList(out string) Listing {
 	var l Listing
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) != 3 {
+		if len(f) < 3 {
 			continue
 		}
-		switch f[0] {
-		case "account":
+		switch {
+		case f[0] == "account" && len(f) <= 4:
 			q, err := strconv.Atoi(f[2])
 			if err != nil || q < 0 || !ValidAddress(f[1]) {
 				continue
 			}
-			l.Mailboxes = append(l.Mailboxes, Mailbox{Address: f[1], QuotaMB: q})
-		case "alias":
+			m := Mailbox{Address: f[1], QuotaMB: q}
+			if len(f) == 4 {
+				for _, fl := range strings.Split(f[3], ",") {
+					switch fl {
+					case "suspended":
+						m.Suspended = true
+					case "blocked":
+						m.SendBlocked = true
+					}
+				}
+			}
+			l.Mailboxes = append(l.Mailboxes, m)
+		case f[0] == "alias" && len(f) == 3:
 			if !ValidAddress(f[1]) {
 				continue
 			}
@@ -163,6 +194,13 @@ func ParseList(out string) Listing {
 			}
 			if len(a.Targets) > 0 {
 				l.Aliases = append(l.Aliases, a)
+			}
+		case f[0] == "catchall" && len(f) == 3:
+			if sites.ValidDomain(f[1]) && ValidAddress(f[2]) {
+				if l.CatchAll == nil {
+					l.CatchAll = map[string]string{}
+				}
+				l.CatchAll[f[1]] = f[2]
 			}
 		}
 	}

@@ -98,6 +98,11 @@ var scrub = []string{
 	`DELETE FROM settings WHERE key LIKE 'security\_%' ESCAPE '\'`,
 	`DELETE FROM settings WHERE key IN ('last_boot_id','reboot_planned_boot_id','oom_checked_at','ssh_watch_since','transfer_exported_at',
 		'infra_state','runtime_patch_notified','backup_verify_at','heartbeat_url')`,
+	// Faz 13: mail state of this server (the mail server is installed again);
+	// the sealed DQS key travels with master.key.
+	`DELETE FROM dmarc_records`, `DELETE FROM dmarc_reports`, `DELETE FROM dmarc_files`,
+	`DELETE FROM settings WHERE key IN ('rbl_state','mail_watch_state','mail_vhost_rev','mail_ops_rev','mail_autoconf','dmarc_report_addr',
+		'db_relocated_mssql','db_relocated_pg')`,
 }
 
 // ExportOptions are the panel paths and identity for Export.

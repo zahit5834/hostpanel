@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"github.com/zahit5834/hostpanel/internal/images"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/customers"
 	"github.com/zahit5834/hostpanel/internal/logs"
 	"github.com/zahit5834/hostpanel/internal/mail"
+	"github.com/zahit5834/hostpanel/internal/notify"
 )
 
 // mailDomainRow is one line of the domain table.
@@ -264,6 +266,8 @@ type mailDomainData struct {
 	JobID      int64
 	Revealed   *mailRevealed
 	MaxTargets int
+	CatchAll   string   // mailbox receiving unknown addresses ("" = off)
+	Targets    []string // mailboxes of the same customer (catch-all choices)
 }
 
 func (s *Server) mailDomainPage(w http.ResponseWriter, r *http.Request) {
@@ -296,9 +300,14 @@ func (s *Server) renderMailDomain(w http.ResponseWriter, r *http.Request, status
 		if d.Running {
 			own = s.Mail.WithUsage(ctx, own)
 		}
-		d.Mailboxes, d.Aliases = own.Mailboxes, own.Aliases
+		d.Mailboxes, d.Aliases, d.CatchAll = own.Mailboxes, own.Aliases, own.CatchAll[dm.Name]
+		for _, m := range l.Mailboxes {
+			if td, err := s.Mail.Store.DomainByName(ctx, mail.DomainOf(m.Address)); err == nil && td.CustomerID == dm.CustomerID {
+				d.Targets = append(d.Targets, m.Address)
+			}
+		}
 	}
-	d.Records = mail.Records(dm, d.Host)
+	d.Records = mail.Records(dm, d.Host, s.Mail.ReportAddress(ctx))
 	if s.DNS != nil {
 		d.Zone, d.DNSReady = s.DNS.ZoneCovering(ctx, dm.Name), s.DNS.Installed(ctx)
 	}
@@ -460,4 +469,86 @@ func (s *Server) mailAliasDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, fmt.Sprintf("/mail/domains/%d", d.ID), http.StatusSeeOther)
+}
+
+// mailboxFlag turns suspension or the send block of a mailbox on or off.
+// Turning a block on is protective and answers alarms quickly (session
+// only); lifting it is routed through requireRecent.
+func (s *Server) mailboxFlag(suspend, on bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		d, ok := s.mailDomainOK(w, r)
+		if !ok {
+			return
+		}
+		addr := mail.NormalizeAddress(r.PostFormValue("address"))
+		var action, title string
+		switch {
+		case suspend && on:
+			action, title = "mail.mailbox.suspend", "Posta kutusu askıya alındı: "+addr
+		case suspend:
+			action, title = "mail.mailbox.unsuspend", "Posta kutusu yeniden açıldı: "+addr
+		case on:
+			action, title = "mail.mailbox.send_block", "Posta gönderimi durduruldu: "+addr
+		default:
+			action, title = "mail.mailbox.send_unblock", "Posta gönderimi yeniden açıldı: "+addr
+		}
+		purge := !suspend && on && r.PostFormValue("purge") == "1"
+		act := s.Activity.Begin(r.Context(), logs.Entry{Action: action, TargetType: "mailbox", TargetID: addr, Summary: title},
+			map[string]any{"purge_queue": purge})
+		var err error
+		if suspend {
+			err = s.Mail.SetSuspended(r.Context(), addr, on)
+		} else {
+			err = s.Mail.SetSendBlocked(r.Context(), addr, on)
+		}
+		notice := title
+		if err == nil && purge {
+			n, perr := s.Mail.PurgeQueue(r.Context(), addr)
+			if perr != nil {
+				notice += " (kuyruk temizlenemedi: " + perr.Error() + ")"
+			} else {
+				notice += fmt.Sprintf(" — kuyruktan %d ileti silindi", n)
+			}
+		}
+		act.Finish(err)
+		if err != nil {
+			s.renderMailDomain(w, r, http.StatusBadRequest, nil, err.Error(), "")
+			return
+		}
+		s.securityAlert(r, title, "Alan adı: "+d.Name)
+		s.renderMailDomain(w, r, http.StatusOK, nil, "", notice)
+	}
+}
+
+func (s *Server) mailCatchAll(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.mailDomainOK(w, r)
+	if !ok {
+		return
+	}
+	target := mail.NormalizeAddress(r.PostFormValue("target"))
+	summary := "Catch-all kapatıldı: " + d.Name
+	if target != "" {
+		summary = "Catch-all: " + d.Name + " → " + target
+	}
+	act := s.Activity.Begin(r.Context(), logs.Entry{Action: "mail.catchall", TargetType: "mail_domain", TargetID: d.Name, Summary: summary}, nil)
+	err := s.Mail.SetCatchAll(r.Context(), d.ID, target)
+	act.Finish(err)
+	if err != nil {
+		s.renderMailDomain(w, r, http.StatusBadRequest, nil, err.Error(), "")
+		return
+	}
+	s.renderMailDomain(w, r, http.StatusOK, nil, "", summary)
+}
+
+// MailWatch raises the mail alarms (queue build-up, unusual sending) on the
+// monitor's 10-minute hook.
+func (s *Server) MailWatch(ctx context.Context) {
+	if s.Mail == nil {
+		return
+	}
+	for _, a := range s.Mail.Watch(ctx) {
+		if s.Notify != nil {
+			s.Notify.Send(ctx, notify.Event{Kind: notify.KindMail, Key: a.Key, Title: a.Title, Text: a.Text})
+		}
+	}
 }

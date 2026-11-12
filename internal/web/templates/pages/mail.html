@@ -1,6 +1,6 @@
 {{define "content"}}
 {{with .Data}}
-<div class="card-head"><h1>E-posta</h1></div>
+<div class="card-head"><h1>E-posta</h1>{{if .Server}}<a class="button" href="/mail/deliverability">Teslim edilebilirlik</a>{{end}}</div>
 
 {{if .JobID}}{{template "job-console" .JobID}}{{end}}
 

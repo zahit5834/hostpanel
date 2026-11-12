@@ -141,6 +141,9 @@ type AuditInput struct {
 	BackupsPlanned bool
 	SSLSoon        []string // domains expiring within 15 days
 	DBExternal     []string // "MSSQL (2 IP)", …
+	DBOldLocation  []string // engines whose data directory is still under /var/lib/hostpanel
+	MailChecked    bool     // a blocklist check has run (mail server installed)
+	MailListed     []string // "<target> (<list>)" currently listed
 
 	Integrity        []IntegrityIssue
 	IntegrityChecked bool
@@ -296,6 +299,16 @@ func Audit(in AuditInput) []Finding {
 		add("ssl", "SSL sertifikaları", LevelWarn, "15 günden az kalan: "+strings.Join(in.SSLSoon, ", ")+".", "/ssl")
 	} else {
 		add("ssl", "SSL sertifikaları", LevelOK, "15 günden yakın bitiş yok.", "/ssl")
+	}
+	switch {
+	case len(in.MailListed) > 0:
+		add("mail.rbl", "Posta kara listeleri", LevelBad, "Listede: "+strings.Join(in.MailListed, ", ")+". Sebebi giderip kaldırma talep edin.", "/mail/deliverability")
+	case in.MailChecked:
+		add("mail.rbl", "Posta kara listeleri", LevelOK, "Son kontrolde sunucu IP'si ve alan adları listede değil.", "/mail/deliverability")
+	}
+	if len(in.DBOldLocation) > 0 {
+		add("db.location", "Veritabanı veri dizinleri", LevelWarn, strings.Join(in.DBOldLocation, ", ")+
+			" verisi panel kullanıcısına ait üst dizinde (/var/lib/hostpanel). Veritabanları sayfasından root'a ait /var/lib/hostpanel-db konumuna taşıyın.", "/databases")
 	}
 	if len(in.DBExternal) > 0 {
 		add("db.external", "Veritabanı dış erişimi", LevelWarn, "Açık: "+strings.Join(in.DBExternal, ", ")+". Gerekmiyorsa kapatın.", "/databases")

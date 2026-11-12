@@ -35,6 +35,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/notify"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
 	"github.com/zahit5834/hostpanel/internal/pgsql"
+	"github.com/zahit5834/hostpanel/internal/rbl"
 	"github.com/zahit5834/hostpanel/internal/runtimes"
 	"github.com/zahit5834/hostpanel/internal/sites"
 	"github.com/zahit5834/hostpanel/internal/ssl"
@@ -80,6 +81,7 @@ type Server struct {
 	Sys       *sysmaint.Service // OS updates, reboot, memory, services
 	Metrics   *metrics.Service  // Faz 12: metric history + heartbeat
 	Domains   *domains.Service  // registration expiry
+	RBL       *rbl.Service      // Faz 13: mail blocklist checks
 	// ExportConfig writes the encrypted panel configuration (main wires it:
 	// it needs the master key, which the web layer never holds otherwise).
 	ExportConfig func(ctx context.Context, passphrase string, w io.Writer) (panelcfg.Manifest, error)

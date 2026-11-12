@@ -21,6 +21,8 @@
 #   hp-pg.sh db-create <db> <owner>
 #   hp-pg.sh db-drop <db> [backup]     "backup": pg_dump -Fc to $PG_HOST_BACKUP/pre-drop-<db>-<ts>.dump first
 #   hp-pg.sh sizes                     <db>=<bytes> lines
+#   hp-pg.sh relocate to-new|to-old    (no container) move postgres/ + postgres-backup/ between
+#                                      /var/lib/hostpanel and the root-owned /var/lib/hostpanel-db
 #   hp-pg.sh dump <db> <file>          pg_dump -Fc → $PG_HOST_BACKUP/<file>.dump (file: hpbk-…)
 #   hp-pg.sh restore <db> <owner> backup <domain> <name> <srcdb>
 #   hp-pg.sh restore <db> <owner> upload <path>
@@ -40,12 +42,12 @@
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
 check_db_dirs
-[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") create|remove-container|purge|start|stop|restart|status|logs|hba|firewall|firewall-clear|ready|version|role-*|db-*|sizes|dump|restore|check-dump|isolation-test …"
+[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") create|remove-container|purge|start|stop|restart|status|logs|hba|firewall|firewall-clear|relocate|ready|version|role-*|db-*|sizes|dump|restore|check-dump|isolation-test …"
 action=$1
 shift
 
 NAME=hostpanel-postgres
-DATA=/var/lib/hostpanel/postgres # mounted at /var/lib/postgresql
+DATA=$(db_path postgres) # mounted at /var/lib/postgresql
 STAGE=$DATA/hp-stage             # inside the volume: readable by the container
 PG_UID=999                       # "postgres" user of the official image
 UFW_TAG=hostpanel-pg
@@ -197,8 +199,9 @@ create)
   ! exists || die "container zaten var: $NAME"
   if [[ -n $(ss -Hltn "sport = :5432") ]]; then die "5432 portu başka bir süreç tarafından kullanılıyor"; fi
   [[ -d /var/lib/hostpanel ]] || die "/var/lib/hostpanel yok (panel kurulu mu?)"
+  if db_moved postgres; then ensure_db_root; fi
   install -d -m 0700 -o "$PG_UID" -g "$PG_UID" "$DATA"
-  install -d -m 0700 -o root -g root "$PG_HOST_BACKUP"
+  ensure_pg_backup_dir
 
   log "docker pull $image"
   docker pull -q "$image"
@@ -287,6 +290,7 @@ stop)
 
 status)
   [[ $# -eq 0 ]] || die "kullanım: status"
+  echo "data_dir=$DATA"
   if ! command -v docker >/dev/null; then
     echo "docker=absent"
     exit 0
@@ -349,6 +353,13 @@ firewall)
     ufw allow proto tcp from "$ip" to any port 5432 comment "$UFW_TAG" >/dev/null
     log "izin: $ip → 5432/tcp"
   done
+  ;;
+
+relocate)
+  [[ $# -eq 1 ]] || die "kullanım: relocate to-new|to-old"
+  need_docker
+  ! exists || die "önce container kaldırılmalı"
+  db_relocate "$1" postgres postgres-backup
   ;;
 
 firewall-clear)
@@ -450,7 +461,7 @@ db-drop)
     exit 0
   fi
   if [[ ${2:-} == backup ]]; then
-    install -d -m 0700 -o root -g root "$PG_HOST_BACKUP"
+    ensure_pg_backup_dir
     out=$PG_HOST_BACKUP/pre-drop-$1-$(date +%Y%m%d-%H%M%S).dump
     umask 077
     docker exec -u postgres "$NAME" pg_dump -Fc -d "$1" >"$out" || {
@@ -475,7 +486,7 @@ dump)
   [[ $2 =~ ^hpbk-[A-Za-z0-9_-]{1,140}$ ]] || die "geçersiz dosya adı"
   need_running
   [[ -n $(db_owner "$1") ]] || die "veritabanı yok: $1"
-  install -d -m 0700 -o root -g root "$PG_HOST_BACKUP"
+  ensure_pg_backup_dir
   out=$PG_HOST_BACKUP/$2.dump
   umask 077
   docker exec -u postgres "$NAME" nice -n 10 pg_dump -Fc -d "$1" >"$out" || {

@@ -257,6 +257,7 @@ type sslCheckData struct {
 	Checks   []ssl.NameCheck
 	ServerIP string
 	AnyBad   bool
+	DNSErr   string // why DNS-01 is unavailable ("" = usable)
 }
 
 func (s *Server) siteSSLCheck(w http.ResponseWriter, r *http.Request) {
@@ -265,6 +266,9 @@ func (s *Server) siteSSLCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := sslCheckData{Site: site, Checks: s.SSL.Precheck(r.Context(), site)}
+	if err := s.SSL.DNSReady(r.Context(), ssl.SiteNames(site)); err != nil {
+		d.DNSErr = err.Error()
+	}
 	for _, ip := range s.SSL.ServerIPs(r.Context()) {
 		if ip.Is4() && !ip.IsPrivate() {
 			d.ServerIP = ip.String()
@@ -284,7 +288,7 @@ func (s *Server) siteSSLLetsEncrypt(w http.ResponseWriter, r *http.Request) {
 	}
 	r.ParseForm()
 	jobID, err := s.SSL.StartLE(r.Context(), site, ssl.LEInput{Names: r.PostForm["names"], Email: r.PostFormValue("email"),
-		Staging: r.PostFormValue("staging") == "1"})
+		Staging: r.PostFormValue("staging") == "1", Method: r.PostFormValue("method")})
 	if err != nil {
 		s.renderSite(w, r, http.StatusBadRequest, site, "ssl", err.Error(), "")
 		return

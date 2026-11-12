@@ -583,6 +583,7 @@ func (s *Server) siteSaveSettings(w http.ResponseWriter, r *http.Request) {
 		Gzip:           r.PostFormValue("gzip") == "1",
 		HSTS:           r.PostFormValue("hsts") == "1",
 		ForceHTTPS:     r.PostFormValue("force_https") == "1",
+		Wildcard:       r.PostFormValue("wildcard") == "1",
 		CustomSnippet:  r.PostFormValue("custom_snippet"),
 	}
 	if in.RuntimeVersion == "" {
@@ -590,7 +591,7 @@ func (s *Server) siteSaveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	op := s.Activity.Begin(r.Context(), logs.Entry{Action: "site.settings.update", TargetType: "site", TargetID: site.Domain,
 		Summary: "Site ayarları güncellendi"}, map[string]any{"memory_max_mb": in.MemoryMaxMB, "cpu_quota_pct": in.CPUQuotaPct,
-		"max_upload_mb": in.MaxUploadMB, "www_mode": in.WWWMode, "aliases": in.Aliases})
+		"max_upload_mb": in.MaxUploadMB, "www_mode": in.WWWMode, "aliases": in.Aliases, "wildcard": in.Wildcard})
 	res, err := s.Sites.UpdateSettings(r.Context(), site, in)
 	op.Finish(err)
 	if err != nil {

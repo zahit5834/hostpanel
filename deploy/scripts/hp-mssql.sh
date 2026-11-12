@@ -17,6 +17,8 @@
 #   hp-mssql.sh logs <n>
 #   hp-mssql.sh firewall <ip|cidr>... UFW allow rules for 1433/tcp (refuses if UFW is inactive)
 #   hp-mssql.sh firewall-clear        remove the panel's 1433 rules (no-op without UFW)
+#   hp-mssql.sh relocate to-new|to-old (no container) move the data directory between
+#                                     /var/lib/hostpanel and the root-owned /var/lib/hostpanel-db
 #
 # The container uses --network host: ports published with -p go through
 # Docker's own iptables chain and bypass UFW entirely. With host networking
@@ -25,12 +27,12 @@
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
 check_db_dirs
-[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") install-docker|create|remove-container|pull|snapshot|snapshot-restore|purge|start|stop|restart|status|logs|firewall|firewall-clear …"
+[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") install-docker|create|remove-container|pull|snapshot|snapshot-restore|purge|start|stop|restart|status|logs|firewall|firewall-clear|relocate …"
 action=$1
 shift
 
 NAME=hostpanel-mssql
-DATA=/var/lib/hostpanel/mssql
+DATA=$(db_path mssql)
 MSSQL_UID=10001 # "mssql" user inside the official images
 UFW_TAG=hostpanel-mssql
 SNAP_ROOT=$BACKUP_ROOT/_mssql
@@ -77,6 +79,7 @@ create)
   if [[ -n $(ss -Hltn "sport = :1433") ]]; then die "1433 portu başka bir süreç tarafından kullanılıyor"; fi
 
   [[ -d /var/lib/hostpanel ]] || die "/var/lib/hostpanel yok (panel kurulu mu?)"
+  if db_moved mssql; then ensure_db_root; fi
   install -d -m 0700 -o "$MSSQL_UID" "$DATA"
   install -d -m 0700 -o "$MSSQL_UID" "$DATA/backup"
 
@@ -192,6 +195,7 @@ stop)
 
 status)
   [[ $# -eq 0 ]] || die "kullanım: status"
+  echo "data_dir=$DATA"
   if ! command -v docker >/dev/null; then
     echo "docker=absent"
     exit 0
@@ -236,6 +240,13 @@ firewall)
     ufw allow proto tcp from "$ip" to any port 1433 comment "$UFW_TAG" >/dev/null
     log "izin: $ip → 1433/tcp"
   done
+  ;;
+
+relocate)
+  [[ $# -eq 1 ]] || die "kullanım: relocate to-new|to-old"
+  need_docker
+  ! exists || die "önce container kaldırılmalı"
+  db_relocate "$1" mssql
   ;;
 
 firewall-clear)

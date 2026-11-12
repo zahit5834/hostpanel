@@ -53,6 +53,7 @@ type Site struct {
 	Gzip           bool
 	HSTS           bool
 	ForceHTTPS     bool
+	Wildcard       bool // also serves *.<domain> (DNS-01 certificate through the panel's BIND)
 	CustomSnippet  string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -68,14 +69,21 @@ func (s Site) Unit() string { return "hp-site-" + s.ShortName }
 func (s Site) Dir() string { return path.Join(SitesRoot, s.Domain) }
 
 // HostNames returns every name the site answers to: domain, www (unless the
-// www mode is "none") and aliases.
+// www mode is "none"), aliases and, with Wildcard, "*.<domain>".
 func (s Site) HostNames() []string {
 	names := []string{s.Domain}
 	if s.WWWMode != WWWNone {
 		names = append(names, s.WWWName())
 	}
-	return append(names, s.Aliases...)
+	names = append(names, s.Aliases...)
+	if s.Wildcard {
+		names = append(names, s.WildcardName())
+	}
+	return names
 }
+
+// WildcardName is "*.<domain>".
+func (s Site) WildcardName() string { return "*." + s.Domain }
 
 // WWWName returns the www. variant of the domain.
 func (s Site) WWWName() string { return "www." + s.Domain }
@@ -127,7 +135,7 @@ func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 
 const siteCols = `s.id, s.customer_id, c.name, s.domain, s.short_name, s.aliases, s.www_mode, s.runtime_id, s.runtime_version,
 	s.fields, COALESCE(s.port,0), s.memory_max_mb, s.cpu_quota_pct, s.status, s.persistent_dirs, s.health_path,
-	s.max_upload_mb, s.gzip, s.hsts, s.force_https, s.custom_snippet, s.created_at, s.updated_at`
+	s.max_upload_mb, s.gzip, s.hsts, s.force_https, s.wildcard, s.custom_snippet, s.created_at, s.updated_at`
 
 func scanSite(sc interface{ Scan(...any) error }) (Site, error) {
 	var s Site
@@ -135,7 +143,7 @@ func scanSite(sc interface{ Scan(...any) error }) (Site, error) {
 	var created, updated int64
 	err := sc.Scan(&s.ID, &s.CustomerID, &s.CustomerName, &s.Domain, &s.ShortName, &aliases, &s.WWWMode, &s.RuntimeID,
 		&s.RuntimeVersion, &fields, &s.Port, &s.MemoryMaxMB, &s.CPUQuotaPct, &s.Status, &dirs, &s.HealthPath,
-		&s.MaxUploadMB, &s.Gzip, &s.HSTS, &s.ForceHTTPS, &s.CustomSnippet, &created, &updated)
+		&s.MaxUploadMB, &s.Gzip, &s.HSTS, &s.ForceHTTPS, &s.Wildcard, &s.CustomSnippet, &created, &updated)
 	if err != nil {
 		return s, err
 	}
@@ -201,10 +209,10 @@ func (st *Store) Insert(ctx context.Context, s *Site) error {
 	now := time.Now().Unix()
 	res, err := st.db.ExecContext(ctx, `INSERT INTO sites(customer_id, domain, short_name, aliases, www_mode, runtime_id,
 		runtime_version, fields, port, memory_max_mb, cpu_quota_pct, status, persistent_dirs, health_path, max_upload_mb,
-		gzip, hsts, force_https, custom_snippet, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		gzip, hsts, force_https, wildcard, custom_snippet, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		s.CustomerID, s.Domain, s.ShortName, jsonStr(s.Aliases), s.WWWMode, s.RuntimeID, s.RuntimeVersion, jsonStr(s.Fields),
 		nullPort(s.Port), s.MemoryMaxMB, s.CPUQuotaPct, s.Status, jsonStr(s.PersistentDirs), s.HealthPath, s.MaxUploadMB,
-		s.Gzip, s.HSTS, s.ForceHTTPS, s.CustomSnippet, now, now)
+		s.Gzip, s.HSTS, s.ForceHTTPS, s.Wildcard, s.CustomSnippet, now, now)
 	if err != nil {
 		return err
 	}
@@ -215,9 +223,9 @@ func (st *Store) Insert(ctx context.Context, s *Site) error {
 // UpdateSettings saves editable settings (not identity fields).
 func (st *Store) UpdateSettings(ctx context.Context, s Site) error {
 	_, err := st.db.ExecContext(ctx, `UPDATE sites SET aliases=?, www_mode=?, runtime_version=?, fields=?, memory_max_mb=?,
-		cpu_quota_pct=?, persistent_dirs=?, health_path=?, max_upload_mb=?, gzip=?, hsts=?, force_https=?, custom_snippet=?,
-		updated_at=? WHERE id=?`, jsonStr(s.Aliases), s.WWWMode, s.RuntimeVersion, jsonStr(s.Fields), s.MemoryMaxMB,
-		s.CPUQuotaPct, jsonStr(s.PersistentDirs), s.HealthPath, s.MaxUploadMB, s.Gzip, s.HSTS, s.ForceHTTPS, s.CustomSnippet,
+		cpu_quota_pct=?, persistent_dirs=?, health_path=?, max_upload_mb=?, gzip=?, hsts=?, force_https=?, wildcard=?,
+		custom_snippet=?, updated_at=? WHERE id=?`, jsonStr(s.Aliases), s.WWWMode, s.RuntimeVersion, jsonStr(s.Fields), s.MemoryMaxMB,
+		s.CPUQuotaPct, jsonStr(s.PersistentDirs), s.HealthPath, s.MaxUploadMB, s.Gzip, s.HSTS, s.ForceHTTPS, s.Wildcard, s.CustomSnippet,
 		time.Now().Unix(), s.ID)
 	return err
 }

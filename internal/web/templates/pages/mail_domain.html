@@ -28,7 +28,7 @@
     <tbody>
     {{range .Mailboxes}}
       <tr>
-        <td><code>{{.Address}}</code></td>
+        <td><code>{{.Address}}</code>{{if .Suspended}} <span class="badge failed">askıda</span>{{end}}{{if .SendBlocked}} <span class="badge warn">gönderim durduruldu</span>{{end}}</td>
         <td class="nowrap">{{if .HasUsage}}{{.UsedMB}} MB{{else}}—{{end}} / {{if .QuotaMB}}{{.QuotaMB}} MB{{if .HasUsage}} <progress max="100" value="{{.UsedPct}}"></progress>{{end}}{{else}}sınırsız{{end}}</td>
         <td class="right"><div class="ops end">
           <details class="inline-details"><summary class="button">Şifre</summary>
@@ -46,6 +46,27 @@
               <input type="number" name="quota_mb" min="0" step="256" value="{{.QuotaMB}}"> MB
               <button type="submit">Kaydet</button>
             </form>
+          </details>
+          <a class="button" href="/mail/domains/{{$d.ID}}/mobileconfig?address={{.Address}}" download title="iPhone / iPad / Mac: e-posta hesabı profili (şifre içermez, kurarken sorulur)">Apple profili</a>
+          <details class="inline-details"><summary class="button">Erişim</summary>
+            <div class="stack pad">
+            {{if .SendBlocked}}
+              <form method="post" action="/mail/domains/{{$d.ID}}/mailboxes/unblock"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="address" value="{{.Address}}">
+                <button type="submit">Gönderimi yeniden aç</button></form>
+            {{else}}
+              <form method="post" action="/mail/domains/{{$d.ID}}/mailboxes/block" class="stack"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="address" value="{{.Address}}">
+                <label class="check"><input type="checkbox" name="purge" value="1"> Bu adresten kuyrukta bekleyen iletileri de sil</label>
+                <button type="submit" data-confirm="{{.Address}} posta gönderemeyecek (posta almaya ve IMAP'e devam eder). Devam edilsin mi?">Gönderimi durdur</button>
+                <span class="muted small">Ele geçirilmiş hesap için: giden posta hemen reddedilir; ardından şifreyi değiştirin.</span></form>
+            {{end}}
+            {{if .Suspended}}
+              <form method="post" action="/mail/domains/{{$d.ID}}/mailboxes/unsuspend"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="address" value="{{.Address}}">
+                <button type="submit">Askıyı kaldır</button></form>
+            {{else}}
+              <form method="post" action="/mail/domains/{{$d.ID}}/mailboxes/suspend"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="address" value="{{.Address}}">
+                <button type="submit" data-confirm="{{.Address}} askıya alınsın mı? Giriş (IMAP/SMTP) kapanır, gelen posta kabul edilmeye devam eder, hiçbir şey silinmez.">Askıya al</button></form>
+            {{end}}
+            </div>
           </details>
           <details class="inline-details"><summary class="button danger">Sil</summary>
             <form method="post" action="/mail/domains/{{$d.ID}}/mailboxes/delete" class="stack pad">
@@ -108,6 +129,22 @@
   {{end}}
 </section>
 
+{{if and .Installed .Mailboxes}}
+<section class="card stack">
+  <h2>Catch-all</h2>
+  <p class="small">Bu alan adında var olmayan adreslere gelen postalar bir posta kutusuna düşer. {{if .CatchAll}}Şu an: <code>{{.CatchAll}}</code>.{{else}}Şu an kapalı: bilinmeyen adresler reddedilir.{{end}}</p>
+  <form method="post" action="/mail/domains/{{$d.ID}}/catchall" class="inline-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <select name="target">
+      <option value="">Kapalı</option>
+      {{range .Targets}}<option value="{{.}}"{{if eq . $.Data.CatchAll}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+    <button type="submit">Kaydet</button>
+  </form>
+  <p class="muted small">Catch-all spam'i belirgin biçimde artırır (her rastgele adres teslim edilir). Hedef yalnızca aynı müşterinin bir posta kutusu olabilir.</p>
+</section>
+{{end}}
+
 <section class="card stack">
   <div class="card-head"><h2>DNS kayıtları</h2>
     {{if .Running}}<button type="button" hx-post="/mail/domains/{{$d.ID}}/check" hx-target="#domain-checks" hx-swap="innerHTML">Yayındaki kayıtları kontrol et</button>{{end}}</div>
@@ -127,7 +164,16 @@
     </tbody>
   </table>
   {{if not $d.DKIMTXT}}<p class="muted small">DKIM anahtarı posta sunucusu çalışırken üretilir.</p>{{end}}
-  <p class="muted small">Ek olarak: posta sunucusunun adı <code>{{.Host}}</code> için A kaydı ve sağlayıcı panelinden PTR. DMARC başlangıçta <code>p=quarantine</code>; raporlama adresi isterseniz kaydı elle düzenleyin.</p>
+  <form method="post" action="/mail/domains/{{$d.ID}}/dmarc" class="inline-form">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>DMARC politikası <select name="policy">
+      <option value="none"{{if eq $d.DMARCPolicy "none"}} selected{{end}}>none — yalnızca raporla</option>
+      <option value="quarantine"{{if eq $d.DMARCPolicy "quarantine"}} selected{{end}}>quarantine — doğrulanamayanı spama</option>
+      <option value="reject"{{if eq $d.DMARCPolicy "reject"}} selected{{end}}>reject — doğrulanamayanı reddet</option>
+    </select></label>
+    <button type="submit">Kaydet</button>
+  </form>
+  <p class="muted small">Alan adı adına başka bir servis (bülten, CRM) de gönderiyorsa önce <code>none</code> ile raporları izleyin (<a href="/mail/deliverability">Teslim edilebilirlik</a>), sonra sıkılaştırın. Ek olarak: posta sunucusunun adı <code>{{.Host}}</code> için A kaydı ve sağlayıcı panelinden PTR. SRV kayıtları Outlook ve diğer istemcilerin sunucuyu kendiliğinden bulması içindir.</p>
 </section>
 
 <section class="card stack danger-zone">
