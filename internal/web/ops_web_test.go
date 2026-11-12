@@ -293,9 +293,9 @@ func TestOpsDryRun(t *testing.T) {
 		t.Fatalf("heartbeat URL logged: %+v", e)
 	}
 	title, text := s.BuildSummary(ctx, "weekly", time.Now())
-	if !strings.Contains(title, "Haftalık özet") || !strings.Contains(text, "Sunucu: disk") || !strings.Contains(text, "Siteler: 2") ||
-		!strings.Contains(text, "Yedekler: 2 başarılı") || !strings.Contains(text, "son doğrulama ✓") ||
-		!strings.Contains(text, "Alan adları (30 gün içinde): ornek.com.tr") || !strings.Contains(text, "fail2ban:") {
+	if !strings.Contains(title, "Haftalık özet") || !strings.Contains(text, "Sunucu:\n• Disk: %") || !strings.Contains(text, "• 2 site") ||
+		!strings.Contains(text, "Yedekler:\n• 2 başarılı") || !strings.Contains(text, "Son doğrulama: ✓") ||
+		!strings.Contains(text, "• Alan adları: ornek.com.tr") || !strings.Contains(text, "fail2ban:") {
 		t.Fatalf("summary:\n%s\n%s", title, text)
 	}
 
@@ -303,7 +303,7 @@ func TestOpsDryRun(t *testing.T) {
 	if r := s.BotCommand(ctx, "durum", nil); !strings.Contains(r, "Siteler:") {
 		t.Fatalf("durum %q", r)
 	}
-	if r := s.BotCommand(ctx, "siteler", nil); !strings.Contains(r, "app.example.com · running") {
+	if r := s.BotCommand(ctx, "siteler", nil); !strings.Contains(r, "app.example.com\n    running") {
 		t.Fatalf("siteler %q", r)
 	}
 	if r := s.BotCommand(ctx, "yedekler", nil); !strings.Contains(r, "Son doğrulama: ✓") {

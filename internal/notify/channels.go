@@ -18,17 +18,23 @@ import (
 	"time"
 )
 
-func message(e Event) string {
-	if e.Text == "" {
-		return e.Title
+// telegram sends the HTML layout; if Telegram cannot parse it (it should
+// not: everything is escaped) the plain text goes out instead.
+func (s *Service) telegram(ctx context.Context, c Config, e Event) error {
+	err := s.tgSend(ctx, c, telegramHTML(e), "HTML")
+	if err != nil && strings.Contains(err.Error(), "can't parse entities") {
+		err = s.tgSend(ctx, c, telegramPlain(e), "")
 	}
-	return e.Title + "\n" + e.Text
+	return err
 }
 
-// telegram calls sendMessage. The token is part of the URL, so transport
+// tgSend calls sendMessage. The token is part of the URL, so transport
 // errors are reported without it.
-func (s *Service) telegram(ctx context.Context, c Config, e Event) error {
-	form := url.Values{"chat_id": {c.TelegramChat}, "text": {"🖥 " + message(e)}, "disable_web_page_preview": {"true"}}
+func (s *Service) tgSend(ctx context.Context, c Config, text, mode string) error {
+	form := url.Values{"chat_id": {c.TelegramChat}, "text": {text}, "disable_web_page_preview": {"true"}}
+	if mode != "" {
+		form.Set("parse_mode", mode)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.TelegramAPI+"/bot"+c.TelegramToken+"/sendMessage",
 		strings.NewReader(form.Encode()))
 	if err != nil {

@@ -114,7 +114,7 @@ func TestBotOnlyAnswersOwnChat(t *testing.T) {
 	}
 	api.mu.Lock()
 	defer api.mu.Unlock()
-	if len(api.sent) != 2 || api.sentTo[0] != "42" || !strings.Contains(api.sent[0], "yanıt: durum") {
+	if len(api.sent) != 2 || api.sentTo[0] != "42" || !strings.Contains(api.sent[0], "<b>yanıt:</b> durum") {
 		t.Fatalf("sent %q to %q", api.sent, api.sentTo)
 	}
 	// The queued update (5) is skipped: the start polls with -1 and update 5

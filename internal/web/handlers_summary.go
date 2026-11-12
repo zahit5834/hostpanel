@@ -141,12 +141,27 @@ func (s *Server) BuildSummary(ctx context.Context, mode string, now time.Time) (
 	}
 	since := now.AddDate(0, 0, -days)
 	snap := system.Read()
+	// Sections are "Header:" + "• item" lines separated by a blank line;
+	// notify lays them out (bold headers/labels in Telegram).
 	var b strings.Builder
-	line := func(format string, a ...any) { fmt.Fprintf(&b, format+"\n", a...) }
+	var sec []string
+	item := func(format string, a ...any) { sec = append(sec, "• "+fmt.Sprintf(format, a...)) }
+	section := func(name string) {
+		if len(sec) == 0 {
+			return
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(name + ":\n" + strings.Join(sec, "\n"))
+		sec = nil
+	}
 	title := fmt.Sprintf("%s özet — %s (%s)", label, snap.Hostname, now.Format("02.01.2006"))
 
-	line("Sunucu: disk %%%d (%s boş), RAM %s / %s, swap %s, yük %.2f", snap.DiskUsedPct(), gb(snap.DiskFree),
-		gb(snap.MemTotal-snap.MemAvail), gb(snap.MemTotal), gb(snap.SwapTotal-snap.SwapFree), snap.Load1)
+	item("Disk: %%%d dolu, %s boş", snap.DiskUsedPct(), gb(snap.DiskFree))
+	item("RAM: %s / %s (swap %s)", gb(snap.MemTotal-snap.MemAvail), gb(snap.MemTotal), gb(snap.SwapTotal-snap.SwapFree))
+	item("Yük: %.2f", snap.Load1)
+	section("Sunucu")
 
 	list, _ := s.Sites.Store.List(ctx, 0)
 	var health map[int64]monitor.Check
@@ -163,26 +178,16 @@ func (s *Server) BuildSummary(ctx context.Context, mode string, now time.Time) (
 			down = append(down, st.Domain)
 		}
 	}
-	siteLine := fmt.Sprintf("Siteler: %d (%d çalışıyor)", len(list), running)
+	item("%d site, %d çalışıyor", len(list), running)
 	if len(down) > 0 {
-		siteLine += ", erişilemeyen: " + strings.Join(down, ", ")
+		item("Erişilemeyen: %s", strings.Join(down, ", "))
 	}
-	line("%s", siteLine)
 	if bad := s.infraDown(ctx); len(bad) > 0 {
 		var n []string
 		for _, d := range bad {
 			n = append(n, d.Name)
 		}
-		line("Altyapı: çalışmayan → %s", strings.Join(n, ", "))
-	}
-	if s.RBL != nil {
-		var n []string
-		for _, r := range s.RBL.State(ctx).Listed() {
-			n = append(n, r.Target+" ("+r.List+")")
-		}
-		if len(n) > 0 {
-			line("Posta kara listesi: %s", strings.Join(n, ", "))
-		}
+		item("Çalışmayan altyapı: %s", strings.Join(n, ", "))
 	}
 
 	if s.Monitor != nil {
@@ -205,9 +210,10 @@ func (s *Server) BuildSummary(ctx context.Context, mode string, now time.Time) (
 			if worstPct < 100 {
 				l += fmt.Sprintf(" (en düşük: %s %%%.2f)", worst, worstPct)
 			}
-			line("%s", l)
+			item("%s", l)
 		}
 	}
+	section("Siteler")
 
 	all, _ := s.Backups.Store.Backups(ctx, backups.Filter{Limit: 2000})
 	okN, failN := 0, 0
@@ -226,18 +232,18 @@ func (s *Server) BuildSummary(ctx context.Context, mode string, now time.Time) (
 			}
 		}
 	}
-	bl := fmt.Sprintf("Yedekler: %d başarılı, %d başarısız", okN, failN)
+	item("%d başarılı, %d başarısız", okN, failN)
 	if len(failed) > 0 {
-		bl += " (" + strings.Join(failed, ", ") + ")"
+		item("Başarısız: %s", strings.Join(failed, ", "))
 	}
 	if v, _ := s.Backups.Store.Verifications(ctx, 1); len(v) > 0 {
 		mark := "✓"
 		if v[0].Status != backups.StatusSuccess {
 			mark = "✗"
 		}
-		bl += fmt.Sprintf("; son doğrulama %s %s (%s)", mark, v[0].Domain, v[0].CreatedAt.Format("02.01"))
+		item("Son doğrulama: %s %s (%s)", mark, v[0].Domain, v[0].CreatedAt.Format("02.01"))
 	}
-	line("%s", bl)
+	section("Yedekler")
 
 	var exp []string
 	for _, c := range s.SSL.ActiveBySite(ctx) {
@@ -247,7 +253,7 @@ func (s *Server) BuildSummary(ctx context.Context, mode string, now time.Time) (
 	}
 	sort.Strings(exp)
 	if len(exp) > 0 {
-		line("SSL (30 gün içinde): %s", strings.Join(exp, ", "))
+		item("SSL: %s", strings.Join(exp, ", "))
 	}
 	if s.Domains != nil {
 		var dn []string
@@ -255,9 +261,10 @@ func (s *Server) BuildSummary(ctx context.Context, mode string, now time.Time) (
 			dn = append(dn, fmt.Sprintf("%s %d gün", e.Name, e.DaysLeft(now)))
 		}
 		if len(dn) > 0 {
-			line("Alan adları (30 gün içinde): %s", strings.Join(dn, ", "))
+			item("Alan adları: %s", strings.Join(dn, ", "))
 		}
 	}
+	section("30 gün içinde bitecek")
 
 	if s.Traffic != nil {
 		tr, _ := s.Traffic.Summary(ctx, traffic.DayKey(since))
@@ -272,16 +279,13 @@ func (s *Server) BuildSummary(ctx context.Context, mode string, now time.Time) (
 			}
 		}
 		sort.Slice(rows, func(i, j int) bool { return rows[i].t.Requests > rows[j].t.Requests })
-		var parts []string
 		for i, r := range rows {
 			if i == 5 {
 				break
 			}
-			parts = append(parts, fmt.Sprintf("%s %d istek / %s", r.d, r.t.Requests, backups.HumanSize(r.t.Bytes)))
+			item("%s — %d istek, %s", r.d, r.t.Requests, backups.HumanSize(r.t.Bytes))
 		}
-		if len(parts) > 0 {
-			line("Trafik (tamamlanmış günler): %s", strings.Join(parts, "; "))
-		}
+		section("Trafik (tamamlanmış günler)")
 	}
 
 	if s.F2B != nil {
@@ -292,31 +296,38 @@ func (s *Server) BuildSummary(ctx context.Context, mode string, now time.Time) (
 				total += j.CurBanned
 				per = append(per, fmt.Sprintf("%s %d", j.Name, j.CurBanned))
 			}
-			line("fail2ban: %d IP engelli (%s)", total, strings.Join(per, ", "))
+			item("fail2ban: %d IP engelli (%s)", total, strings.Join(per, ", "))
 		}
 	}
+	if s.RBL != nil {
+		var n []string
+		for _, r := range s.RBL.State(ctx).Listed() {
+			n = append(n, r.Target+" ("+r.List+")")
+		}
+		if len(n) > 0 {
+			item("Posta kara listesi: %s", strings.Join(n, ", "))
+		}
+	}
+	section("Güvenlik")
 
-	var upd []string
 	if s.Sys != nil {
 		if a := s.Sys.Upgradable(ctx, false); a.Err == "" && len(a.Pkgs) > 0 {
-			upd = append(upd, fmt.Sprintf("%d paket (%d güvenlik)", len(a.Pkgs), a.Security))
+			item("Sistem: %d paket (%d güvenlik)", len(a.Pkgs), a.Security)
 		}
 		if ri := s.Sys.Reboot(ctx); ri.Required {
-			upd = append(upd, "yeniden başlatma gerekli")
+			item("Yeniden başlatma gerekli")
 		}
 	}
 	if s.Update != nil {
 		if inf := s.Update.Info(ctx, false); inf.Available {
-			upd = append(upd, "panel "+inf.Latest.Tag)
+			item("Panel: %s", inf.Latest.Tag)
 		}
 	}
 	for _, o := range s.Sites.PatchOffers(ctx) {
-		upd = append(upd, o.Name+" "+o.To)
+		item("%s: %s", o.Name, o.To)
 	}
-	if len(upd) > 0 {
-		line("Bekleyen güncellemeler: %s", strings.Join(upd, ", "))
-	}
-	return title, strings.TrimRight(b.String(), "\n")
+	section("Bekleyen güncellemeler")
+	return title, b.String()
 }
 
 func (s *Server) summaryTest(w http.ResponseWriter, r *http.Request) {
@@ -342,11 +353,11 @@ func (s *Server) summaryTest(w http.ResponseWriter, r *http.Request) {
 const botRateKey = "telegram" // login_attempts "ip" of the bot's 2FA codes
 
 const botHelp = `Komutlar:
-/durum — sunucu ve siteler
-/siteler — site listesi (durum, sağlık)
-/disk — disk ve bellek
-/yedekler — son yedekler ve doğrulama
-/yeniden_baslat <site> <2FA kodu> — siteyi yeniden başlat`
+• /durum — sunucu ve siteler
+• /siteler — site listesi (durum, sağlık)
+• /disk — disk ve bellek
+• /yedekler — son yedekler ve doğrulama
+• /yeniden_baslat <site> <2FA kodu> — siteyi yeniden başlat`
 
 // BotCommand answers one Telegram command.
 func (s *Server) BotCommand(ctx context.Context, cmd string, args []string) string {
@@ -360,7 +371,7 @@ func (s *Server) BotCommand(ctx context.Context, cmd string, args []string) stri
 		return s.botSites(ctx)
 	case "disk":
 		snap := system.Read()
-		return fmt.Sprintf("Disk (/): %%%d dolu, %s boş / %s\nRAM: %s / %s kullanımda\nSwap: %s / %s",
+		return fmt.Sprintf("Disk: %%%d dolu, %s boş (toplam %s)\nRAM: %s / %s kullanımda\nSwap: %s / %s",
 			snap.DiskUsedPct(), gb(snap.DiskFree), gb(snap.DiskTotal), gb(snap.MemTotal-snap.MemAvail), gb(snap.MemTotal),
 			gb(snap.SwapTotal-snap.SwapFree), gb(snap.SwapTotal))
 	case "yedekler":
@@ -368,14 +379,14 @@ func (s *Server) BotCommand(ctx context.Context, cmd string, args []string) stri
 	case "yeniden_baslat":
 		return s.botRestart(ctx, args)
 	}
-	return "Bilinmeyen komut.\n" + botHelp
+	return "Bilinmeyen komut.\n\n" + botHelp
 }
 
 func (s *Server) botStatus(ctx context.Context) string {
 	snap := system.Read()
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s — çalışma süresi %s\nCPU yükü %.2f · RAM %%%d · disk %%%d\n", snap.Hostname,
-		snap.Uptime.Round(time.Hour), snap.Load1, snap.MemUsedPct(), snap.DiskUsedPct())
+	fmt.Fprintf(&b, "Sunucu: %s\nÇalışma süresi: %s\nYük: %.2f · RAM %%%d · disk %%%d\n\n", snap.Hostname,
+		upFor(snap.Uptime), snap.Load1, snap.MemUsedPct(), snap.DiskUsedPct())
 	list, _ := s.Sites.Store.List(ctx, 0)
 	health, _ := s.Monitor.Store.All(ctx)
 	running, down := 0, []string{}
@@ -389,14 +400,16 @@ func (s *Server) botStatus(ctx context.Context) string {
 	}
 	fmt.Fprintf(&b, "Siteler: %d / %d çalışıyor\n", running, len(list))
 	if len(down) > 0 {
-		fmt.Fprintf(&b, "Erişilemeyen: %s\n", strings.Join(down, ", "))
+		fmt.Fprintf(&b, "🔴 Erişilemeyen: %s\n", strings.Join(down, ", "))
 	}
+	b.WriteString("\n")
 	if bad := s.infraDown(ctx); len(bad) > 0 {
+		b.WriteString("Altyapı:\n")
 		for _, d := range bad {
-			fmt.Fprintf(&b, "✗ %s: %s\n", d.Name, d.Why)
+			fmt.Fprintf(&b, "• ✗ %s — %s\n", d.Name, d.Why)
 		}
 	} else {
-		b.WriteString("Altyapı: sorun yok\n")
+		b.WriteString("Altyapı: ✓ sorun yok\n")
 	}
 	return strings.TrimSpace(b.String())
 }
@@ -413,7 +426,16 @@ func (s *Server) botSites(ctx context.Context) string {
 		if c, ok := health[st.ID]; ok && c.Enabled {
 			h = c.State
 		}
-		fmt.Fprintf(&b, "%s · %s · sağlık: %s\n", st.Domain, st.Status, h)
+		dot := "🟡"
+		switch {
+		case h == monitor.StateDown || st.Status == sites.StatusError:
+			dot = "🔴"
+		case st.Status == sites.StatusRunning:
+			dot = "🟢"
+		case st.Status == sites.StatusStopped || st.Status == sites.StatusDisabled:
+			dot = "⚪"
+		}
+		fmt.Fprintf(&b, "%s %s\n    %s · sağlık: %s\n", dot, st.Domain, st.Status, h)
 	}
 	return strings.TrimSpace(b.String())
 }
@@ -425,7 +447,7 @@ func (s *Server) botBackups(ctx context.Context) string {
 	for _, st := range list {
 		bk, ok := latest[st.ID]
 		if !ok {
-			fmt.Fprintf(&b, "%s · yedek yok\n", st.Domain)
+			fmt.Fprintf(&b, "⚪ %s\n    yedek yok\n", st.Domain)
 			continue
 		}
 		where := "yerel"
@@ -435,10 +457,14 @@ func (s *Server) botBackups(ctx context.Context) string {
 				where = "yerel+Drive"
 			}
 		}
-		fmt.Fprintf(&b, "%s · %s · %s · %s\n", st.Domain, bk.CreatedAt.Format("02.01 15:04"), bk.Status, where)
+		mark := "✅"
+		if bk.Status != backups.StatusSuccess {
+			mark = "❌"
+		}
+		fmt.Fprintf(&b, "%s %s\n    %s · %s · %s\n", mark, st.Domain, bk.CreatedAt.Format("02.01 15:04"), bk.Status, where)
 	}
 	if v, _ := s.Backups.Store.Verifications(ctx, 1); len(v) > 0 {
-		fmt.Fprintf(&b, "Son doğrulama: %s %s / %s (%s)\n", map[bool]string{true: "✓", false: "✗"}[v[0].Status == backups.StatusSuccess],
+		fmt.Fprintf(&b, "\nSon doğrulama: %s %s / %s (%s)\n", map[bool]string{true: "✓", false: "✗"}[v[0].Status == backups.StatusSuccess],
 			v[0].Domain, v[0].Name, v[0].CreatedAt.Format("02.01 15:04"))
 	}
 	if b.Len() == 0 {
@@ -485,4 +511,13 @@ func (s *Server) botRestart(ctx context.Context, args []string) string {
 	s.Activity.Record(ctx, logs.Entry{Action: "telegram.command", TargetType: "site", TargetID: site.Domain,
 		Summary: "Telegram: " + site.Domain + " yeniden başlatılıyor"}, map[string]any{"job_id": id})
 	return fmt.Sprintf("%s yeniden başlatılıyor (iş #%d). Sonuç için /siteler.", site.Domain, id)
+}
+
+// upFor renders an uptime as "3 gün 4 sa" (Telegram /durum).
+func upFor(d time.Duration) string {
+	h := int(d.Hours())
+	if h < 24 {
+		return fmt.Sprintf("%d sa", h)
+	}
+	return fmt.Sprintf("%d gün %d sa", h/24, h%24)
 }

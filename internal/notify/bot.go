@@ -224,5 +224,5 @@ func (s *Service) reply(ctx context.Context, token string, chat int64, text stri
 	c := Config{TelegramToken: token, TelegramChat: strconv.FormatInt(chat, 10)}
 	sctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
-	return s.telegram(sctx, c, Event{Title: text})
+	return s.telegram(sctx, c, Event{Text: text})
 }
