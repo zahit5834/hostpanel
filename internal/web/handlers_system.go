@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zahit5834/hostpanel/internal/exec"
 	"github.com/zahit5834/hostpanel/internal/jobs"
 	"github.com/zahit5834/hostpanel/internal/logs"
 	"github.com/zahit5834/hostpanel/internal/monitor"
@@ -72,7 +73,7 @@ type serverData struct {
 	Output   string // nginx -t / service output
 	Mem      sysmaint.Mem
 	Plan     sysmaint.Plan
-	OOM      []logs.Entry
+	OOM      []oomRow
 
 	Upd     sysmaint.AptInfo
 	Auto    sysmaint.AutoUpdates
@@ -134,9 +135,45 @@ func (s *Server) memoryPlan(ctx context.Context) sysmaint.Plan {
 	return sysmaint.MakePlan(s.Sys.ReadMem(), items)
 }
 
-func (s *Server) recentOOM(ctx context.Context) []logs.Entry {
-	e, _ := s.Activity.Query(ctx, logs.Filter{Action: "system.oom", From: time.Now().Add(-24 * time.Hour), Limit: 10})
-	return e
+// oomRow is an OOM kill of the last 24 h; Resolved once a later
+// system.oom.resolved entry exists for the same unit.
+type oomRow struct {
+	logs.Entry
+	Resolved bool
+}
+
+func (s *Server) recentOOM(ctx context.Context) []oomRow {
+	from := time.Now().Add(-24 * time.Hour)
+	kills, _ := s.Activity.Query(ctx, logs.Filter{Action: "system.oom", From: from, Limit: 50})
+	fixed, _ := s.Activity.Query(ctx, logs.Filter{Action: "system.oom.resolved", From: from, Limit: 50})
+	out := make([]oomRow, 0, len(kills))
+	for _, k := range kills {
+		r := oomRow{Entry: k}
+		for _, f := range fixed {
+			if f.TargetID == k.TargetID && !f.TS.Before(k.TS) {
+				r.Resolved = true
+				break
+			}
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// openOOM is the newest unresolved kill per unit (dashboard alerts).
+func (s *Server) openOOM(ctx context.Context) []oomRow {
+	var out []oomRow
+	seen := map[string]bool{}
+	for _, r := range s.recentOOM(ctx) { // newest first
+		if seen[r.TargetID] {
+			continue
+		}
+		seen[r.TargetID] = true
+		if !r.Resolved {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func (s *Server) serverDataFor(r *http.Request, tab string) serverData {
@@ -341,27 +378,99 @@ func (s *Server) swapCreate(w http.ResponseWriter, r *http.Request) {
 // oomLabel names the victim: a site (hp-site-<short>.service), a container
 // (by process name) or the process itself.
 func (s *Server) oomLabel(ctx context.Context, o sysmaint.OOM) string {
-	unit := o.Unit()
-	if strings.HasPrefix(unit, "hp-site-") {
-		list, _ := s.Sites.Store.List(ctx, 0)
-		for _, site := range list {
-			if site.Unit() == unit {
-				return "site " + site.Domain
-			}
-		}
+	if site, part, ok := s.oomSite(ctx, o.Unit()); ok {
+		return "site " + site.Domain + part
 	}
 	switch {
 	case o.Process == "sqlservr":
 		return "MSSQL"
 	case o.Process == "postgres":
 		return "PostgreSQL"
-	case strings.HasPrefix(unit, "docker-"):
+	case strings.HasPrefix(o.Unit(), "docker-"):
 		return "container (" + o.Process + ")"
 	}
 	return o.Process
 }
 
-// OOMCheck reports kernel OOM kills since the last check (monitor hook, 10 min).
+// oomSite maps a unit to its site: the service (hp-site-<short>.service),
+// a git build (hp-build-<short>) or a cron run (hp-cron-<short>-<id>).
+func (s *Server) oomSite(ctx context.Context, unit string) (sites.Site, string, bool) {
+	name := strings.TrimSuffix(unit, ".service")
+	if !strings.HasPrefix(name, "hp-") {
+		return sites.Site{}, "", false
+	}
+	list, _ := s.Sites.Store.List(ctx, 0)
+	for _, site := range list {
+		switch {
+		case name == site.Unit():
+			return site, "", true
+		case name == "hp-build-"+site.ShortName:
+			return site, " (derleme)", true
+		case strings.HasPrefix(name, "hp-cron-"+site.ShortName+"-"):
+			return site, " (cron)", true
+		}
+	}
+	return sites.Site{}, "", false
+}
+
+// oomQuiet: an OOM counts as resolved after this long without a repeat,
+// if the victim is running now.
+const oomQuiet = 30 * time.Minute
+
+// oomVictimOK reports whether the killed unit is healthy now.
+func (s *Server) oomVictimOK(ctx context.Context, unit string) bool {
+	active := func(u string) bool {
+		res, _ := s.Sites.Probe.Run(ctx, exec.Cmd{Name: "systemctl", Args: []string{"is-active", u}, Timeout: 5 * time.Second})
+		return s.Cfg.DryRun || strings.TrimSpace(string(res.Stdout)) == "active"
+	}
+	if site, part, ok := s.oomSite(ctx, unit); ok {
+		if part != "" || site.Status != sites.StatusRunning {
+			return true // build/cron runs are transient; a stopped site is not failing
+		}
+		if s.Monitor != nil {
+			if h, err := s.Monitor.Store.All(ctx); err == nil {
+				if c, ok := h[site.ID]; ok && c.Enabled && c.State == monitor.StateDown {
+					return false
+				}
+			}
+		}
+		return active(site.Unit() + ".service")
+	}
+	if strings.HasPrefix(unit, "docker-") { // container scopes change id on restart
+		return len(s.infraDown(ctx)) == 0
+	}
+	if strings.HasSuffix(unit, ".service") && !strings.HasPrefix(unit, "hp-") {
+		return active(unit)
+	}
+	return true
+}
+
+// resolveOOM closes open OOM alerts whose victim stayed up for oomQuiet:
+// activity system.oom.resolved + notification; the dashboard alert goes away.
+func (s *Server) resolveOOM(ctx context.Context, now time.Time) {
+	sys := logs.WithActor(ctx, logs.Actor{Source: logs.SourceSystem})
+	for _, r := range s.openOOM(ctx) {
+		if now.Sub(r.TS) < oomQuiet || !s.oomVictimOK(ctx, r.TargetID) {
+			continue
+		}
+		who := strings.TrimPrefix(r.Summary, "Bellek yetersiz: ")
+		if i := strings.Index(who, " sonlandırıldı"); i > 0 {
+			who = who[:i]
+		}
+		summary := "Bellek sorunu giderildi: " + who
+		s.Activity.Record(sys, logs.Entry{Action: "system.oom.resolved", TargetType: "server", TargetID: r.TargetID,
+			Summary: summary, Status: logs.StatusSuccess}, nil)
+		if s.Notify != nil {
+			s.Notify.Send(ctx, notify.Event{Kind: notify.KindSystem, Key: "oom-ok:" + r.TargetID, NoDedupe: true,
+				Title: "✅ " + summary,
+				Text: fmt.Sprintf("Son bellek yetersizliği: %s.\n%d dakikadır tekrarlanmadı ve servis çalışıyor.",
+					r.TS.Local().Format("02.01 15:04"), int(now.Sub(r.TS).Minutes()))})
+		}
+	}
+}
+
+// OOMCheck reports kernel OOM kills since the last check and closes the ones
+// that are resolved (monitor hook, 10 min).
 func (s *Server) OOMCheck(ctx context.Context) {
 	now := time.Now()
 	since, _ := strconv.ParseInt(store.GetSetting(ctx, s.DB, setOOMChecked, "0"), 10, 64)
@@ -369,6 +478,7 @@ func (s *Server) OOMCheck(ctx context.Context) {
 	if since == 0 {
 		return
 	}
+	defer s.resolveOOM(ctx, now)
 	events, err := s.Sys.OOMSince(ctx, time.Unix(since, 0))
 	if err != nil {
 		s.Log.Warn("oom check", "err", err)

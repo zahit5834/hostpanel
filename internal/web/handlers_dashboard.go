@@ -159,7 +159,7 @@ func (s *Server) dashboardAlerts(ctx context.Context, snap system.Snapshot, rows
 		out = append(out, alert{Text: fmt.Sprintf("Bellek sınırlarının toplamı fiziksel RAM'i aşıyor (%d / %d MB)", p.ReservedMB, p.TotalMB),
 			Link: "/server?tab=general", Detail: "Hepsi aynı anda sınırına yaklaşırsa çekirdek süreç öldürür."})
 	}
-	for _, e := range s.recentOOM(ctx) {
+	for _, e := range s.openOOM(ctx) {
 		out = append(out, alert{Text: "Bellek yetersizliği: " + e.Summary + " (" + e.TS.Format("02.01 15:04") + ")", Link: "/server?tab=general"})
 	}
 	if s.Sys != nil {

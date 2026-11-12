@@ -70,7 +70,7 @@
   {{end}}
   {{with $d.OOM}}
   <h3>Son 24 saatte bellek yetersizliği</h3>
-  <ul class="small">{{range .}}<li>{{datetime .TS}} — {{.Summary}}</li>{{end}}</ul>
+  <ul class="small">{{range .}}<li>{{datetime .TS}} — {{.Summary}}{{if .Resolved}} <span class="badge success">giderildi</span>{{end}}</li>{{end}}</ul>
   {{end}}
 </section>
 </div>
