@@ -365,6 +365,7 @@ func (s *Server) renderGeneral(w http.ResponseWriter, r *http.Request, status in
 			"IPs":      store.GetSetting(r.Context(), s.DB, ssl.SettingServerIPs, ""),
 			"LocalIPs": strings.Join(local, ", "),
 			"Defaults": s.panelDefaults(r.Context()),
+			"Panel":    s.panelAddrData(r),
 		}})
 }
 

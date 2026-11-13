@@ -33,3 +33,14 @@ func TestIdleGC(t *testing.T) {
 	var nilGC *IdleGC
 	nilGC.Touch()
 }
+
+func TestPageOutBinary(t *testing.T) {
+	// The test binary's own read-only mappings are advised; the process keeps
+	// running (pages fault back in), which is the point.
+	if n := PageOutBinary(); n <= 0 {
+		t.Fatalf("PageOutBinary = %d, want > 0", n)
+	}
+	if n := PageOutBinary(); n <= 0 { // idempotent
+		t.Fatalf("second PageOutBinary = %d", n)
+	}
+}

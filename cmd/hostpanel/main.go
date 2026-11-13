@@ -40,6 +40,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/metrics"
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/paneladdr"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
 	"github.com/zahit5834/hostpanel/internal/pgsql"
 	"github.com/zahit5834/hostpanel/internal/rbl"
@@ -212,7 +213,8 @@ func serve(args []string) error {
 		Jobs: jm, Activity: activity, Log: log, ScriptsDir: cfg.ScriptsDir, TemplatesDir: cfg.TemplatesDir,
 		UploadDir: filepath.Join(cfg.DataDir, "uploads"), DryRun: cfg.DryRun}
 	siteSvc.ProbeToken = ssl.EnsureServerID(ctx, a.db)
-	siteSvc.PanelDomain = cfg.PanelDomain
+	panelAddr := paneladdr.NewHolder(cfg)
+	siteSvc.PanelDomain = panelAddr.Domain
 	siteSvc.Register()
 	sslSvc := &ssl.Service{Store: ssl.NewStore(a.db), Sites: siteSvc, DB: a.db, Box: a.box, Runner: runner, Probe: probe,
 		Jobs: jm, Activity: activity, Log: log, ScriptsDir: cfg.ScriptsDir,
@@ -235,7 +237,7 @@ func serve(args []string) error {
 	dnsSvc.Register()
 	mailSvc := &mail.Service{Store: mail.NewStore(a.db), DB: a.db, Runner: runner, Jobs: jm, Activity: activity, Log: log,
 		ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun, MemTotalMB: dbSvc.MemTotalMB, ServerIPs: sslSvc.ServerIPs,
-		Changed: dnsSvc.MailChanged, NameTaken: mailNameTaken(siteSvc, cfg.PanelDomain)}
+		Changed: dnsSvc.MailChanged, NameTaken: mailNameTaken(siteSvc, panelAddr.Domain)}
 	if cfg.DryRun {
 		mailSvc.Fake = mail.NewFake() // hp-mail.sh is only logged: accounts live in memory
 	}
@@ -289,6 +291,12 @@ func serve(args []string) error {
 		SSH: &hostsec.SSH{Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun},
 		F2B: &hostsec.Fail2ban{Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun},
 		Sys: &sysmaint.Service{Runner: runner, Probe: probe, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun}}
+	srv.PanelAddr = &paneladdr.Service{Addr: panelAddr, Jobs: jm, Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: cfg.DryRun,
+		Taken: srv.PanelTaken, ZoneFor: dnsSvc.ZoneCovering, ApplyDNS: dnsSvc.ApplyFor, Delegated: srv.PanelDelegated,
+		ServerIPs: sslSvc.ServerIPs, Email: srv.ACMEEmail, Target: srv.PanelTarget, SetTarget: srv.SetPanelTarget,
+		Changed: srv.PanelChanged, Wait: 10 * time.Second}
+	srv.PanelAddr.Register()
+	dnsSvc.Panel = srv.PanelAddr.DNSName
 	metricsSvc := &metrics.Service{DB: a.db, Log: log, AfterTick: idle.Touch}
 	metricsSvc.Init()
 	srv.Metrics = metricsSvc
@@ -544,9 +552,9 @@ Sıradaki adımlar:
 
 // mailNameTaken rejects a mail server name that a site or the panel uses
 // (their nginx vhosts own the name on port 80).
-func mailNameTaken(siteSvc *sites.Service, panelDomain string) func(ctx context.Context, host string) error {
+func mailNameTaken(siteSvc *sites.Service, panelDomain func() string) func(ctx context.Context, host string) error {
 	return func(ctx context.Context, host string) error {
-		if panelDomain != "" && host == panelDomain {
+		if d := panelDomain(); d != "" && host == d {
 			return fmt.Errorf("%s panelin kendi adresi; posta sunucusu adı olarak kullanılamaz", host)
 		}
 		list, err := siteSvc.Store.List(ctx, 0)

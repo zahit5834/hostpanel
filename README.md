@@ -75,6 +75,21 @@ ssh -L 8443:127.0.0.1:8443 kullanici@sunucu
 ```
 Ardından `https://127.0.0.1:8443` adresini açın.
 
+## Panel adresi (panel.alanadiniz.com)
+Kurulumda alan adı vermediyseniz ya da adı değiştirmek istiyorsanız: **Ayarlar → Genel → Panel adresi**.
+1. Ön eki (varsayılan `panel`) yazın, listeden bir alan adı seçin. Liste paneldeki DNS zone'larından ve sitelerin alan adlarından oluşur.
+2. "Panel adresini değiştir"e basın. Panel şunları kendisi yapar:
+   - Zone paneldeyse A/AAAA kaydını ekler. Zone başka yerdeyse sayfadaki IP'lere A kaydını DNS sağlayıcınızda siz girersiniz.
+   - Adın genel DNS'te bu sunucuya çözülmesini bekler (en fazla ~2 dk).
+   - Let's Encrypt sertifikası alır, sonra nginx'i `https://panel.alanadiniz.com` (443) için yapılandırır. 80. port bu adrese yönlenir.
+3. Eski `https://<sunucu-ip>:8443` adresi **yedek giriş** olarak açık kalır (self-signed). Yeni ad bozulursa buradan girebilirsiniz.
+
+Notlar:
+- Sertifika alınana kadar panel eski adresinden çalışmaya devam eder. Bir adım başarısız olursa adres değişmez, DNS kaydı geri alınır.
+- Bir sitenin, posta sunucusunun ya da nameserver'ın adı seçilemez. Aynı adda elle girilmiş bir DNS kaydı varsa ad reddedilir.
+- Oturum çerezleri adrese bağlıdır, yeni adreste bir kez yeniden giriş yapılır.
+- "Alan adını kaldır" paneli yalnızca IP adresine döndürür ve sertifikayı siler.
+
 ## Kendi nameserver'larınız (DNS)
 1. **DNS** sayfasında nameserver adlarını (ör. `ns1.alanadiniz.com`, `ns2.alanadiniz.com`), yönetici e-postasını ve sunucunun genel IP'lerini kaydedin.
 2. "DNS sunucusunu kur": Ubuntu deposundan BIND 9 kurulur.

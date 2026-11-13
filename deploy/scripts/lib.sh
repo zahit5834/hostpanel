@@ -868,15 +868,22 @@ panel_self_signed() {
   chmod 0644 "$PANEL_TLS_DIR/cert.pem"
 }
 
-# render_panel_vhost MODE DOMAIN PORT — print the panel's nginx config.
+# render_panel_vhost MODE DOMAIN PORT [IP_PORT] — print the panel's nginx config.
 #   ip:     PORT ssl default_server with the self-signed certificate
 #   acme:   port 80 for DOMAIN only (ACME challenge before the certificate exists)
-#   domain: port 80 (ACME + redirect) and PORT ssl with the Let's Encrypt certificate
+#   domain: port 80 (ACME + redirect) and PORT ssl with the Let's Encrypt
+#           certificate; with IP_PORT also the self-signed IP entry there
+#           (fallback when the name is broken; settings → panel address)
 render_panel_vhost() {
-  local mode=$1 domain=$2 port=$3 cert key redirect
+  local mode=$1 domain=$2 port=$3 ip_port=${4:-} redirect
   validate_oneof "$mode" ip acme domain
   validate_panel_port "$port"
   [[ $mode == ip ]] || validate_domain "$domain"
+  if [[ -n $ip_port ]]; then
+    [[ $mode == domain ]] || die "IP girişi yalnızca domain modunda"
+    validate_panel_port "$ip_port"
+    [[ $ip_port != "$port" ]] || die "IP girişi portu alan adının portundan farklı olmalı"
+  fi
   echo "# HostPanel panel vhost (${mode}) — written by install.sh / hp-update.sh; do not edit."
   if [[ $mode != ip ]]; then
     redirect="https://\$host:${port}\$request_uri"
@@ -896,23 +903,27 @@ server {
 }
 CONF
   fi
-  [[ $mode == acme ]] && return 0
-  if [[ $mode == ip ]]; then
-    cert=$PANEL_TLS_DIR/cert.pem key=$PANEL_TLS_DIR/key.pem
-  else
-    cert=/etc/letsencrypt/live/$PANEL_CERT_NAME/fullchain.pem key=/etc/letsencrypt/live/$PANEL_CERT_NAME/privkey.pem
-  fi
-  local listen_opts="ssl http2" name=$domain hsts=""
-  if [[ $mode == ip ]]; then
-    name=_
-    listen_opts="ssl http2 default_server"
-  else
-    hsts='    add_header Strict-Transport-Security "max-age=31536000" always;'
-  fi
+  case $mode in
+    acme) return 0 ;;
+    ip) _panel_tls_server "$port" "ssl http2 default_server" _ "$PANEL_TLS_DIR/cert.pem" "$PANEL_TLS_DIR/key.pem" "" ;;
+    domain)
+      _panel_tls_server "$port" "ssl http2" "$domain" "/etc/letsencrypt/live/$PANEL_CERT_NAME/fullchain.pem" \
+        "/etc/letsencrypt/live/$PANEL_CERT_NAME/privkey.pem" '    add_header Strict-Transport-Security "max-age=31536000" always;'
+      if [[ -n $ip_port ]]; then
+        _panel_tls_server "$ip_port" "ssl http2 default_server" _ "$PANEL_TLS_DIR/cert.pem" "$PANEL_TLS_DIR/key.pem" ""
+      fi
+      ;;
+  esac
+}
+
+# _panel_tls_server PORT LISTEN_OPTS NAME CERT KEY HSTS_LINE — one HTTPS block
+# proxying to the panel.
+_panel_tls_server() {
+  local port=$1 opts=$2 name=$3 cert=$4 key=$5 hsts=$6
   cat <<CONF
 server {
-    listen ${port} ${listen_opts};
-    listen [::]:${port} ${listen_opts};
+    listen ${port} ${opts};
+    listen [::]:${port} ${opts};
     server_name ${name};
     ssl_certificate ${cert};
     ssl_certificate_key ${key};
@@ -961,18 +972,67 @@ ${hsts}
 CONF
 }
 
-# write_panel_vhost MODE DOMAIN PORT — install the panel vhost; nginx -t must
-# pass, otherwise the previous file is restored.
+# write_panel_vhost MODE DOMAIN PORT [IP_PORT] — install the panel vhost;
+# nginx -t must pass, otherwise the previous file is restored.
 write_panel_vhost() {
-  local tmp
+  local tmp default_port=""
   tmp=$(mktemp)
   render_panel_vhost "$@" >"$tmp"
-  # an IP-mode panel on 443 is that port's default server itself: drop the
-  # catch-all first (nginx refuses two); ensure_default_vhost re-adds port 80.
-  if [[ $1 == ip && $3 == 443 && -f $HP_DEFAULT_VHOST ]]; then
+  # a self-signed IP entry on 443 is that port's default server itself: drop
+  # the catch-all first (nginx refuses two); ensure_default_vhost re-adds 80.
+  [[ $1 == ip ]] && default_port=$3
+  [[ $1 == domain && -n ${4:-} ]] && default_port=$4
+  if [[ $default_port == 443 && -f $HP_DEFAULT_VHOST ]]; then
     rm -f -- "$HP_DEFAULT_VHOST_LINK" "$HP_DEFAULT_VHOST"
   fi
   install_vhost "$tmp" "$HP_VHOST" "$HP_VHOST_LINK" "panel"
+}
+
+# panel_vhost_from_config — write the vhost config.yaml describes: the domain
+# (+ IP entry on panel_ip_port) once its certificate exists, else IP mode.
+panel_vhost_from_config() {
+  local domain port ip_port
+  domain=$(config_value panel_domain)
+  port=$(config_value panel_port)
+  ip_port=$(config_value panel_ip_port)
+  [[ -n $port ]] || port=8443
+  [[ $ip_port == 0 ]] && ip_port=""
+  if [[ -n $domain && -s /etc/letsencrypt/live/$PANEL_CERT_NAME/fullchain.pem ]]; then
+    [[ -n $ip_port ]] && panel_self_signed
+    write_panel_vhost domain "$domain" "$port" "$ip_port"
+  else
+    # no certificate (yet): the IP entry keeps its own port if there is one
+    [[ -n $ip_port ]] && port=$ip_port
+    panel_self_signed
+    write_panel_vhost ip "" "$port"
+  fi
+}
+
+# set_config_values KEY=VALUE... — rewrite top-level scalars of config.yaml
+# (others, comments and mode/owner kept; empty VALUE = "", "-" = drop the key).
+# Values are domains or numbers here (callers validate them).
+set_config_values() {
+  local kv k v owner mode tmp
+  [[ -f $HP_CONFIG && ! -L $HP_CONFIG ]] || die "${HP_CONFIG} yok"
+  owner=$(stat -c %U:%G "$HP_CONFIG") mode=$(stat -c %a "$HP_CONFIG")
+  tmp=$(mktemp)
+  cp -- "$HP_CONFIG" "$tmp"
+  for kv in "$@"; do
+    k=${kv%%=*} v=${kv#*=}
+    [[ $k =~ ^[a-z_]+$ && $v =~ ^[a-z0-9.-]*$ ]] || die "geçersiz config değeri: ${kv}"
+    if [[ $v == - ]]; then
+      sed -i -E "/^${k}:/d" "$tmp"
+      continue
+    fi
+    [[ $v =~ ^[0-9]+$ ]] || v="\"${v}\""
+    if grep -qE "^${k}:" "$tmp"; then
+      sed -i -E "s|^${k}:.*\$|${k}: ${v}|" "$tmp"
+    else
+      printf '%s: %s\n' "$k" "$v" >>"$tmp"
+    fi
+  done
+  atomic_write "$HP_CONFIG" "$mode" "$owner" <"$tmp"
+  rm -f -- "$tmp"
 }
 
 # ---------------------------------------------------------------------------
@@ -1707,12 +1767,17 @@ FILTER
   fi
 }
 
-# f2b_ports — ports of the panel jail: 443 plus the configured panel port.
+# f2b_ports — ports of the panel jail: 443 plus the configured panel port
+# and the IP entry's port (panel on a domain).
 f2b_ports() {
-  local p
+  local p q x out=443
   p=$(config_value panel_port)
+  q=$(config_value panel_ip_port)
   [[ $p =~ ^[0-9]{1,5}$ ]] || p=8443
-  if [[ $p == 443 ]]; then echo 443; else echo "${p},443"; fi
+  for x in "$p" "$q"; do
+    [[ $x =~ ^[0-9]{1,5}$ && $x != 0 && $x != 443 && ,$out, != *,$x,* ]] && out="${x},${out}"
+  done
+  echo "$out"
 }
 
 # f2b_current — "MAXRETRY FINDTIME BANTIME RECIDIVE" of the jail file (the

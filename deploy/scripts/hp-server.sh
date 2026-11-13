@@ -30,6 +30,8 @@ protected_ports() {
   [[ $p =~ ^[0-9]{1,5}$ ]] && ports+=("$p")
   p=$(config_value panel_port)
   [[ $p =~ ^[0-9]{1,5}$ ]] && ports+=("$p")
+  p=$(config_value panel_ip_port)
+  [[ $p =~ ^[0-9]{1,5}$ && $p != 0 ]] && ports+=("$p")
   printf '%s\n' "${ports[@]}" | sort -un | paste -sd, -
 }
 

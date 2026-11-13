@@ -39,6 +39,7 @@ func (g *IdleGC) run() {
 		return
 	}
 	debug.FreeOSMemory()
+	PageOutBinary()
 }
 
 // Stop cancels a pending release (shutdown).

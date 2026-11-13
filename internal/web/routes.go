@@ -175,6 +175,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("GET /settings/security", s.requireAuth(s.securityPage))
 	mux.Handle("GET /settings/general", s.requireAuth(s.generalPage))
 	mux.Handle("POST /settings/general", s.requireAuth(s.saveGeneral))
+	mux.Handle("POST /settings/panel-address", s.requireRecent(s.panelAddrSave))
 	mux.Handle("POST /settings/password", s.requireAuth(s.changePassword))
 	mux.Handle("POST /settings/2fa/start", s.requireAuth(s.totpStart))
 	mux.Handle("POST /settings/2fa/enable", s.requireAuth(s.totpEnable))

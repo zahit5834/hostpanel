@@ -48,8 +48,9 @@ type Service struct {
 	CertFor func(ctx context.Context, siteID int64) *TLSPaths
 	// ProbeToken is served at /.well-known/hostpanel-probe for SSL pre-checks.
 	ProbeToken string
-	// PanelDomain is the panel's own nginx name (config panel_domain); sites can't use it.
-	PanelDomain string
+	// PanelDomain returns the panel's own nginx name (settings → panel
+	// address; "" = IP only); sites can't use it. nil = none.
+	PanelDomain func() string
 	// MailHost returns the mail server's name ("" = none); its port 80
 	// vhost (certificate challenges) owns it.
 	MailHost func(ctx context.Context) string
@@ -1051,7 +1052,7 @@ func (s *Service) notPanelDomain(ctx context.Context, names []string) error {
 		mail = s.MailHost(ctx)
 	}
 	for _, n := range names {
-		if s.PanelDomain != "" && n == s.PanelDomain {
+		if s.PanelDomain != nil && s.PanelDomain() != "" && n == s.PanelDomain() {
 			return fmt.Errorf("%s panelin kendi adresi; site olarak kullanılamaz", n)
 		}
 		if mail != "" && n == mail {

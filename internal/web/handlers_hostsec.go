@@ -309,7 +309,10 @@ func (s *Server) IntegrityCheck(ctx context.Context) []hostsec.IntegrityIssue {
 
 func (s *Server) expectedPorts(ctx context.Context, sshPorts []string) ([]hostsec.PortInfo, []int) {
 	exp := []hostsec.PortInfo{{Proto: "tcp", Port: 80, Label: "HTTP"}, {Proto: "tcp", Port: 443, Label: "HTTPS"},
-		{Proto: "tcp", Port: s.Cfg.PanelPort, Label: "panel"}, {Proto: "udp", Port: 68, Label: "DHCP"}}
+		{Proto: "tcp", Port: s.PanelAddr.Addr.Get().Port, Label: "panel"}, {Proto: "udp", Port: 68, Label: "DHCP"}}
+	if p := s.PanelAddr.Addr.Get().IPPort; p != 0 {
+		exp = append(exp, hostsec.PortInfo{Proto: "tcp", Port: p, Label: "panel (IP girişi)"})
+	}
 	if len(sshPorts) == 0 {
 		sshPorts = []string{"22"}
 	}

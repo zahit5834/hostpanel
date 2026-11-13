@@ -26,5 +26,38 @@
     <div><button type="submit" class="primary">Kaydet</button></div>
   </form>
 </section>
+
+{{with .Panel}}
+<section class="card stack" id="panel-address">
+  <h2>Panel adresi</h2>
+  {{if .JobID}}{{template "job-console" .JobID}}{{end}}
+  <dl class="kv">
+    <dt>Alan adı</dt><dd>{{if .URL}}<a href="{{.URL}}">{{.URL}}</a>{{else}}<span class="muted">yok — panel yalnızca IP adresinden açılıyor</span>{{end}}</dd>
+    <dt>{{if .URL}}Yedek giriş{{else}}IP adresi{{end}}</dt><dd>{{if .Fallback}}<code>{{.Fallback}}</code> <span class="muted small">(self-signed sertifika)</span>{{else}}—{{end}}</dd>
+  </dl>
+  {{if .Running}}<p class="small">Panel adresi değiştiriliyor; iş bitince bu sayfayı yenileyin.</p>
+  {{else if .Bases}}
+  <form method="post" action="/settings/panel-address" class="stack" data-confirm="Panelin adresi değişecek. Sertifika alınırken panel eski adresten çalışmaya devam eder ve IP adresi yedek giriş olarak açık kalır. Devam edilsin mi?">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <div class="form-grid">
+      <label>Ön ek <input name="label" value="{{.Label}}" required pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?" spellcheck="false" autocomplete="off"></label>
+      <label>Alan adı
+        <select name="base" required>
+          {{range .Bases}}<option value="{{.Name}}">{{.Name}}{{if .InZone}} — DNS panelde, kayıt otomatik{{else}} — DNS başka yerde{{end}}</option>{{end}}
+        </select></label>
+    </div>
+    <p class="muted small">Panel <code>https://&lt;ön ek&gt;.&lt;alan adı&gt;</code> adresinden açılır (port 443, Let's Encrypt). Alan adının DNS'i paneldeyse A kaydı otomatik eklenir. DNS başka bir sağlayıcıdaysa önce şu kaydı oradan ekleyin: <code>&lt;ön ek&gt; A {{range $i, $ip := .IPs}}{{if $i}}, {{end}}{{$ip}}{{end}}</code>. Sertifika ancak ad bu sunucuya çözüldükten sonra alınır; o zamana kadar hiçbir şey değişmez.</p>
+    <div><button type="submit" class="primary">Panel adresini değiştir</button></div>
+  </form>
+  {{else}}<p class="muted small">Önce bir site ekleyin ya da DNS'e bir zone ekleyin; panel adresi onların alan adlarından seçilir.</p>{{end}}
+  {{if and .URL (not .Running)}}
+  <form method="post" action="/settings/panel-address" data-confirm="Alan adı kaldırılsın mı? Panel yalnızca IP adresinden (self-signed) açılacak.">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <button type="submit" name="action" value="clear" class="link-btn">Alan adını kaldır (yalnızca IP)</button>
+  </form>
+  {{end}}
+  <p class="muted small">Yeni adreste bir kez yeniden giriş yapmanız gerekir; oturumlar adresler arasında paylaşılmaz. IP adresi her zaman yedek giriş olarak açık kalır.</p>
+</section>
+{{end}}
 {{end}}
 {{end}}

@@ -92,6 +92,9 @@ type RenderInput struct {
 	// authorizing DMARC reports for other domains (RFC 7489 §7.1).
 	MailExtraHosts []string
 	MailReports    []string
+	// PanelHost is the panel's own name (settings → panel address; "" = IP
+	// only): it gets the server's A/AAAA records when it falls into this zone.
+	PanelHost string
 }
 
 // MailSRV are the client set-up records published per mail domain (RFC 6186
@@ -147,6 +150,9 @@ func AutoRecords(in RenderInput) []Record {
 	}
 	add(in.Settings.NS1, "nameserver")
 	add(in.Settings.NS2, "nameserver")
+	if in.PanelHost != "" {
+		add(in.PanelHost, "panel")
+	}
 	if in.Zone.AutoSites {
 		for _, s := range in.Sites {
 			for _, n := range s.Names {

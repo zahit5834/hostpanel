@@ -23,7 +23,7 @@ set -euo pipefail
 REPO=${HP_REPO:-zahit5834/hostpanel}
 PACKAGES=(nginx certbot python3-certbot-nginx ufw fail2ban zstd curl jq unzip openssl git ca-certificates)
 
-DOMAIN="" EMAIL="" PORT=8443 VERSION=latest TARBALL="" SUMS="" IMPORT="" NO_FW=0 YES=0
+DOMAIN="" EMAIL="" PORT=8443 IP_PORT="" ADDR_FLAGS=0 VERSION=latest TARBALL="" SUMS="" IMPORT="" NO_FW=0 YES=0
 
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mUYARI:\033[0m %s\n' "$*" >&2; }
@@ -45,9 +45,9 @@ parse_args() {
         ;;
     esac
     case $1 in
-      --domain) DOMAIN=$2 && shift ;;
+      --domain) DOMAIN=$2 ADDR_FLAGS=1 && shift ;;
       --email) EMAIL=$2 && shift ;;
-      --port) PORT=$2 && shift ;;
+      --port) PORT=$2 ADDR_FLAGS=1 && shift ;;
       --version) VERSION=$2 && shift ;;
       --tarball) TARBALL=$2 && shift ;;
       --sums) SUMS=$2 && shift ;;
@@ -120,6 +120,7 @@ ufw_plan() {
   echo 80/tcp
   echo 443/tcp
   [[ $PORT == 443 ]] || echo "${PORT}/tcp"
+  [[ -z $IP_PORT || $IP_PORT == 443 ]] || echo "${IP_PORT}/tcp"
 }
 
 # client_ip — address of the admin running this over SSH (kept out of fail2ban bans).
@@ -269,8 +270,19 @@ write_config() {
   fi
   chown root:hostpanel "$f"
   chmod 0640 "$f"
-  set_config panel_domain "\"${DOMAIN}\""
-  set_config panel_port "$PORT"
+  # Re-run without --domain/--port: keep the panel address chosen in the
+  # panel (settings → panel address), including its IP entry.
+  if ((!ADDR_FLAGS)) && grep -qE '^panel_port:' "$f"; then
+    DOMAIN=$(config_value panel_domain)
+    PORT=$(config_value panel_port)
+    IP_PORT=$(config_value panel_ip_port)
+    [[ -n $PORT ]] || PORT=8443
+    [[ $IP_PORT == 0 ]] && IP_PORT=""
+  else
+    set_config panel_domain "\"${DOMAIN}\""
+    set_config panel_port "$PORT"
+    sed -i -E '/^panel_ip_port:/d' "$f"
+  fi
   set_config update_repo "$REPO"
 }
 
@@ -317,8 +329,8 @@ setup_fail2ban() {
   if [[ -n $ip && $ip != 127.* && $ip != ::1 ]] && ((!have)); then
     ign+=("$ip")
   fi
-  local jports="443"
-  [[ $PORT == 443 ]] || jports="${PORT},443"
+  local jports
+  jports=$(f2b_ports)
   render_f2b_jail "$on" "${cur[0]}" "${cur[1]}" "${cur[2]}" "${cur[3]}" "$jports" "${ign[@]}" >"$F2B_JAIL"
   [[ -f /var/log/hostpanel/auth.log ]] || install -o hostpanel -g hostpanel -m 0640 /dev/null /var/log/hostpanel/auth.log
   if fail2ban-client -t >/dev/null 2>&1; then
@@ -358,7 +370,9 @@ ROTATE
 
 # setup_vhost — panel behind nginx: Let's Encrypt for --domain, else self-signed on the IP.
 setup_vhost() {
-  if [[ -n $DOMAIN ]]; then
+  if ((!ADDR_FLAGS)) && [[ -n $DOMAIN && -s /etc/letsencrypt/live/$PANEL_CERT_NAME/fullchain.pem ]]; then
+    panel_vhost_from_config
+  elif [[ -n $DOMAIN ]]; then
     if [[ ! -s /etc/letsencrypt/live/$PANEL_CERT_NAME/fullchain.pem ]] ||
       [[ $(openssl x509 -in "/etc/letsencrypt/live/$PANEL_CERT_NAME/fullchain.pem" -noout -checkhost "$DOMAIN" 2>/dev/null) != *"does match"* ]]; then
       say "Let's Encrypt sertifikası alınıyor: ${DOMAIN}"
@@ -422,6 +436,10 @@ summary() {
   echo " HostPanel ${VERSION} kuruldu"
   echo
   echo " Adres:     ${url}"
+  if [[ -n $IP_PORT && $url == https://${DOMAIN}* && -n $DOMAIN ]]; then
+    ip=$(server_ips | grep -v ':' | head -n1 || true)
+    echo " Yedek:     https://${ip:-<sunucu-ip>}:${IP_PORT} (self-signed)"
+  fi
   if [[ $creds == *Şifre:* ]]; then
     sed 's/^/ /' <<<"$creds"
     echo

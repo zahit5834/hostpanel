@@ -111,7 +111,7 @@ func TestUpdateTransferDefaultsDryRun(t *testing.T) {
 	}
 
 	// --- panel domain is reserved ---
-	s.Sites.PanelDomain = "panel.example.com"
+	s.Sites.PanelDomain = func() string { return "panel.example.com" }
 	res = w.postBody("/sites", url.Values{"customer_id": {"1"}, "domain": {"panel.example.com"}, "runtime": {"static"}})
 	b, _ := io.ReadAll(res.Body)
 	res.Body.Close()

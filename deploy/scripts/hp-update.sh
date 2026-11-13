@@ -6,6 +6,9 @@
 #   hp-update.sh run <vX.Y.Z>      same, but wait and stream the output (update.sh)
 #   hp-update.sh apply <vX.Y.Z>    the update itself (only inside hostpanel-update.service)
 #   hp-update.sh refresh-vhost     re-render the panel's nginx vhost from config.yaml
+#   hp-update.sh panel-domain set <name> <email|->   serve the panel on https://<name>
+#                                  (Let's Encrypt, port 443) + the self-signed IP entry
+#   hp-update.sh panel-domain clear                  back to the IP entry only
 #
 # Root downloads the release itself from the repository named in the root-owned
 # config.yaml and verifies it against the release's SHA256SUMS: a compromised
@@ -23,7 +26,7 @@
 {
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 require_root
-[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") start|run|apply <vX.Y.Z> | refresh-vhost"
+[[ $# -ge 1 ]] || die "kullanım: $(basename "$0") start|run|apply <vX.Y.Z> | refresh-vhost | panel-domain …"
 action=$1
 shift
 
@@ -226,22 +229,156 @@ refresh_vhost() {
     log "panel vhost yok, atlandı"
     return 0
   }
-  local domain port
-  domain=$(config_value panel_domain)
-  port=$(config_value panel_port)
-  [[ -n $port ]] || port=8443
-  if [[ -n $domain && -s /etc/letsencrypt/live/$PANEL_CERT_NAME/fullchain.pem ]]; then
-    write_panel_vhost domain "$domain" "$port"
-  else
-    panel_self_signed
-    write_panel_vhost ip "" "$port"
-  fi
+  panel_vhost_from_config
   log "panel vhost yenilendi"
   refresh_mail_vhost
   ensure_default_vhost
 }
 
+# --- panel address (settings → panel address) ---
+PANEL_ACME_VHOST=/etc/nginx/sites-available/hostpanel-panel-acme.conf
+PANEL_ACME_VHOST_LINK=/etc/nginx/sites-enabled/hostpanel-panel-acme.conf
+PANEL_DOMAIN_LOCK=/run/hostpanel-panel-domain.lock
+
+# site_has_name NAME — an enabled site vhost serves NAME (exact server_name
+# token): the panel must never take over a site's name.
+site_has_name() {
+  local f
+  for f in /etc/nginx/sites-enabled/hp-*.conf; do
+    [[ -f $f ]] || continue
+    if [[ -n $(awk -v n="$1" '{ for (i = 1; i <= NF; i++) { t = $i; if (t == "server_name") { on = 1; continue } if (on) { e = sub(/;.*$/, "", t); if (t == n) print FILENAME; if (e) on = 0 } } }' "$f") ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# panel_ip_entry — the port of the IP (self-signed) entry after the switch:
+# the configured one, else the current IP-mode port, else 8443.
+panel_ip_entry() {
+  local p
+  p=$(config_value panel_ip_port)
+  if [[ -z $p || $p == 0 ]]; then
+    p=$(config_value panel_port)
+    [[ -n $(config_value panel_domain) || -z $p || $p == 443 ]] && p=8443
+  fi
+  printf '%s\n' "$p"
+}
+
+# panel_domain_set NAME EMAIL|- — certificate for NAME (via a temporary port
+# 80 vhost; the running panel vhost is untouched until it exists), then the
+# domain vhost on 443 plus the IP entry. Any failure restores vhost + config.
+panel_domain_set() {
+  local name=$1 email=$2 ip_port ip args=() old_name
+  validate_domain "$name"
+  old_name=$(config_value panel_domain)
+  [[ $email == - ]] || validate_email "$email"
+  [[ $name != "${PANEL_UPSTREAM%%:*}" ]] || die "geçersiz ad"
+  ! site_has_name "$name" || die "${name} bir sitenin adı; panel adı olamaz"
+  [[ $name != "$(sed -n 's/^    server_name \([^ ;]*\)[ ;].*/\1/p' "$MAIL_VHOST" 2>/dev/null | head -n 1)" ]] || die "${name} posta sunucusunun adı"
+  ip_port=$(panel_ip_entry)
+  validate_panel_port "$ip_port"
+  [[ $ip_port != 443 ]] || die "IP girişi 443 olamaz (alan adı 443'te)"
+  command -v certbot >/dev/null || die "certbot kurulu değil"
+  install -d -o root -g root -m 0755 /var/www/letsencrypt
+
+  local tmp
+  tmp=$(mktemp)
+  cat >"$tmp" <<CONF
+# HostPanel: temporary ACME vhost for the panel's new name; removed afterwards.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${name};
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type text/plain;
+    }
+    location / {
+        return 404;
+    }
+}
+CONF
+  install_vhost "$tmp" "$PANEL_ACME_VHOST" "$PANEL_ACME_VHOST_LINK" "geçici ACME"
+  log "sertifika alınıyor: ${name}"
+  args=(certonly --non-interactive --agree-tos --no-eff-email --webroot -w /var/www/letsencrypt
+    --cert-name "$PANEL_CERT_NAME" -d "$name" --keep-until-expiring)
+  if [[ $email == - ]]; then args+=(--register-unsafely-without-email); else args+=(--email "$email"); fi
+  if ! certbot "${args[@]}" 2>&1 | tail -n 20; then
+    rm -f -- "$PANEL_ACME_VHOST_LINK" "$PANEL_ACME_VHOST"
+    nginx -t -q && systemctl reload nginx
+    die "sertifika alınamadı (DNS ${name} → bu sunucu mu, 80 açık mı?); panel adresi değişmedi"
+  fi
+  rm -f -- "$PANEL_ACME_VHOST_LINK" "$PANEL_ACME_VHOST"
+  [[ $(openssl x509 -in "/etc/letsencrypt/live/$PANEL_CERT_NAME/fullchain.pem" -noout -checkhost "$name" 2>/dev/null) == *"does match"* ]] ||
+    die "sertifika ${name} adını içermiyor; panel adresi değişmedi"
+
+  local cfg_bak vhost_bak
+  cfg_bak=$(mktemp) vhost_bak=$(mktemp)
+  cp -p -- "$HP_CONFIG" "$cfg_bak"
+  [[ -f $HP_VHOST ]] && cp -p -- "$HP_VHOST" "$vhost_bak"
+  set_config_values "panel_domain=${name}" "panel_port=443" "panel_ip_port=${ip_port}"
+  panel_self_signed
+  if ! (write_panel_vhost domain "$name" 443 "$ip_port"); then
+    cp -p -- "$cfg_bak" "$HP_CONFIG"
+    if [[ -s $vhost_bak ]]; then
+      install -o root -g root -m 0644 "$vhost_bak" "$HP_VHOST"
+      nginx -t -q && systemctl reload nginx
+    fi
+    rm -f -- "$cfg_bak" "$vhost_bak"
+    # the lineage already carries the new name: back to the old one (its
+    # restored vhost answers the challenge on port 80)
+    if [[ -n $old_name && $old_name != "$name" ]]; then
+      args=("${args[@]/#$name/$old_name}")
+      if certbot "${args[@]}" >/dev/null 2>&1; then
+        nginx -t -q && systemctl reload nginx
+      else
+        log "UYARI: ${old_name} için sertifika geri alınamadı; tarayıcı uyarı verebilir (yedek IP girişinden adresi yeniden seçin)"
+      fi
+    fi
+    die "panel yapılandırması reddedildi; eski adres geri yüklendi"
+  fi
+  rm -f -- "$cfg_bak" "$vhost_bak"
+  ensure_default_vhost
+  ip=$(server_ips | grep -v ':' | head -n1 || true)
+  log "panel adresi: https://${name}"
+  echo "url=https://${name}"
+  echo "fallback=https://${ip:-<sunucu-ip>}:${ip_port}"
+}
+
+# panel_domain_clear — back to the IP entry only; the panel's certificate is
+# deleted (its renewal could no longer reach the ACME location).
+panel_domain_clear() {
+  local port
+  port=$(panel_ip_entry)
+  validate_panel_port "$port"
+  set_config_values "panel_domain=" "panel_port=${port}" "panel_ip_port=-"
+  panel_self_signed
+  write_panel_vhost ip "" "$port"
+  ensure_default_vhost
+  if [[ -d /etc/letsencrypt/live/$PANEL_CERT_NAME ]]; then
+    certbot delete --non-interactive --cert-name "$PANEL_CERT_NAME" >/dev/null 2>&1 || log "UYARI: eski panel sertifikası silinemedi"
+  fi
+  log "panel adresi: yalnızca IP (port ${port})"
+  echo "fallback=https://$(server_ips | grep -v ':' | head -n1 || true):${port}"
+}
+
 case $action in
+  panel-domain)
+    exec 8>"$PANEL_DOMAIN_LOCK"
+    flock -n 8 || die "panel adresi zaten değiştiriliyor"
+    case ${1:-} in
+      set)
+        [[ $# -eq 3 ]] || die "kullanım: panel-domain set <ad> <e-posta|->"
+        panel_domain_set "$2" "$3"
+        ;;
+      clear)
+        [[ $# -eq 1 ]] || die "kullanım: panel-domain clear"
+        panel_domain_clear
+        ;;
+      *) die "kullanım: panel-domain set|clear" ;;
+    esac
+    ;;
   start | run)
     [[ $# -eq 1 ]] || die "kullanım: ${action} <vX.Y.Z>"
     validate_version "$1"

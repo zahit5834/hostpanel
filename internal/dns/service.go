@@ -62,6 +62,8 @@ type Service struct {
 	// Mail returns the mail server's name, mail domains and the extra
 	// client set-up / report authorization names (nil = no mail).
 	Mail func(ctx context.Context) MailInfo
+	// Panel returns the panel's own name ("" = IP only; settings → panel address).
+	Panel func(ctx context.Context) string
 
 	mu    sync.Mutex // one apply at a time
 	cache sync.Map   // zone → delegationCache
@@ -344,6 +346,11 @@ func (s *Service) Input(ctx context.Context, z Zone) (RenderInput, error) {
 			}
 		}
 	}
+	if s.Panel != nil {
+		if h := s.Panel(ctx); h != "" && ZoneFor(h, zones) == z.Name {
+			in.PanelHost = h
+		}
+	}
 	if s.Mail != nil {
 		mi := s.Mail(ctx)
 		in.MailHost, in.MailExtraHosts, in.MailReports = mi.Host, mi.ExtraHosts, mi.Reports
@@ -555,6 +562,26 @@ func (s *Service) MailChanged(ctx context.Context, names []string) {
 			s.Log.Warn("dns apply after mail change", "zone", zn, "err", err)
 		}
 	}
+}
+
+// ApplyFor writes the zone covering host now, inside the caller's job (a
+// queued dns.apply would wait behind it with one worker). No zone or no BIND
+// installed: nothing to do.
+func (s *Service) ApplyFor(ctx context.Context, l *jobs.Log, host string) error {
+	if !s.Installed(ctx) {
+		return nil
+	}
+	zn := s.ZoneCovering(ctx, host)
+	if zn == "" {
+		return nil
+	}
+	z, err := s.Store.ZoneByName(ctx, zn)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writeZone(ctx, l, z)
 }
 
 // ZoneCovering returns the zone that serves host ("" when none).

@@ -33,6 +33,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/metrics"
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/paneladdr"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
 	"github.com/zahit5834/hostpanel/internal/pgsql"
 	"github.com/zahit5834/hostpanel/internal/rbl"
@@ -76,12 +77,13 @@ type Server struct {
 	Traffic   *traffic.Service
 	Idle      *system.IdleGC // returns memory to the OS after the last request
 	Images    *images.Service
-	SSH       *hostsec.SSH      // Faz 11: SSH login settings + admin keys
-	F2B       *hostsec.Fail2ban // host fail2ban jails
-	Sys       *sysmaint.Service // OS updates, reboot, memory, services
-	Metrics   *metrics.Service  // Faz 12: metric history + heartbeat
-	Domains   *domains.Service  // registration expiry
-	RBL       *rbl.Service      // Faz 13: mail blocklist checks
+	SSH       *hostsec.SSH       // Faz 11: SSH login settings + admin keys
+	F2B       *hostsec.Fail2ban  // host fail2ban jails
+	Sys       *sysmaint.Service  // OS updates, reboot, memory, services
+	Metrics   *metrics.Service   // Faz 12: metric history + heartbeat
+	Domains   *domains.Service   // registration expiry
+	PanelAddr *paneladdr.Service // settings → panel address
+	RBL       *rbl.Service       // Faz 13: mail blocklist checks
 	// ExportConfig writes the encrypted panel configuration (main wires it:
 	// it needs the master key, which the web layer never holds otherwise).
 	ExportConfig func(ctx context.Context, passphrase string, w io.Writer) (panelcfg.Manifest, error)

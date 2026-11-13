@@ -33,6 +33,7 @@ type Config struct {
 	Workers       int    `yaml:"workers"`        // background job workers
 	PanelDomain   string `yaml:"panel_domain"`   // public panel name (nginx vhost); empty = IP mode
 	PanelPort     int    `yaml:"panel_port"`     // public HTTPS port nginx serves the panel on
+	PanelIPPort   int    `yaml:"panel_ip_port"`  // self-signed IP entry next to panel_domain (0 = none)
 	UpdateRepo    string `yaml:"update_repo"`    // GitHub owner/name for releases
 
 	// Dev is set by the --dev flag only, never from YAML.
@@ -105,6 +106,9 @@ func Load(path string, base Config) (Config, error) {
 	}
 	if cfg.PanelPort < 1 || cfg.PanelPort > 65535 {
 		return cfg, fmt.Errorf("config: geçersiz panel_port %d", cfg.PanelPort)
+	}
+	if cfg.PanelIPPort < 0 || cfg.PanelIPPort > 65535 || (cfg.PanelIPPort != 0 && cfg.PanelIPPort == cfg.PanelPort) {
+		return cfg, fmt.Errorf("config: geçersiz panel_ip_port %d", cfg.PanelIPPort)
 	}
 	if cfg.PanelDomain != "" && !domainRe.MatchString(cfg.PanelDomain) {
 		return cfg, fmt.Errorf("config: geçersiz panel_domain %q", cfg.PanelDomain)

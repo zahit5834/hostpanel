@@ -62,8 +62,8 @@ func (s *Server) domainHosts(ctx context.Context) map[string][]string {
 			add(srv.Hostname, "posta sunucusu adı")
 		}
 	}
-	if s.Cfg.PanelDomain != "" {
-		add(s.Cfg.PanelDomain, "panel adresi")
+	if d := s.PanelAddr.Addr.Domain(); d != "" {
+		add(d, "panel adresi")
 	}
 	return uses
 }

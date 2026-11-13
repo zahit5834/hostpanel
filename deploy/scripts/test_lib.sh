@@ -320,6 +320,38 @@ v=$(vhost acme panel.ornek.com 8443)
 bad render_panel_vhost domain "x.com; include /etc/passwd" 8443
 bad render_panel_vhost ip "" 80
 bad render_panel_vhost other "" 8443
+# Panel on a domain (443) + the self-signed IP entry on 8443.
+v=$(vhost domain panel.ornek.com 443 8443)
+for want in "listen 443 ssl http2;" "server_name panel.ornek.com;" "listen 8443 ssl http2 default_server;" \
+  "server_name _;" "ssl_certificate /etc/hostpanel/panel-tls/cert.pem;" "/etc/letsencrypt/live/hostpanel-panel/fullchain.pem"; do
+  [[ $v == *"$want"* ]] || { echo "FAIL domain+ip vhost misses: $want"; fail=1; }
+done
+[[ $(grep -c 'proxy_pass http://127.0.0.1:8090;' <<<"$v") == 4 && $(grep -c '^server {' <<<"$v") == 3 ]] ||
+  { echo "FAIL domain+ip vhost block count"; fail=1; }
+[[ $(grep -c Strict-Transport <<<"$v") == 1 ]] || { echo "FAIL HSTS only on the domain block"; fail=1; }
+bad render_panel_vhost domain panel.ornek.com 443 443
+bad render_panel_vhost ip "" 8443 9443
+bad render_panel_vhost domain panel.ornek.com 443 80
+
+# set_config_values: other keys, comments, mode and quoting kept.
+cp "$tmp6/config.yaml" "$tmp6/c2.yaml"
+chmod 0640 "$tmp6/c2.yaml"
+( source ./lib.sh; HP_CONFIG=$tmp6/c2.yaml; atomic_write() { local t; t=$(mktemp); cat >"$t"; chmod "$2" "$t"; mv -f "$t" "$1"; }
+  set_config_values panel_domain=panel.yeni.com panel_port=443 panel_ip_port=8443 )
+c2() { ( source ./lib.sh; HP_CONFIG=$tmp6/c2.yaml; config_value "$1" ); }
+[[ $(c2 panel_domain) == panel.yeni.com && $(c2 panel_port) == 443 && $(c2 panel_ip_port) == 8443 && $(c2 update_repo) == zahit5834/hostpanel ]] ||
+  { echo "FAIL set_config_values"; cat "$tmp6/c2.yaml"; fail=1; }
+[[ $(stat -c %a "$tmp6/c2.yaml") == 640 ]] || { echo "FAIL set_config_values mode"; fail=1; }
+( source ./lib.sh; HP_CONFIG=$tmp6/c2.yaml; atomic_write() { local t; t=$(mktemp); cat >"$t"; chmod "$2" "$t"; mv -f "$t" "$1"; }
+  set_config_values panel_domain= panel_ip_port=- )
+[[ $(c2 panel_domain) == "" && $(grep -c '^panel_ip_port:' "$tmp6/c2.yaml") == 0 && $(grep -c '^panel_domain: ""' "$tmp6/c2.yaml") == 1 ]] ||
+  { echo "FAIL set_config_values clear"; cat "$tmp6/c2.yaml"; fail=1; }
+bad set_config_values 'panel_domain=x"; y'
+bad set_config_values 'Bad=1'
+f2b=$( source ./lib.sh; HP_CONFIG=$tmp6/c3.yaml; printf 'panel_port: 443\npanel_ip_port: 8443\n' >"$HP_CONFIG"; f2b_ports )
+[[ $f2b == "8443,443" ]] || { echo "FAIL f2b_ports domain+ip: $f2b"; fail=1; }
+f2b=$( source ./lib.sh; HP_CONFIG=$tmp6/c3.yaml; printf 'panel_port: 8443\n' >"$HP_CONFIG"; f2b_ports )
+[[ $f2b == "8443,443" ]] || { echo "FAIL f2b_ports ip: $f2b"; fail=1; }
 
 # archive_ok: plain files/dirs under the top directory only.
 mkdir -p "$tmp6/a/pkg-v1/bin" "$tmp6/b/pkg-v1" "$tmp6/c/other"

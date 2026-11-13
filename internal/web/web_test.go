@@ -39,6 +39,7 @@ import (
 	"github.com/zahit5834/hostpanel/internal/metrics"
 	"github.com/zahit5834/hostpanel/internal/monitor"
 	"github.com/zahit5834/hostpanel/internal/notify"
+	"github.com/zahit5834/hostpanel/internal/paneladdr"
 	"github.com/zahit5834/hostpanel/internal/panelcfg"
 	"github.com/zahit5834/hostpanel/internal/pgsql"
 	"github.com/zahit5834/hostpanel/internal/runtimes"
@@ -134,6 +135,13 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server) {
 	s.Traffic = &traffic.Service{DB: db, Sites: svc, Log: log}
 	s.Metrics = &metrics.Service{DB: db, Log: log}
 	s.Domains = &domains.Service{DB: db, Log: log, Client: &http.Client{Transport: noNetwork{}}}
+	holder := paneladdr.NewHolder(cfg)
+	svc.PanelDomain = holder.Domain
+	s.PanelAddr = &paneladdr.Service{Addr: holder, Jobs: jm, Runner: runner, ScriptsDir: cfg.ScriptsDir, DryRun: true,
+		Taken: s.PanelTaken, ZoneFor: dnsSvc.ZoneCovering, ApplyDNS: dnsSvc.ApplyFor, Delegated: s.PanelDelegated,
+		ServerIPs: sslSvc.ServerIPs, Email: s.ACMEEmail, Target: s.PanelTarget, SetTarget: s.SetPanelTarget, Changed: s.PanelChanged}
+	s.PanelAddr.Register()
+	dnsSvc.Panel = s.PanelAddr.DNSName
 	// Container registries: local stand-ins (MCR tag list + Docker Hub tags).
 	reg2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/v2/mssql/") {
