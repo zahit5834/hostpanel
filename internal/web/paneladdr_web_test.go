@@ -9,6 +9,8 @@ import (
 
 	"github.com/zahit5834/hostpanel/internal/dns"
 	"github.com/zahit5834/hostpanel/internal/logs"
+	"github.com/zahit5834/hostpanel/internal/ssl"
+	"github.com/zahit5834/hostpanel/internal/store"
 )
 
 // Settings → panel address (dry-run): name checks, the job, the live
@@ -21,6 +23,10 @@ func TestPanelAddressDryRun(t *testing.T) {
 
 	w.post("/dns/settings", url.Values{"ns1": {"ns1.ornek.com"}, "ns2": {"ns2.ornek.com"},
 		"hostmaster": {"hostmaster@ornek.com"}, "ips": {"185.48.180.32"}})
+	// the public IP entered in Settings → General (CI runners have none of their own)
+	if err := store.SetSetting(ctx, s.DB, ssl.SettingServerIPs, "185.48.180.32"); err != nil {
+		t.Fatal(err)
+	}
 	w.post("/customers", url.Values{"name": {"Acme"}})
 	w.post("/dns/zones", url.Values{"name": {"ornek.com"}, "customer_id": {"1"}})
 	mustJob(t, s, w.post("/dns/install", url.Values{}))
