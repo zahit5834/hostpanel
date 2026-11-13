@@ -39,9 +39,11 @@ func (s *Server) panelAddrData(r *http.Request) panelAddrData {
 	a := s.PanelAddr.Addr.Get()
 	d := panelAddrData{Addr: a, URL: a.URL(), Label: "panel", JobID: parseInt64(r.URL.Query().Get("job"))}
 	if p := a.FallbackPort(); p != 0 {
+		// the address the admin entered (Settings → General) wins: behind NAT
+		// the interface address is not the one reachable from outside
 		ip := "<sunucu-ip>"
 		if v4 := publicV4(s.SSL.ServerIPs(ctx)); len(v4) > 0 {
-			ip = v4[0].String()
+			ip = v4[len(v4)-1].String()
 		}
 		d.Fallback = fmt.Sprintf("https://%s:%d", ip, p)
 	}
